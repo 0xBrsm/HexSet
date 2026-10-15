@@ -102,3 +102,25 @@ def test_a_checkpoint_names_its_trader_or_trades_for_itself():
         pass
 
     assert trader_of(Old()) is None
+
+
+
+def test_a_searched_file_can_ask_for_its_own_seat_recalibrated():
+    assert search_config({"search": "mcts", "own_calibration": "0.32,0.81"}).own_calibration == (0.32, 0.81)
+    assert search_config({"search": "mcts"}).own_calibration is None
+    assert search_config({"own_calibration": "0.32,0.81"}).own_calibration is None   # not searched
+
+
+@pytest.mark.parametrize("value", ["0.3", "a,b", "0.3,0", "0.3,-1", "nan,1"])
+def test_an_unreadable_calibration_fails_the_load(value):
+    with pytest.raises(ValueError):
+        search_config({"search": "mcts", "own_calibration": value})
+
+
+def test_a_searched_file_can_ask_to_play_its_confident_roots_unsearched():
+    assert search_config({"search": "mcts", "decisive": "0.95"}).decisive == 0.95
+    assert search_config({"search": "mcts"}).decisive is None
+    assert search_config({"decisive": "0.95"}).decisive is None   # not searched
+    for bad in ("0", "1.2", "sure"):
+        with pytest.raises(ValueError, match="decisive"):
+            search_config({"search": "mcts", "decisive": bad})

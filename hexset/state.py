@@ -45,6 +45,7 @@ __all__ = [
     "upgrade_to_city",
     "can_place_road",
     "road_placeable",
+    "placeable_roads",
     "check_road",
     "place_road",
     "production",
@@ -363,7 +364,7 @@ def city_count(state: GameState, player: int) -> int:
 
 def road_count(state: GameState, player: int) -> int:
     """How many roads `player` has on the board."""
-    return sum(1 for owner in state.edge_owner if owner == player)
+    return state.edge_owner.count(player)
 
 
 def can_place_settlement(
@@ -478,6 +479,25 @@ def road_placeable(state: GameState, player: int, edge: int) -> bool:
         ):
             return True
     return False
+
+
+def placeable_roads(state: GameState, player: int) -> list[int]:
+    """Every edge `road_placeable` accepts for `player`, ascending, worked
+    out in one pass: the vertices its network extends from -- its own
+    buildings, and the open ends of its roads that no opponent's building
+    stops -- and the free edges that touch one."""
+    topology = state.board.topology
+    edges, edge_owner, vertex_owner = topology.edges, state.edge_owner, state.vertex_owner
+    reach = {v for v, owner in enumerate(vertex_owner) if owner == player}
+    for e, owner in enumerate(edge_owner):
+        if owner == player:
+            for v in edges[e]:
+                if vertex_owner[v] == NO_OWNER:
+                    reach.add(v)
+    return [
+        e for e, owner in enumerate(edge_owner)
+        if owner == NO_OWNER and (edges[e][0] in reach or edges[e][1] in reach)
+    ]
 
 
 def check_road(state: GameState, player: int, edge: int) -> None:

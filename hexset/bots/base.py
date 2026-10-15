@@ -100,17 +100,21 @@ class Vetoed:
     checkpoint declares. ``gains_many`` is the proposer's, ``-1.0`` where the
     veto refuses; every other name is the proposer's.
 
-    The veto never adds, changes or chooses an exchange: it only removes
-    ones the proposer would make. Seat it with
+    The veto never adds or changes an exchange: it only removes ones the
+    proposer would make. Nor does it choose one, unless ``picks``: then of
+    the answers to this seat's own offer that the proposer would take, each
+    on its own, and the veto clears, the pick is the one the veto gains most
+    from (the proposer's own pick among equals). Seat it with
     ``TradesBy(mover, Vetoed(trader, mover))`` (`hexset.arena.traded` with
     ``veto=True``) for a mover that vetoes its own trader.
     """
 
-    __slots__ = ("proposer", "veto")
+    __slots__ = ("proposer", "veto", "picks")
 
-    def __init__(self, proposer: object, veto: object) -> None:
+    def __init__(self, proposer: object, veto: object, picks: bool = False) -> None:
         object.__setattr__(self, "proposer", proposer)
         object.__setattr__(self, "veto", veto)
+        object.__setattr__(self, "picks", picks)
 
     def __getattr__(self, name: str):
         return getattr(object.__getattribute__(self, "proposer"), name)
@@ -122,19 +126,22 @@ class Vetoed:
         delattr(self.proposer, name)
 
     def __reduce__(self):
-        return (Vetoed, (self.proposer, self.veto))
+        return (Vetoed, (self.proposer, self.veto, self.picks))
 
     def seat_at(self, game: Game) -> None:
         seat_at(self.proposer, game)
         seat_at(self.veto, game)
 
-    def _clears(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[bool]:
-        """Whether the veto gains from each of ``received`` (signed towards
-        this seat) with the matching counterparty, in one batch."""
+    def _gains(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[float]:
+        """The veto's gain from each of ``received`` (signed towards this
+        seat) with the matching counterparty, in one batch."""
         if not received:
             return []
-        gains = valued_many(self.veto, view, list(received), list(counterparties))
-        return [clears_floor(g, self.veto) for g in gains]
+        return valued_many(self.veto, view, list(received), list(counterparties))
+
+    def _clears(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[bool]:
+        """Whether the veto gains from each of ``received`` above its floor."""
+        return [clears_floor(g, self.veto) for g in self._gains(view, received, counterparties)]
 
     def candidates(self, view: View, counterparties: Sequence[int], *, turn=None, already_offered=()):
         menu = list(self.proposer.candidates(view, counterparties, turn=turn, already_offered=already_offered))
@@ -159,11 +166,24 @@ class Vetoed:
     def pick(self, view: View, responses: Sequence[Response]) -> int | None:
         live = [i for i, r in enumerate(responses)
                 if r.kind in (RESPONSE_ACCEPT, RESPONSE_COUNTER) and r.bundle is not None]
-        ok = dict(zip(live, self._clears(view, [responses[i].bundle for i in live],
-                                         [responses[i].seat for i in live])))
-        thinned = [r if ok.get(i, True) else Response(r.seat, RESPONSE_PASS, None)
-                   for i, r in enumerate(responses)]
-        return self.proposer.pick(view, thinned)
+        gains = dict(zip(live, self._gains(view, [responses[i].bundle for i in live],
+                                           [responses[i].seat for i in live])))
+        ok = {i: clears_floor(g, self.veto) for i, g in gains.items()}
+        passed = [Response(r.seat, RESPONSE_PASS, None) for r in responses]
+        thinned = [r if ok.get(i, True) else passed[i] for i, r in enumerate(responses)]
+        if not self.picks:
+            return self.proposer.pick(view, thinned)
+        # Each answer the veto clears, put to the proposer alone: those it
+        # would take are the field, ranked by the veto's own gain.
+        field = [i for i in live if ok[i]
+                 and self.proposer.pick(view, [thinned[i]]) == 0]
+        if not field:
+            return None
+        best = max(gains[i] for i in field)
+        top = [i for i in field if gains[i] == best]
+        if len(top) == 1:
+            return top[0]
+        return self.proposer.pick(view, [r if i in top else passed[i] for i, r in enumerate(responses)])
 
     def gains_many(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[float]:
         own = valued_many(self.proposer, view, list(received), list(counterparties))

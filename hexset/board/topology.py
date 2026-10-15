@@ -58,6 +58,21 @@ class Topology:
     vertex_index: dict[VertexKey, int] = dataclass_field(compare=False)
     edge_index: dict[tuple[int, int], int] = dataclass_field(compare=False)
 
+    def __hash__(self) -> int:
+        # The dataclass hash over the compared tuples, worked out once: a
+        # topology keys the caches the engine consults at every position.
+        cached = self.__dict__.get("_hash")
+        if cached is None:
+            cached = hash((self.hexes, self.vertices, self.edges, self.hex_vertices,
+                           self.hex_edges, self.hex_neighbors, self.vertex_hexes,
+                           self.vertex_edges, self.vertex_neighbors, self.edge_hexes))
+            object.__setattr__(self, "_hash", cached)
+        return cached
+
+    def __getstate__(self) -> dict:
+        # A hash is the process's own; a pickled topology works it out again.
+        return {k: v for k, v in self.__dict__.items() if k != "_hash"}
+
     @property
     def num_hexes(self) -> int:
         return len(self.hexes)

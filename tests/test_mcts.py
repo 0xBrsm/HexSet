@@ -23,6 +23,7 @@ from hexset.mcts import (
     Search,
     _Chance,
     _drawn,
+    calibrate_own,
     draws_hidden,
     lost_value,
     sampled_children,
@@ -603,3 +604,107 @@ def test_several_worlds_each_get_the_whole_budget_and_combine_by_share():
     assert root.prior.sum() == pytest.approx(1.0)
     assert not any(root.children), "a combined root holds no subtree of its own"
     assert root.game is root.worlds[0][1].game
+
+
+
+# --- own_calibration: the searching seat's win chance read through a fitted map ---------------------
+
+
+def test_calibrating_one_seat_moves_it_and_keeps_the_vector_summing_as_before():
+    vector = (0.1, 0.5, 0.3, 0.1)
+    out = calibrate_own(vector, 0, (0.32, 0.81))
+    z = 0.32 + 0.81 * np.log(0.1 / 0.9)
+    assert out[0] == pytest.approx(1 / (1 + np.exp(-z)))
+    assert sum(out) == pytest.approx(1.0)
+    rest = (1 - out[0]) / 0.9
+    assert out[1:] == pytest.approx(tuple(v * rest for v in vector[1:]))
+    assert calibrate_own(vector, 2, (0.0, 1.0)) == pytest.approx(vector)
+
+
+def test_calibration_keeps_the_order_of_the_seats_own_values():
+    lows = [calibrate_own((p, 1 - p, 0.0, 0.0), 0, (0.32, 0.81))[0] for p in (0.01, 0.05, 0.2, 0.6, 0.95)]
+    assert lows == sorted(lows)
+
+
+def test_a_search_with_the_identity_calibration_searches_the_same_tree():
+    plain = Search(Stub(favour=1), simulations=24, wave=4, rng=random.Random(7))
+    ident = Search(Stub(favour=1), simulations=24, wave=4, rng=random.Random(7), own_calibration=(0.0, 1.0))
+    assert plain.run(a_game())[2].tolist() == ident.run(a_game())[2].tolist()
+
+
+def test_a_calibrated_search_reads_the_root_movers_values_through_the_map():
+    game = a_game()
+    value = (0.1, 0.3, 0.3, 0.3)
+    search = Search(Stub(value=value), simulations=8, wave=4, rng=random.Random(3), own_calibration=(0.32, 0.81))
+    root, _, _ = search.run(game)
+    assert root.value == pytest.approx(calibrate_own(value, root.mover, (0.32, 0.81)))
+
+
+def test_a_decisive_root_is_evaluated_but_not_searched():
+    """A root whose prior on one move reaches `decisive` reads like a forced
+    root: one evaluation, the whole budget on that move at the root's value."""
+    stub = Stub(value=(0.5, -0.5, 0.25, -0.25), favour=2)
+    search = Search(stub, simulations=64, rng=random.Random(1), decisive=0.95)
+    root, options, visits = search.run(a_game())
+    assert len(options) > 2
+    assert visits[2] == 64.0 and visits.sum() == 64.0
+    assert [len(wave) for wave in stub.waves] == [1]
+    assert root.totals[2].tolist() == [32.0, -32.0, 16.0, -16.0]
+
+
+def test_a_root_short_of_decisive_is_searched():
+    stub = Stub(favour=2)
+    search = Search(stub, simulations=64, rng=random.Random(1), decisive=0.995)
+    _, _, visits = search.run(a_game())
+    assert visits.sum() == 64.0
+    assert len(stub.waves) > 1
+
+
+def test_without_decisive_every_root_is_searched_as_before():
+    def visits(**kwargs):
+        stub = Stub(favour=2)
+        return Search(stub, simulations=48, rng=random.Random(3), **kwargs).run(a_game())[2].tolist()
+
+    assert visits() == visits(decisive=None)
+
+
+@pytest.mark.parametrize("decisive", [0.0, -0.5, 1.5])
+def test_decisive_is_a_prior(decisive):
+    with pytest.raises(ValueError, match="decisive"):
+        Search(Stub(), decisive=decisive)
+
+
+def _select_as_arrays(search: Search, node: Node) -> int:
+    """`Search._select` in its array form: what the loop must agree with."""
+    counts = node.visits + node.virtual
+    total = float(counts.sum())
+    if search._sided(node.mover):
+        totals = node.ranked
+    else:
+        totals = (
+            search.rank_rows(node.totals, node.mover)
+            if search.stance == "paranoid"
+            else node.ranked
+        ) + lost_value(search.stance, node.totals.shape[1]) * node.virtual
+    means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
+    bonus = search.exploration * node.prior * np.sqrt(max(total, 1e-8)) / (1 + counts)
+    return int(np.argmax(means + bonus))
+
+
+@pytest.mark.parametrize("stance,against", [("own", ()), ("relative", ()), ("paranoid", ()),
+                                            ("relative", (1, 2))])
+def test_select_scores_edges_as_the_array_form_does(stance, against):
+    rng = np.random.default_rng(7)
+    search = Search(Stub(), stance=stance, against=against, rng=random.Random(1))
+    node = search._node(imagine(a_game(), search.rng))
+    n = len(node.options)
+    for trial in range(300):
+        node.mover = int(rng.integers(0, 4))
+        node.prior = rng.dirichlet(np.ones(n))
+        node.visits = rng.integers(0, 6, n).astype(float) * (rng.random(n) < 0.7)
+        if trial % 3 == 0:
+            node.visits = node.visits + rng.random(n) * (node.visits > 0)   # shared worlds' shares
+        node.virtual = rng.integers(0, 3, n).astype(float) * (rng.random(n) < 0.3)
+        node.totals = rng.normal(size=(n, 4)) * node.visits[:, None]
+        node.ranked = rng.normal(size=n) * node.visits
+        assert search._select(node) == _select_as_arrays(search, node)

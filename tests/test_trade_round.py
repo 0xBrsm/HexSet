@@ -731,6 +731,90 @@ def test_the_referee_refuses_an_exchange_outside_the_table(a, b, received, match
     assert game.trades == []
 
 
+# -- embargoes close trading between two seats -------------------------------
+
+
+@pytest.mark.parametrize("pair", [(1, 0), (0, 1)])
+def test_an_embargo_reads_both_ways_and_the_referee_takes_the_hosts_trades(pair):
+    """An embargo closes the pair either way. It is the offer and answer
+    stages' to honour; an exchange the host executed is a fact, so the
+    referee lets it through -- a host's embargoes are only as fresh as its
+    last word, and a lifted one must not stop a trade it carried out."""
+    from hexset.trading import embargoed, execute_agreed
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.embargoes = frozenset({pair})
+    assert embargoed(game, 0, 1) and embargoed(game, 1, 0)
+    assert not embargoed(game, 0, 2)
+    execute_agreed(game, 0, 1, bundle(wood=-1, ore=1), ask_actor=False, ask_counterparty=False)
+    assert len(game.trades) == 1
+
+
+def test_the_offer_menu_is_built_for_the_seats_not_under_an_embargo():
+    """An offer is made with only the seats that can answer in mind: the
+    gate's menu is asked for those, and with none left nothing goes up."""
+    from hexset import trading
+
+    game, _view = _untyped_ore_table()
+
+    class Sampler(Gate):
+        def __init__(self, gain_fn, extra):
+            super().__init__(gain_fn)
+            self.extra = extra
+            self.asked = []
+
+        def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+            self.asked.append(list(counterparties))
+            return [(c, self.extra) for c in counterparties]
+
+    actor = Sampler(lambda r, c: 5.0 if r[ORE] > 0 else -1.0, bundle(wood=-1, ore=1))
+    actor.trade_params = TradeParams(open_asks=False)
+    gates = (actor, Gate(lambda r, c: 1.0), Gate(lambda r, c: 1.0), Gate(lambda r, c: 1.0))
+
+    game.embargoes = frozenset({(1, 0), (0, 3)})
+    assert trading.offer(game, gates) == Offer(0, bundle(wood=-1, ore=1))
+    assert actor.asked == [[2]]
+
+    actor.asked.clear()
+    game.embargoes = frozenset({(1, 0), (2, 0), (3, 0)})
+    assert trading.offer(game, gates) is None
+    assert actor.asked == []
+
+
+def test_a_seat_under_an_embargo_is_not_asked_and_cannot_take_the_offer():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
+    asked = []
+
+    class Taker(Gate):
+        def __init__(self, seat):
+            super().__init__(lambda r, c: 3.0 if r[WOOD] > 0 else -1.0)
+            self.seat = seat
+
+        def respond(self, view, offer):
+            asked.append(self.seat)
+            return default_respond(self, view, offer)
+
+    actor = Gate(lambda r, c: 5.0 if r[ORE] > 0 else -1.0)
+    actor.trade_params = TradeParams(open_asks=False)
+    game.embargoes = frozenset({(1, 0)})
+    trades = trade_round(game, (actor, Taker(1), Taker(2), None))
+
+    assert 1 not in asked
+    assert [(t.a, t.b) for t in trades] == [(0, 2)]
+
+
+def test_a_seat_hears_the_tables_embargoes():
+    from hexset.seat import Seat
+
+    game = stocked((0, Resource.WOOD, 1))
+    seat = object.__new__(Seat)
+    seat.game = game
+    seat.set_embargoes([(2, 0), ("1", "3")])
+    assert game.embargoes == frozenset({(2, 0), (1, 3)})
+    seat.set_embargoes([])
+    assert game.embargoes == frozenset()
+
+
 # -- a gate's own limits bind what it offers and what it signs ---------------
 
 

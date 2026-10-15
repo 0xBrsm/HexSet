@@ -35,6 +35,7 @@ __all__ = [
     "record_shapes",
     "NO_MOVE",
     "record_from_game",
+    "record_rows",
     "record_batch",
 ]
 
@@ -122,11 +123,100 @@ def _port_code(board: Board) -> np.ndarray:
     return codes
 
 
+#: The fields a board fixes for the whole game, worked out once per board.
+BOARD_FIELDS: tuple[str, ...] = ("terrain", "token", "port_code")
+_board_rows: dict[int, tuple[Board, dict[str, np.ndarray]]] = {}
+
+
+def _board_fields(board: Board) -> dict[str, np.ndarray]:
+    """`BOARD_FIELDS` for `board`, read-only and shared by every record of
+    it. Keyed by identity and held beside the board, so a recycled id is
+    never mistaken for it."""
+    entry = _board_rows.get(id(board))
+    if entry is None or entry[0] is not board:
+        rows = {
+            "terrain": np.asarray([int(t) for t in board.terrain], dtype=np.int64),
+            "token": np.asarray(board.tokens, dtype=np.int64),
+            "port_code": _port_code(board),
+        }
+        for row in rows.values():
+            row.flags.writeable = False
+        if len(_board_rows) >= 64:
+            _board_rows.clear()
+        entry = _board_rows[id(board)] = (board, rows)
+    return entry[1]
+
+
 #: The mask of a record whose perspective seat has no move of its own -- a
 #: value-only row for a seat that is not acting. The graph normalises its
 #: prior over the legal entries, so a mask needs at least one, and this one is
 #: the same for every position: it says nothing about any seat's cards.
 NO_MOVE = Action(ActionType.END_TURN)
+
+
+def _row(
+    game: Game,
+    perspective: int | None,
+    space: ActionSpace,
+    options: Sequence[Action] | None,
+    indices: Sequence[int] | None,
+) -> dict:
+    """One record's fields past `BOARD_FIELDS`, as plain ints and lists, and
+    under `"mask"` the action indices the mask sets: what `record_from_game`
+    and `record_rows` both turn into arrays."""
+    state = game._state
+    players = state.num_players
+    if perspective is None:
+        perspective = to_move(game)
+    if not 0 <= perspective < players:
+        raise ValueError(f"no such player: {perspective}")
+    if indices is None:
+        if options is None:
+            options = legal_actions(game, perspective) or (NO_MOVE,)
+        indices = [space.index(action) for action in options]
+
+    # Board-seat order like every other field; `RecordEncoder` rotates it and
+    # drops the perspective seat's own entry (exact via `own_hand` below).
+    rows = game.ledger.for_seat(perspective).seats
+    seats = range(players)
+    return {
+        "robber": state.robber,
+        "vertex_owner": state.vertex_owner,
+        "vertex_building": state.vertex_building,
+        "edge_owner": state.edge_owner,
+        "bank": state.bank,
+        "knights_played": state.knights_played,
+        "award_points": [award_points(state, s) for s in seats],
+        "longest_road_holder": state.longest_road_holder,
+        "largest_army_holder": state.largest_army_holder,
+        "phase": int(game.phase),
+        "free_roads": game.free_roads,
+        "deck_size": len(state.deck),
+        "turns": game.turns,
+        # Board-seat order, each at most `roads.ROADS_TO_TAKE_CAP`; the graph scales it.
+        "roads_to_take": roads_to_take_all(state),
+        "to_move": to_move(game),
+        "perspective": perspective,
+        "own_hand": state.hands[perspective],
+        "hand_totals": [hand_size(state, s) for s in seats],
+        "own_dev": [held + fresh for held, fresh in
+                    zip(state.dev_cards[perspective], state.new_dev_cards[perspective])],
+        "dev_totals": [dev_count(state, s) for s in seats],
+        "ledger_known": [rows[s].known for s in seats],
+        "ledger_unknown": [rows[s].unknown for s in seats],
+        "mask": indices,
+    }
+
+
+#: The fields `_row` states, in `RECORD_FIELDS` order, every one int64, and
+#: those of them that are one number a row.
+_ROW_FIELDS: tuple[str, ...] = tuple(
+    name for name in RECORD_FIELDS if name not in BOARD_FIELDS and name != "action_mask"
+)
+_SCALAR_FIELDS = frozenset({
+    "robber", "longest_road_holder", "largest_army_holder", "phase", "free_roads",
+    "deck_size", "turns", "to_move", "perspective",
+})
 
 
 def record_from_game(
@@ -142,66 +232,49 @@ def record_from_game(
     (`legal_actions(game, perspective)`), and to `NO_MOVE` alone where it has
     none, so the mask never encodes another seat's moves: they would read
     that seat's hand."""
-    state = game._state
-    players = state.num_players
-    if perspective is None:
-        perspective = to_move(game)
-    if not 0 <= perspective < players:
-        raise ValueError(f"no such player: {perspective}")
-
-    if options is None:
-        options = legal_actions(game, perspective) or (NO_MOVE,)
+    row = _row(game, perspective, space, options, None)
+    out = {name: field.copy() for name, field in _board_fields(game._state.board).items()}
+    for name in _ROW_FIELDS:
+        out[name] = (np.int64(row[name]) if name in _SCALAR_FIELDS
+                     else np.asarray(row[name], dtype=np.int64))
     mask = np.zeros(space.size, dtype=bool)
-    for action in options:
-        mask[space.index(action)] = True
+    mask[row["mask"]] = True
+    out["action_mask"] = mask
+    return {name: out[name] for name in RECORD_FIELDS}
 
-    own_dev = np.array(
-        [held + fresh for held, fresh in zip(state.dev_cards[perspective], state.new_dev_cards[perspective])],
-        dtype=np.int64,
-    )
-    hand_totals = np.array(
-        [hand_size(state, s) for s in range(players)], dtype=np.int64
-    )
-    dev_totals = np.array(
-        [dev_count(state, s) for s in range(players)], dtype=np.int64
-    )
-    award = np.array([award_points(state, s) for s in range(players)], dtype=np.int64)
 
-    # Board-seat order like every other field; `RecordEncoder` rotates it and
-    # drops the perspective seat's own entry (exact via `own_hand` above).
-    rows = game.ledger.for_seat(perspective).seats
-    ledger_known = np.asarray([rows[s].known for s in range(players)], dtype=np.int64)
-    ledger_unknown = np.asarray([rows[s].unknown for s in range(players)], dtype=np.int64)
-
-    return {
-        "terrain": np.asarray([int(t) for t in state.board.terrain], dtype=np.int64),
-        "token": np.asarray(state.board.tokens, dtype=np.int64),
-        "port_code": _port_code(state.board),
-        "robber": np.int64(state.robber),
-        "vertex_owner": np.asarray(state.vertex_owner, dtype=np.int64),
-        "vertex_building": np.asarray(state.vertex_building, dtype=np.int64),
-        "edge_owner": np.asarray(state.edge_owner, dtype=np.int64),
-        "bank": np.asarray(state.bank, dtype=np.int64),
-        "knights_played": np.asarray(state.knights_played, dtype=np.int64),
-        "award_points": award,
-        "longest_road_holder": np.int64(state.longest_road_holder),
-        "largest_army_holder": np.int64(state.largest_army_holder),
-        "phase": np.int64(int(game.phase)),
-        "free_roads": np.int64(game.free_roads),
-        "deck_size": np.int64(len(state.deck)),
-        "turns": np.int64(game.turns),
-        # Board-seat order, each at most `roads.ROADS_TO_TAKE_CAP`; the graph scales it.
-        "roads_to_take": np.asarray(roads_to_take_all(state), dtype=np.int64),
-        "to_move": np.int64(to_move(game)),
-        "perspective": np.int64(perspective),
-        "own_hand": np.asarray(state.hands[perspective], dtype=np.int64),
-        "hand_totals": hand_totals,
-        "own_dev": own_dev,
-        "dev_totals": dev_totals,
-        "ledger_known": ledger_known,
-        "ledger_unknown": ledger_unknown,
-        "action_mask": mask,
-    }
+def record_rows(
+    rows: Sequence[tuple[Game, int | None, Sequence[Action] | None]],
+    space: ActionSpace,
+    indices: Sequence[Sequence[int]] | None = None,
+) -> dict[str, np.ndarray]:
+    """`record_from_game` for several `(game, perspective, options)` rows,
+    stacked on a leading batch axis, built straight into the batch.
+    `indices`, one list per row, are its options' action indices where the
+    caller has them already (`space.index`); they set the mask in their
+    place. Every game must share `space`'s topology and player count."""
+    if not rows:
+        raise ValueError("need at least one position")
+    built = [
+        _row(game, seat, space, options, None if indices is None else indices[i])
+        for i, (game, seat, options) in enumerate(rows)
+    ]
+    n = len(rows)
+    boards = [game._state.board for game, _, _ in rows]
+    out: dict[str, np.ndarray] = {}
+    if all(board is boards[0] for board in boards):
+        for name, field in _board_fields(boards[0]).items():
+            out[name] = np.tile(field, (n, 1))
+    else:
+        for name in BOARD_FIELDS:
+            out[name] = np.stack([_board_fields(board)[name] for board in boards])
+    for name in _ROW_FIELDS:
+        out[name] = np.asarray([row[name] for row in built], dtype=np.int64)
+    mask = np.zeros((n, space.size), dtype=bool)
+    for i, row in enumerate(built):
+        mask[i, row["mask"]] = True
+    out["action_mask"] = mask
+    return {name: out[name] for name in RECORD_FIELDS}
 
 
 def record_batch(
@@ -211,5 +284,4 @@ def record_batch(
     axis. Every game must share `space`'s topology and player count."""
     if not games_and_perspectives:
         raise ValueError("need at least one position")
-    rows = [record_from_game(game, seat, space) for game, seat in games_and_perspectives]
-    return {name: np.stack([row[name] for row in rows]) for name in RECORD_FIELDS}
+    return record_rows([(game, seat, None) for game, seat in games_and_perspectives], space)

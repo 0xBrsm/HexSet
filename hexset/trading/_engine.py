@@ -375,6 +375,13 @@ def _two_sided(received: object) -> bool:
     return any(n > 0 for n in received) and any(n < 0 for n in received)
 
 
+def embargoed(game: "Game", seat: int, other: int) -> bool:
+    """Whether trading between `seat` and `other` is closed: either holds an
+    embargo against the other (`Game.embargoes`)."""
+    embargoes = game.embargoes
+    return bool(embargoes) and ((seat, other) in embargoes or (other, seat) in embargoes)
+
+
 def _validate_exchange(game: "Game", actor: int, counterparty: int, received: Bundle) -> None:
     """The referee's checks on an exchange between `actor` and `counterparty`
     (`received` signed towards `actor`), before any gate is asked: both are
@@ -498,7 +505,7 @@ def _best_clearing(
     state = game._state
     traders = game.gates
     actor_gate = traders[me] if traders is not None else gate
-    skipped = frozenset(game.locked)
+    skipped = frozenset(game.locked) | {s for s in range(state.num_players) if embargoed(game, me, s)}
     if traders is not None:
         skipped |= {s for s, g in enumerate(traders) if s != me and not params_of(g).trades}
     candidates = list(_candidates(
@@ -908,7 +915,9 @@ def offer(
     """The round's first stage: the current player's gate picks one offer
     from its `menu`, through its `offer(view, candidates)` or `default_offer`.
     `None` when there is nothing to broadcast: not `Phase.MAIN`, a locked or
-    unseated actor, no candidate left, or the gate passing.
+    unseated actor, no seat to trade with (every other locked or under an
+    embargo with the actor, `embargoed`), no candidate left, or the gate
+    passing. The menu is built for the seats that can answer only.
 
     `already_offered`, when given, excludes bundles already put to the table
     this turn and gains the one returned -- except where the gate's
@@ -938,7 +947,12 @@ def offer(
     if gate is None:
         return None
     view = game.state(me)
-    others = [s for s in range(game._state.num_players) if s != me and s not in game.locked]
+    # A seat under an embargo with the actor cannot answer, so no offer is
+    # made with it in mind: the menu is built for the seats that can.
+    others = [s for s in range(game._state.num_players)
+              if s != me and s not in game.locked and not embargoed(game, me, s)]
+    if not others:
+        return None
     offered = already_offered if already_offered is not None else frozenset()
     repeat_fn = getattr(gate, "allow_repeated_offer", None)
 
@@ -1333,7 +1347,8 @@ def resolve_offer(
     # later seat answers having seen an earlier one's.
     responses = []
     for seat in range(game._state.num_players):
-        if seat != me and seat not in game.locked and gates[seat] is not None:
+        if (seat != me and seat not in game.locked and gates[seat] is not None
+                and not embargoed(game, me, seat)):
             response = respond(game, gates[seat], seat, offer)
             show_response(game, me, response)
             responses.append(response)
@@ -1371,7 +1386,7 @@ def trade_round(
     the bundle actually broadcast; unlike `already_offered` it is a list, so
     a permitted repeat still registers and a caller looping over rounds can
     tell "offered again" from "had nothing to offer". A seat with no gate,
-    and a locked seat, are never asked.
+    a locked seat, and a seat under an embargo with the actor are never asked.
 
     Returns the one executed `Trade` as a one-element list, or `[]` if: the
     game is not in `Phase.MAIN`; the current player has no gate, no

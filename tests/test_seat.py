@@ -139,6 +139,47 @@ def test_pick_takes_the_acceptance_over_a_counter_the_hand_cannot_cover():
     assert gate.finished[0][1] == (counter, took, Response(3, RESPONSE_PASS))
 
 
+class Prefers(Wants):
+    """Wants `resource`, and prices each taker by `rank` (higher first)."""
+
+    def __init__(self, resource: int, rank: dict, budget: int | None = None):
+        super().__init__(resource, budget)
+        self.rank = rank
+
+    def gains_many(self, view, received, counterparties):
+        return [float(self.rank.get(c, 0)) if r[self.resource] > 0 else -1.0
+                for r, c in zip(received, counterparties)]
+
+
+def test_a_pick_with_seats_still_answering_waits_only_for_one_it_would_prefer():
+    """At a table whose seats answer over time, the taker in hand is taken
+    the moment no seat still answering could be picked over it, and waited
+    on while one could."""
+    true = _main()
+    seat = _seat(true, Prefers(ORE, {1: 3.0, 2: 2.0, 3: 1.0}, budget=1))
+    offer = seat.offer()
+    took = {s: Response(s, RESPONSE_ACCEPT, offer.received) for s in (1, 2, 3)}
+    # The best seat takes it: nobody still answering can beat it.
+    assert seat.pick([took[1]], waiting=[2, 3]) == took[1]
+    assert seat.held is None
+    # The second takes it while the best is still answering: wait.
+    assert seat.pick([took[2]], waiting=[1, 3]) is None
+    assert seat.held == (took[2], 1)
+    # ... and once the best refuses, the second is taken.
+    assert seat.pick([took[2], Response(1, RESPONSE_PASS)], waiting=[3]) == took[2]
+    assert seat.held is None
+    # Nobody waiting: the plain pick.
+    assert seat.pick([took[3], Response(1, RESPONSE_PASS), Response(2, RESPONSE_PASS)]) == took[3]
+
+
+def test_a_pick_never_waits_for_a_seat_the_gate_would_refuse():
+    true = _main()
+    seat = _seat(true, Prefers(ORE, {1: -1.0, 2: 2.0}, budget=1))
+    offer = seat.offer()
+    took = Response(2, RESPONSE_ACCEPT, offer.received)
+    assert seat.pick([took], waiting=[1]) == took
+
+
 def test_a_closed_round_tells_the_gate_and_the_turn_is_published_once():
     true = _main()
     gate = Wants(ORE, budget=1)

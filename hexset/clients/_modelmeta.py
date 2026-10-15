@@ -11,6 +11,8 @@ arrives as text from a file is read the same way wherever it came from.
 """
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 
 from hexset.trading import UNLIMITED, TradeParams
@@ -30,6 +32,13 @@ class SearchConfig:
 
     simulations: int = 0
     wave: int = DEFAULT_WAVE
+    #: `(a, b)` for `hexset.mcts.calibrate_own`, or `None`: metadata
+    #: `own_calibration = "a,b"`, read only for a searched file.
+    own_calibration: tuple[float, float] | None = None
+    #: The prior at which a root is played without searching
+    #: (`hexset.mcts.Search`), or `None`: metadata `decisive`, read only for
+    #: a searched file.
+    decisive: float | None = None
 
     @property
     def searches(self) -> bool:
@@ -104,6 +113,19 @@ def trader_veto_of(checkpoint: object) -> bool:
     return bool(getattr(checkpoint, "trader_veto", False))
 
 
+def trader_veto_pick_config(meta: dict[str, str]) -> bool:
+    """Whether `meta` asks its veto to choose which taker of its own offer
+    to deal with (`trader_veto_pick = gain`, `hexset.bots.Vetoed` with
+    ``picks``): of the answers its trader would take, the one its own value
+    gains most from. Otherwise, and without a veto, the trader picks."""
+    return str(meta.get("trader_veto_pick", "")).strip().lower() == "gain"
+
+
+def trader_veto_pick_of(checkpoint: object) -> bool:
+    """Whether `checkpoint`'s veto picks the taker, read by name like `trader_of`."""
+    return bool(getattr(checkpoint, "trader_veto_pick", False))
+
+
 def search_config(meta: dict[str, str]) -> SearchConfig:
     """The search `meta` asks for, read only when the file actually asks to be
     searched, so a stale `simulations` cannot turn a policy into a search."""
@@ -113,4 +135,34 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
         simulations=_clamp(meta.get("simulations"), DEFAULT_SIMULATIONS, MAX_SIMULATIONS)
         or DEFAULT_SIMULATIONS,
         wave=_clamp(meta.get("wave"), DEFAULT_WAVE, MAX_WAVE) or DEFAULT_WAVE,
+        own_calibration=_calibration(meta.get("own_calibration")),
+        decisive=_decisive(meta.get("decisive")),
     )
+
+
+def _decisive(value: str | None) -> float | None:
+    """Metadata `decisive`: a prior in (0, 1], or absent."""
+    if value is None or value == "":
+        return None
+    try:
+        decisive = float(value)
+    except ValueError:
+        raise ValueError(f"decisive {value!r} is not a number") from None
+    if not 0.0 < decisive <= 1.0:
+        raise ValueError(f"decisive {value!r} is not a prior in (0, 1]")
+    return decisive
+
+
+def _calibration(value: str | None) -> tuple[float, float] | None:
+    """`"a,b"` as `(a, b)`; absent is `None`. A value that does not read as
+    two finite numbers with `b > 0` fails the load rather than searching on
+    a guess: the order of positions has to survive the recalibration."""
+    if value is None or not value.strip():
+        return None
+    try:
+        a, b = (float(part) for part in value.split(","))
+    except ValueError:
+        raise ValueError(f"own_calibration {value!r} is not two numbers 'a,b'") from None
+    if not (math.isfinite(a) and math.isfinite(b)) or b <= 0:
+        raise ValueError(f"own_calibration {value!r} needs finite a and b > 0")
+    return (a, b)

@@ -205,3 +205,24 @@ def test_a_new_road_is_seen_through_the_cache():
     needing(state, [4, 5], holder=1)
     assert roads_to_take(state, 0) == 2
     assert roads_to_take_all(state) == (2, 0)
+
+
+def test_placeable_roads_lists_every_edge_road_placeable_accepts():
+    from hexset.game import is_over, start
+    from hexset.play import step_randomly
+    from hexset.state import placeable_roads, road_placeable
+
+    for seed in range(8):
+        rng = random.Random(seed)
+        game = start(random_base_board(rng), 4, rng)
+        for step in range(400):
+            if is_over(game):
+                break
+            if step % 25 == 0:
+                state = game._state
+                for player in range(state.num_players):
+                    assert placeable_roads(state, player) == [
+                        e for e in range(state.board.topology.num_edges)
+                        if road_placeable(state, player, e)
+                    ]
+            step_randomly(game, rng)

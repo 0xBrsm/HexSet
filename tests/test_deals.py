@@ -352,6 +352,20 @@ def test_a_hosted_mover_ignores_a_blacklisted_seat():
     assert seat.deal_log[-1].ignored == (1,)
 
 
+@pytest.mark.parametrize("withdrawn", [(), (3,)])
+def test_withdrawn_or_void_promises_clear_the_previous_acceptance(withdrawn):
+    game = a_robber_move()
+    clear_hand(game._state, 3)
+    game.ledger.seats[3].known = [0] * 5
+    game.ledger.seats[3].unknown = 0
+    seat = a_mover(game)
+    seat.deal_ask()
+    assert seat.deal_promised((1, 2)) == (1,)
+    assert seat.deal_promised(withdrawn) == ()
+    assert seat.deal_log[-1].accepted == ()
+    assert seat.game.robber_promised == ()
+
+
 def a_spared_deal():
     """Seat 0 asked for wood; seats 1 and 2 promised; it spared seat 1 and robbed seat 2."""
     seat = a_mover()

@@ -13,7 +13,8 @@ import pytest
 from hexset.actions import space_for
 from hexset.board.board import random_base_board
 from hexset.game import is_over, start
-from hexset.onnx_record import RECORD_FIELDS, record_batch, record_from_game
+from hexset.actions import legal_actions
+from hexset.onnx_record import RECORD_FIELDS, record_batch, record_from_game, record_rows
 from hexset.play import step_randomly
 
 
@@ -98,3 +99,36 @@ def test_the_record_carries_roads_to_take_and_the_mover_in_board_seat_order():
         assert tuple(row["roads_to_take"]) == roads_to_take_all(game._state)
         assert all(0 <= n <= ROADS_TO_TAKE_CAP for n in row["roads_to_take"])
         assert row["to_move"].shape == () and int(row["to_move"]) == to_move(game)
+
+
+def test_record_rows_builds_the_rows_record_from_game_builds_one_at_a_time():
+    games = [a_game(seed=seed, steps=steps) for seed, steps in ((0, 40), (1, 90), (2, 150))]
+    space = space_for(games[0])
+    some = tuple(legal_actions(games[1])[:2])
+    rows = [(games[0], None, None), (games[1], None, some), (games[2], 1, None), (games[0], 2, None)]
+    for batch in (record_rows(rows, space),
+                  record_rows(rows[:1] * 3, space),
+                  record_rows(rows[1:2], space, [[space.index(a) for a in some]])):
+        assert list(batch) == list(RECORD_FIELDS)
+    batch = record_rows(rows, space)
+    for i, (game, seat, options) in enumerate(rows):
+        single = record_from_game(game, seat, space, options)
+        for name in RECORD_FIELDS:
+            assert batch[name][i].dtype == single[name].dtype, name
+            np.testing.assert_array_equal(batch[name][i], single[name], err_msg=name)
+    same = record_rows(rows[:1] * 3, space)
+    for name in RECORD_FIELDS:
+        np.testing.assert_array_equal(same[name], np.stack([record_from_game(games[0], None, space)[name]] * 3))
+    indexed = record_rows(rows[1:2], space, [[space.index(a) for a in some]])
+    np.testing.assert_array_equal(indexed["action_mask"][0], record_from_game(games[1], None, space, some)["action_mask"])
+    with pytest.raises(ValueError, match="at least one"):
+        record_rows([], space)
+
+
+def test_a_records_board_fields_are_its_own():
+    game = a_game(steps=10)
+    space = space_for(game)
+    first = record_from_game(game, None, space)
+    first["terrain"][:] = -7
+    np.testing.assert_array_equal(record_from_game(game, None, space)["terrain"],
+                                  [int(t) for t in game._state.board.terrain])

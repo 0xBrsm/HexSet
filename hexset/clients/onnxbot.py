@@ -27,10 +27,11 @@ from hexset.clients.netbot import NetworkBot, bot_for, declared_trader, searcher
 from hexset.game import Game
 from hexset.lockstep import forward
 from hexset.mcts import Search
-from hexset.onnx_record import record_from_game
+from hexset.onnx_record import record_from_game, record_rows
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
     SearchConfig, gate_config, search_config, trader_config, trader_veto_config, trader_veto_of,
+    trader_veto_pick_config, trader_veto_pick_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
 
@@ -66,9 +67,12 @@ class V2Policy:
         self,
         rows: Sequence[tuple[Game, int, tuple[Action, ...]]],
         outputs: list[str],
+        indices: Sequence[Sequence[int]] | None = None,
     ) -> list[np.ndarray]:
-        records = [record_from_game(game, seat, self.space, options) for game, seat, options in rows]
-        return self._run_records(records, outputs)
+        """The graph on `rows`' records, built as one batch (`record_rows`);
+        `indices`, each row's options' action indices, where the caller has
+        them already."""
+        return self._run_batch(record_rows(rows, self.space, indices), outputs)
 
     def _run_records(
         self, records: Sequence[dict[str, np.ndarray]], outputs: list[str]
@@ -76,14 +80,21 @@ class V2Policy:
         """`_run`'s second half, for pre-built record rows. Keyed off the
         graph's own input names, since onnxruntime rejects a feed carrying a
         name the graph does not declare."""
+        return self._run_batch(
+            {key: np.stack([record[key] for record in records]) for key in records[0]}, outputs
+        )
+
+    def _run_batch(self, batch: dict[str, np.ndarray], outputs: list[str]) -> list[np.ndarray]:
+        """The graph on a stacked batch of record fields, fed the inputs it
+        declares."""
         wanted = [i.name for i in self.session.get_inputs()]
-        missing = [name for name in wanted if name not in records[0]]
+        missing = [name for name in wanted if name not in batch]
         if missing:
             raise ValueError(
                 f"this graph asks for {missing}, which the record does not carry — "
                 "it was exported against a newer contract than this server builds"
             )
-        inputs = {key: np.stack([record[key] for record in records]) for key in wanted}
+        inputs = {key: batch[key] for key in wanted}
         # `session.run`, or inside a `hexset.lockstep` lane, these rows of a
         # run shared with the other lanes' waiting forwards.
         return forward(self.session, outputs, inputs)
@@ -129,23 +140,24 @@ class V2Policy:
     def score_rows(
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
-        prior, value = self._run(rows, ["prior", "value"])
+        index = self.space.index
+        indices = [[index(option) for option in options] for _, _, options in rows]
+        prior, value = self._run(rows, ["prior", "value"], indices)
         return [
             (
-                self._combine_prior(options, prior[i]),
+                self._combine_prior(indices[i], prior[i]),
                 tuple(float(v) for v in value[i]),
             )
-            for i, (_, _, options) in enumerate(rows)
+            for i in range(len(rows))
         ]
 
-    def _combine_prior(self, options, prior: np.ndarray) -> np.ndarray:
-        """A leaf's options, scored from this row's dense prior."""
-        weights = np.empty(len(options))
-        for i, option in enumerate(options):
-            weights[i] = prior[self.space.index(option)]
+    def _combine_prior(self, indices: Sequence[int], prior: np.ndarray) -> np.ndarray:
+        """A leaf's options, scored from this row's dense prior: `indices`
+        are the options' action indices."""
+        weights = prior[list(indices)].astype(np.float64)
         total = weights.sum()
         if total <= 0:
-            return np.full(len(options), 1.0 / len(options))
+            return np.full(len(indices), 1.0 / len(indices))
         return weights / total
 
 
@@ -168,6 +180,8 @@ class Loaded:
     trader: str | None = None
     #: Whether the file's own gate vetoes that trader (`trader_veto`).
     trader_veto: bool = False
+    #: Whether that veto picks which taker to deal with (`trader_veto_pick`).
+    trader_veto_pick: bool = False
 
     @property
     def trade_params(self) -> TradeParams:
@@ -253,6 +267,7 @@ def _load_cached(
         ),
         trader=trader_config(meta),
         trader_veto=trader_veto_config(meta),
+        trader_veto_pick=trader_veto_pick_config(meta),
     )
 
 
@@ -295,10 +310,13 @@ def searcher(
     inference_batch: int | None = None,
     rng=None,
     threads: int | None = DEFAULT_THREADS,
+    own_calibration: tuple[float, float] | None = None,
+    decisive: float | None = None,
 ) -> Search:
     """The checkpoint at `path` as a batched PUCT search on `board`, trading
     through its own value-head gate. `k` is the determinized worlds each
-    decision is searched in."""
+    decision is searched in; `decisive`, the prior at which a root is played
+    without searching (`hexset.mcts.Search`)."""
     return searcher_for(
         load(path, board.topology, device, threads),
         simulations=simulations,
@@ -306,6 +324,8 @@ def searcher(
         k=k,
         inference_batch=inference_batch,
         rng=rng,
+        own_calibration=own_calibration,
+        decisive=decisive,
     )
 
 
@@ -348,7 +368,8 @@ def spawn(
         )
     trader = declared_trader(loaded, path)
     own = _spawn_own(path, board, loaded, rng, device, threads)
-    return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded))
+    return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
+                  veto_picks=trader_veto_pick_of(loaded))
 
 
 def _spawn_own(path, board, loaded, rng, device, threads):
@@ -365,4 +386,6 @@ def _spawn_own(path, board, loaded, rng, device, threads):
         device=device,
         rng=rng,
         threads=threads,
+        own_calibration=loaded.search.own_calibration,
+        decisive=loaded.search.decisive,
     )

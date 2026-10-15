@@ -194,7 +194,7 @@ def _roads_to_take(topology, seat: int, beat: int, budget: int,
     roads in it, so `k` new roads cannot reach `beat` while the seat owns
     fewer than `beat - k`; the search starts at the first `k` that could,
     and deepens one road at a time, stopping at the first that does."""
-    owned = sum(1 for o in edge_owner if o == seat)
+    owned = edge_owner.count(seat)
     probe = _Roads(topology, edge_owner, vertex_owner)
     for k in range(max(1, beat - owned), budget + 1):
         if longest_with_new_roads(probe, seat, k)[k] >= beat:

@@ -637,7 +637,8 @@ def test_on_another_seats_turn_the_gate_reads_from_the_movers_frame(board, monke
     from hexset.clients.netbot import NetworkBot
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
+                     trade=TradeParams(gate_own_frame=False))
     game = _off_turn_position(board)
     true_hand_1 = list(game.state(0, hidden=False).hands[1])
     bot.seat_at(game)
@@ -667,6 +668,93 @@ def test_on_another_seats_turn_the_gate_reads_from_the_movers_frame(board, monke
     assert game.state(0, hidden=False).hands[1] == true_hand_1
 
 
+def test_from_the_movers_frame_the_gate_still_reads_its_own_whole_hand(board, monkeypatch):
+    """Where the public record cannot name all of this seat's cards (a steal
+    took one into `unknown`), the mover's frame still shows them all: every
+    world it reads has this seat's ledger row equal to its hand, before and
+    after the exchange, and the gain is the whole hand's."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
+                     trade=TradeParams(gate_own_frame=False))
+    game = _off_turn_position(board)
+    game.ledger.seats[0].known = [1, 0, 0, 0, 0]
+    game.ledger.seats[0].unknown = 2
+    bot.seat_at(game)
+    captured = _captured_value_rows(monkeypatch)
+    gets_wheat = (0, 0, 0, 1, 0)
+
+    gains = bot.gains_many(game.state(0), [gets_wheat], [1])
+    assert [frame for _, frame in captured] == [1, 1]
+    for world, _ in captured:
+        row = world.ledger.seats[0]
+        hand = list(world.state(0, hidden=False).hands[0])
+        assert row.known == hand and row.most == hand and row.unknown == 0
+    assert captured[1][0].ledger.seats[0].known == [1, 1, 1, 1, 0]
+    assert gains == [pytest.approx(
+        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
+    )]
+    assert game.ledger.seats[0].known == [1, 0, 0, 0, 0]       # the live ledger is untouched
+    assert game.ledger.seats[0].unknown == 2
+
+
+def _frame_scaled_values(monkeypatch):
+    """`HandValuePolicy.value_rows` replaced by a read that depends on the
+    frame: every entry is (frame + 1) x seat 0's card count / 100, so a gain
+    averaged over frames is that mean factor times the card change. The
+    frames asked for are recorded, row by row."""
+    frames: list[int] = []
+
+    def read(self, rows):
+        out = []
+        for world, frame in rows:
+            frames.append(frame)
+            cards = sum(world.state(0, hidden=False).hands[0])
+            out.append(tuple((frame + 1) * cards / 100 for _ in range(PLAYERS)))
+        return out
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", read)
+    return frames
+
+
+@pytest.mark.parametrize("choice, frames_asked, factor", [
+    ("one", [1, 1], 2.0),
+    ("pair", [0, 1, 0, 1], 1.5),
+    ("all", [0, 1, 2, 3, 0, 1, 2, 3], 2.5),
+])
+def test_gate_frames_averages_this_seats_entry_over_the_frames_off_turn(board, monkeypatch, choice, frames_asked, factor):
+    """On seat 1's turn, `gate_frames` reads the before and after world from
+    the mover's frame (`one`), this seat's and the mover's (`pair`) or every
+    seat's (`all`), in one forward, and the gain is the mean over them."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    frames = _frame_scaled_values(monkeypatch)
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
+                     trade=TradeParams(gate_own_frame=False, gate_frames=choice))
+    game = _off_turn_position(board)
+    bot.seat_at(game)
+    gains = bot.gains_many(game.state(0), [(0, 0, 0, 1, 0)], [1])
+    assert frames == frames_asked
+    assert gains == [pytest.approx(factor * 1 / 100)]
+
+
+def test_gate_frames_reads_this_seats_own_turn_from_its_own_frame_alone(board, monkeypatch):
+    """A position this seat is to move in has one right frame, its own:
+    `gate_frames` leaves it there."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    frames = _frame_scaled_values(monkeypatch)
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, trade=TradeParams(gate_frames="all"))
+    game = _off_turn_position(board)
+    game.current_player = 0
+    bot.seat_at(game)
+    bot.gains_many(game.state(0), [(0, 0, 0, 1, 0)], [1])
+    assert frames == [0, 0]
+
+
 def test_an_off_turn_read_imagines_this_seats_own_rows_and_no_other_seats(board, monkeypatch):
     """What another seat saw stolen stays out of every world this seat values
     -- the mover's frame reads the table's rows there -- and what this seat
@@ -690,7 +778,8 @@ def test_an_off_turn_read_imagines_this_seats_own_rows_and_no_other_seats(board,
             theirs.seats[2].known = list(game.state(0, hidden=False).hands[2])
             theirs.seats[2].unknown = 0
             ledger.private[1] = theirs
-        bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7))
+        bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
+                         trade=TradeParams(gate_own_frame=False))
         bot.seat_at(game)
         captured.clear()
         gains = bot.gains_many(game.state(0), [gets_wheat], [1])
@@ -843,3 +932,44 @@ def test_plain_onnx_web_spawn_matches_arena_seeded_trade_worlds(board, monkeypat
     expected = [arena._world_rng(view, seat).random() for _ in range(5)]
     assert [web._world_rng(view, seat).random() for _ in range(5)] == expected
     assert [other_seed._world_rng(view, seat).random() for _ in range(5)] != expected
+
+
+
+# --- own_calibration in the gate: gains on the calibrated scale -------------------------------------------
+
+
+@dataclass
+class ChancePolicy(HandValuePolicy):
+    """Win chances: seat 0's grows with its own card count from 5%, the rest
+    share what is left equally. Enough to watch a gain change scale."""
+
+    def _value(self, game, seat):
+        own = sum(View.from_game(game, seat).known[0])
+        p0 = min(0.05 + 0.01 * own, 0.9)
+        return (p0,) + ((1 - p0) / (PLAYERS - 1),) * (PLAYERS - 1)
+
+
+def test_a_calibrated_gate_prices_gains_on_the_calibrated_scale(board):
+    from hexset.clients.netbot import NetworkBot
+    from hexset.mcts import calibrate_own
+
+    cal = (0.32, 0.81)
+    game = _position_with_a_settlement_in_hand(board)
+    assert to_move(game) == 0
+    space = stub_checkpoint(board).space
+    gains = {}
+    for name, c in (("raw", None), ("calibrated", cal)):
+        bot = NetworkBot(policy=ChancePolicy(space), players=PLAYERS, rng=random.Random(7), own_calibration=c)
+        bot.seat_at(game)
+        view = game.state(0)
+        gets_two_gives_one = (1, 1, -1, 0, 0)
+        gains[name] = bot.gains_many(view, [gets_two_gives_one], [1])[0]
+        across = bot.gains_across(0, [(game, [gets_two_gives_one], [1])])[0][0]
+        assert across == pytest.approx(gains[name])
+    own = sum(game.state(0).known[0])
+    before = ChancePolicy(space)._value(game, 0)
+    p = lambda cards: (min(0.05 + 0.01 * cards, 0.9),) + ((1 - min(0.05 + 0.01 * cards, 0.9)) / 3,) * 3
+    assert gains["raw"] == pytest.approx(p(own + 1)[0] - before[0])
+    assert gains["calibrated"] == pytest.approx(
+        calibrate_own(p(own + 1), 0, cal)[0] - calibrate_own(before, 0, cal)[0])
+    assert gains["calibrated"] > gains["raw"] > 0      # behind, a gain counts for more

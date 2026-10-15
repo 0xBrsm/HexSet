@@ -162,12 +162,22 @@ def test_an_explicit_zero_is_honoured_where_zero_is_meaningful():
     assert TradeParams.from_meta({}, base=base).gate_plies == 8
 
 
-def test_the_own_frame_read_round_trips_and_is_off_by_default():
-    assert not UNLIMITED.gate_own_frame
+def test_the_own_frame_read_round_trips_and_is_on_by_default():
+    assert UNLIMITED.gate_frames == "one" and "gate_frames" not in UNLIMITED.as_meta()
+    for choice in ("pair", "all"):
+        declared = replace(UNLIMITED, gate_frames=choice)
+        assert declared.as_meta()["gate_frames"] == choice
+        assert TradeParams.from_meta(declared.as_meta()) == declared
+    assert TradeParams.from_meta({"gate_frames": "most"}).gate_frames == "one"
+    with pytest.raises(ValueError):
+        replace(UNLIMITED, gate_frames="most")
+    assert UNLIMITED.gate_own_frame
     assert "gate_own_frame" not in UNLIMITED.as_meta()
-    own = replace(UNLIMITED, gate_own_frame=True)
-    assert TradeParams.from_meta(own.as_meta()) == own
-    assert TradeParams.from_meta({"gate_own_frame": "0"}, base=own) == UNLIMITED
+    mover = replace(UNLIMITED, gate_own_frame=False)
+    assert mover.as_meta()["gate_own_frame"] == "0"
+    assert TradeParams.from_meta(mover.as_meta()) == mover
+    assert TradeParams.from_meta({"gate_own_frame": "1"}, base=mover) == UNLIMITED
+    assert TradeParams.from_meta({}) == UNLIMITED
 
 
 def test_a_gate_written_against_the_old_attributes_still_describes_itself():

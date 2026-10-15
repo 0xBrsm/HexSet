@@ -150,3 +150,62 @@ def test_a_checkpoint_without_the_key_does_not_veto():
         trader = TRADER
 
     assert trader_veto_of(Loaded()) is False
+
+
+class BySeat:
+    """Gains `by[seat]` from any exchange with that seat, at a floor of zero."""
+
+    trade_floor = 0.0
+
+    def __init__(self, by):
+        self.by = by
+
+    def gains_many(self, view, received, counterparties):
+        return [self.by.get(c, -1.0) for c in counterparties]
+
+
+class First(Proposer):
+    """Takes any answer but seat 3's, and picks the first one it takes."""
+
+    def pick(self, view, responses):
+        self.seen = list(responses)
+        return next((i for i, r in enumerate(responses)
+                     if r.kind != RESPONSE_PASS and r.seat != 3), None)
+
+
+def test_a_picking_veto_takes_the_taker_its_own_value_gains_most_from():
+    view = a_game().state(0)
+    answers = [Response(s, RESPONSE_ACCEPT, GOOD) for s in (1, 2, 3)]
+    veto = BySeat({1: 0.01, 2: 0.05, 3: 0.09})
+    assert Vetoed(First(), veto).pick(view, answers) == 0, "the trader's own pick"
+    assert Vetoed(First(), veto, picks=True).pick(view, answers) == 1, \
+        "seat 2: the veto's best of what the trader takes (it never takes seat 3)"
+
+
+def test_a_picking_veto_never_takes_what_it_does_not_clear_or_the_trader_would_not():
+    view = a_game().state(0)
+    answers = [Response(1, RESPONSE_ACCEPT, GOOD), Response(3, RESPONSE_ACCEPT, GOOD)]
+    assert Vetoed(First(), BySeat({1: -0.02, 3: 0.09}), picks=True).pick(view, answers) is None
+
+
+def test_a_picking_veto_leaves_a_tie_to_the_trader():
+    view = a_game().state(0)
+    answers = [Response(2, RESPONSE_ACCEPT, GOOD), Response(1, RESPONSE_ACCEPT, GOOD)]
+    assert Vetoed(First(), BySeat({1: 0.03, 2: 0.03}), picks=True).pick(view, answers) == 0
+
+
+def test_traded_with_veto_picks_seats_a_picking_veto():
+    game = a_game()
+    mover = ScarcityTrader(random.Random(1))
+    seat = traded(mover, TRADER, game._state.board, random.Random(2), veto=True, veto_picks=True)
+    assert seat.trader.picks is True
+    assert traded(mover, TRADER, game._state.board, random.Random(2), veto=True).trader.picks is False
+
+
+@pytest.mark.parametrize("value,expected", [("gain", True), ("GAIN", True), ("trader", False),
+                                            ("", False), (None, False), ("1", False)])
+def test_the_pick_metadata_key_names_who_picks(value, expected):
+    from hexset.clients._modelmeta import trader_veto_pick_config
+
+    meta = {} if value is None else {"trader_veto_pick": value}
+    assert trader_veto_pick_config(meta) is expected

@@ -5,6 +5,126 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.14.0
+
+### Breaking
+
+- **A network gate reads every position from its own frame again by
+  default: `TradeParams.gate_own_frame` is on.** The mover's-frame read
+  (1.13.0) values a trade on another seat's turn from that seat's frame,
+  which has no input for this seat's dev cards by kind, so it drops them;
+  the own frame is the only one that carries everything the seat knows.
+  Checkpoint metadata now writes `gate_own_frame=0` for the mover's frame
+  and nothing for the default, so a checkpoint exported without the key
+  reads its own frame, and one written `gate_own_frame=1` reads as before.
+
+### Added
+
+- **A veto can choose the taker: `Vetoed(proposer, veto, picks=True)`,
+  `traded(..., veto_picks=True)`, metadata `trader_veto_pick = "gain"`.** Of
+  the answers to the seat's own offer that its trader would take, each on its
+  own, and the veto clears, the seat deals with the one the veto's own value
+  gains most from, rather than the trader's choice; equal gains go to the
+  trader's pick. Without the key nothing changes.
+
+- **`TradeParams.gate_frames`** (checkpoint metadata `gate_frames`, `one` by
+  default): on another seat's turn, a network gate can value a trade from
+  several frames and average its own entry of each value vector -- `pair`,
+  its own frame and the mover's; `all`, every seat's -- on one world sampled
+  from its belief with its own hand shown whole. Each frame reads a seat's
+  cards through different inputs, so each is a different estimate of the
+  same position. On its own turn the gate reads its own frame alone.
+
+- **A search can play a confident root without searching it:
+  `Search(decisive=p)`, the `mcts:<path>@<n>:decisive=<p>` entrant option,
+  metadata `decisive`.** Where the evaluator's prior on one of a root's moves
+  is at least `p`, that move takes the whole budget at the root's own value,
+  as a root with one legal move does, and no simulation is spent. Off unless
+  set; an entrant without it is unchanged, journal lineup included.
+
+- **`hexset.onnx_record.record_rows`: several `(game, perspective, options)`
+  records built straight into one batch**, equal to stacking
+  `record_from_game`'s rows, and `hexset.state.placeable_roads`: every edge
+  `road_placeable` accepts for a seat, listed in one pass.
+
+- **Trade embargoes: `Game.embargoes`, `Seat.set_embargoes(pairs)`,
+  `trading.embargoed(game, a, b)`.** An embargo is a `(seat, against)` pair: a
+  seat refusing every trade with another. It closes trading between the two
+  both ways. The offer stage builds the actor's menu for the seats still open
+  to it only, so a gate never prices an offer with a closed seat in mind, and
+  makes no offer when every other seat is closed. The round never asks a
+  closed seat to answer. The referee does not check embargoes: an exchange
+  the host executed stands. A table with no embargoes trades as before.
+
+- **`Seat.pick(responses, waiting=...)`: a pick at a table whose seats answer
+  over time.** `waiting` names the seats that have not answered yet. The answer
+  picked is returned only if none of them, accepting the offer as put, would be
+  picked over it by the gate's own pick; otherwise `None`, meaning wait for the
+  rest. So a client takes the gate's favourite taker the moment it accepts, the
+  next one once every seat it would prefer has refused. Without `waiting`, `pick`
+  is unchanged. When it waits, `Seat.held` says on what: the answer it would
+  take now and the waiting seat the gate picks over it.
+
+- **A searched checkpoint can read its own seat's win chance through a
+  calibration: `Search(own_calibration=(a, b))`, `hexset.mcts.calibrate_own`,
+  metadata `own_calibration = "a,b"`.** At every position the search
+  evaluates, the deciding seat's chance `p` becomes
+  `sigmoid(a + b * logit(p))` and the other seats' chances are scaled so the
+  vector keeps its sum; finished games keep their exact values. The search's
+  trade gate reads its prices through the same map (`NetworkBot(own_calibration=...)`,
+  `bot_for(..., own_calibration=...)`): `gains_many`, `estimate_many` and
+  `gains_across` are differences of calibrated chances, so the clearing floor
+  sits on that scale. For a value head whose reading of its own seat is off at
+  a table it was not trained against. The order of the seat's own values is
+  kept (`b > 0`), so the policy's own choices are unchanged; what moves is how
+  the search weighs uncertain lines and which trades clear. Absent, nothing
+  changes; a searched file that asks for it plays and trades with it.
+
+- **A robber deal answered off the seat's own value head:
+  `DealParams(answerer="value")` (`hexset.deals.VALUE_ANSWERER`),
+  `ValueDealer.promise`, `ValueDealer.promise_worth`.** Asked by another
+  mover, the seat promises where its win chance promising beats its win
+  chance silent. Both are read over the mover's robber moves by the params'
+  robber model, card by card of the steal. Promising, the model reads the seat
+  as promised, and where a move spares it the exchange is priced after the
+  move, against each card the mover may give back. Only the mover's likeliest
+  target answers, and a spared promiser pays. The mover's moves are read off
+  the board, so an ask heard before the roll or during discards reads none of
+  the mover's hidden cards. `Dealing` builds it from the
+  seat's network (`value_net`), the same `ValueDealer` that asks where the
+  seat also asks as a value mover.
+
+### Changed
+
+- **Robber deals honour trade embargoes (`Game.embargoes`), either way.** A
+  seat under an embargo with the mover is out of the deal: it promises
+  nothing (`answer`), the mover asks it nothing and counts no promise of its
+  (`default_ask`, `ValueDealer`, `Deal.ignored`), and so never spares it
+  for one. The deal is paid by an exchange the embargo forbids. New
+  `deals.closed(game, seat)`: the seats under an embargo with `seat`. A
+  game with no embargoes plays as before.
+
+- **Search is faster, with every decision unchanged.** A wave's leaf records
+  are built as one batch with each board's fixed fields worked out once, an
+  edge is scored in plain floats with the array form's operations in its
+  order, a backup sums the value vector once, legal roads are listed in one
+  pass, and a `Topology` works out its hash once. Root visits, values and
+  priors are the same to the bit.
+
+### Fixed
+
+- **The network gate's mover's-frame read shows its own hand whole.** Off
+  `gate_own_frame`, a trade on another seat's turn is read from the mover's
+  frame on one world sampled from the gate's belief. That world held the
+  gate's true hand, but its ledger row was the table's, so the read guessed
+  at cards the gate knows. Every world it samples now marks its own row
+  fully known (`known` and `most` its hand, `unknown` 0), before and after
+  the exchange, so only what it cannot know is guessed.
+
+- **Withdrawn robber-deal promises release the robber move.** When an
+  updated reply list has no countable promises, `Seat.deal_promised` clears
+  the previous acceptance and its move constraints.
+
 ## 1.13.0
 
 ### Breaking

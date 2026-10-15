@@ -40,7 +40,7 @@ from .deals import keep_promises
 from .robber import allowed_targets, may_stand, victims
 from .state import (
     MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, can_place_settlement, city_count,
-    city_upgradeable, road_count, road_placeable, settlement_count, settlement_placeable,
+    city_upgradeable, placeable_roads, road_count, settlement_count, settlement_placeable,
 )
 
 __all__ = [
@@ -209,15 +209,12 @@ def _building_actions(game: Game) -> list[Action]:
 
     # Each piece limit is read once here rather than rescanned inside every
     # per-node predicate, which would make enumeration quadratic;
-    # `road_placeable` and friends are the public predicates without the check.
+    # `road_placeable` and friends are the public predicates without the check;
+    # `placeable_roads` lists every edge the first accepts in one pass.
     if (game.free_roads > 0 or can_afford(state, player, Purchase.ROAD)) and (
         road_count(state, player) < MAX_ROADS
     ):
-        out.extend(
-            Action(ActionType.BUILD_ROAD, e)
-            for e in range(topology.num_edges)
-            if road_placeable(state, player, e)
-        )
+        out.extend(Action(ActionType.BUILD_ROAD, e) for e in placeable_roads(state, player))
     if (
         can_afford(state, player, Purchase.SETTLEMENT)
         and settlement_count(state, player) < MAX_SETTLEMENTS

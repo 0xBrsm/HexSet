@@ -59,8 +59,8 @@ from .board.board import Board
 from .bots.base import seat_at
 from .chance import UNSEEN, ChanceError, Hosted
 from .deals import (
-    ANSWERING, NO_BLOCK, Ask, Deal, DealParams, blacklist, deal_params_of, default_accept, default_ask, default_return,
-    robber_model,
+    ANSWERING, NO_BLOCK, Ask, Deal, DealParams, blacklist, closed, deal_params_of, default_accept, default_ask,
+    default_return, robber_model,
 )
 from .deals import answer as deal_answer
 from .deals import targeted as deal_targeted
@@ -302,6 +302,16 @@ class Seat:
         move only (`Game.robber_allowed`)."""
         self.game.robber_allowed = None if hexes is None else frozenset(hexes)
 
+    def set_embargoes(self, pairs: Iterable[tuple[int, int]]) -> None:
+        """The table's trade embargoes as the host states them now: `(seat,
+        against)` pairs, each a seat refusing every trade with another
+        (`Game.embargoes`). An offer of this seat's is then built for the
+        seats it can still trade with, and none goes up when there are none
+        (`trading.offer`); and a seat under an embargo with it is out of its
+        robber deals both ways: never asked or spared for a promise, never
+        promised (`deals.closed`)."""
+        self.game.embargoes = frozenset((int(a), int(b)) for a, b in pairs)
+
     # -- this seat's trading ---------------------------------------------
 
     @property
@@ -367,16 +377,37 @@ class Seat:
         self._responses = []
         return offered
 
-    def pick(self, responses: Sequence[Response]) -> Response | None:
+    def pick(self, responses: Sequence[Response], waiting: Iterable[int] = ()) -> Response | None:
         """Which answer to this seat's open offer to execute, among what the
         other seats said (an acceptance carries the offer's own bundle, a
         counter its own; both signed towards this seat). The gate's `pick`,
         else `default_pick`, which prices an acceptance by its taker. `None`
-        executes nothing. The answers are kept for `close_round`."""
+        executes nothing. The answers are kept for `close_round`.
+
+        At a table whose seats answer over time, `waiting` names the seats
+        that have not answered yet. The answer picked is then executed only
+        if none of them would be picked over it by accepting the offer as
+        put -- the gate's own pick between the two decides -- so the round
+        takes its preferred taker the moment no better one can still come,
+        and otherwise `None`: wait for the rest, with `held` saying what is
+        waited for. An open offer (`Offer.any`) cannot be accepted as put, so
+        it never waits."""
         if self._round is None:
             raise ValueError("this seat has no open offer")
         self._responses = list(responses)
-        return trading.pick(self.game, self.gate, self.seat, self._responses)
+        self.held = None
+        chosen = trading.pick(self.game, self.gate, self.seat, self._responses)
+        if chosen is None or self._round.any:
+            return chosen
+        rivals = [Response(s, RESPONSE_ACCEPT, tuple(self._round.received))
+                  for s in waiting if s != chosen.seat]
+        if not rivals:
+            return chosen
+        best = trading.pick(self.game, self.gate, self.seat, [chosen, *rivals])
+        if best is chosen:
+            return chosen
+        self.held = (chosen, best.seat)
+        return None
 
     def close_round(self, trade: Trade | None = None) -> None:
         """This seat's open round is over, with `trade` the exchange the host
@@ -394,6 +425,7 @@ class Seat:
             finished(self.game.state(self.seat), offer, list(self._responses), trade,
                      turn=self.game.turns)
         self._responses = []
+        self.held = None
 
     def answer(self, offer: Offer) -> Response:
         """This seat's answer to another seat's offer (`offer.received` signed
@@ -603,8 +635,8 @@ class Seat:
     def deal_promised(self, promised: Sequence[int]) -> tuple[int, ...]:
         """The seats that promised this seat's ask, in the order they did.
         Of them it counts every one but a seat its own view says cannot hold
-        the card (`Deal.void`) and one it has blacklisted (`Deal.ignored`,
-        `deals.blacklist`), and spares for those its dealer picks
+        the card (`Deal.void`) and one it has blacklisted or is under an
+        embargo with (`Deal.ignored`, `deals.blacklist`, `deals.closed`), and spares for those its dealer picks
         (`deal_accept`, else `deals.default_accept`): the robber move it then
         chooses spares them (`Game.robber_promised`). Returns the seats spared
         for; `()` without an open ask."""
@@ -613,12 +645,13 @@ class Seat:
             return ()
         view = game.state(self.seat)
         card = tuple(int(r == deal.resource) for r in range(len(view.known[self.seat])))
-        banned = blacklist(game, self.seat)
+        banned = blacklist(game, self.seat) | closed(game, self.seat)
         promised = tuple(dict.fromkeys(s for s in promised if s != self.seat))
         deal.promised = promised
         deal.void = tuple(s for s in promised if not trading.has_room(view, s, card))
         deal.ignored = tuple(s for s in promised if s in banned and s not in deal.void)
         counted = deal.counted
+        deal.accepted = ()
         if counted:
             _, dealer = self._dealing()
             accept = dealer.accept if dealer is not None else getattr(self.gate, "deal_accept", None)
@@ -692,6 +725,9 @@ class Seat:
         self._offers_made = 0
         self._round: Offer | None = None
         self._responses: list[Response] = []
+        # Why the last `pick` returned None to wait: (the answer it would
+        # take now, the waiting seat the gate picks over it); else None.
+        self.held: tuple[Response, int] | None = None
         self._hand_sizes: tuple[int, ...] | None = None
         self._published = False
         self._trades: list[Trade] = []

@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
-from hexset.mcts import Search
+from hexset.mcts import Search, calibrate_own
 from hexset.actions import options_for
-from hexset.clients._modelmeta import gate_config_of, trader_of, trader_veto_of
+from hexset.clients._modelmeta import gate_config_of, trader_of, trader_veto_of, trader_veto_pick_of
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
@@ -81,6 +81,11 @@ class NetworkBot(trading.DeclaredTrade):
     # Seat this bot is installed at, which the view must then agree with, or
     # `None` to answer whatever seat the view names.
     seat: int | None = None
+    #: `(a, b)` for `hexset.mcts.calibrate_own`, or `None`: the seat's own
+    #: chance in every value vector the gate prices is read through it, the
+    #: same map its search reads positions with, so a gain and the clearing
+    #: floor are on that scale.
+    own_calibration: tuple[float, float] | None = None
     _seated: Game | None = field(default=None, repr=False, compare=False)
     _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
     _protocol: "TradeProtocol | None" = field(
@@ -200,6 +205,12 @@ class NetworkBot(trading.DeclaredTrade):
         if memo is not None and memo[0] == key:
             return memo[1]
         scored = self._evaluate(seat, view, received, counterparties)
+        if self.own_calibration is not None and scored[0]:
+            before, afters = scored
+            scored = (
+                calibrate_own(before, seat, self.own_calibration),
+                {i: calibrate_own(v, seat, self.own_calibration) for i, v in afters.items()},
+            )
         self._memo = (key, scored)
         return scored
 
@@ -207,12 +218,16 @@ class NetworkBot(trading.DeclaredTrade):
         self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> tuple[tuple[float, ...], dict[int, tuple[float, ...]]]:
         """The live position's value vector and every coverable candidate's,
-        keyed by candidate index. On `seat`'s own turn at `gate_plies == 0`
-        each post-trade position is read from `seat`'s own frame (`_after`),
-        never the true hand. Otherwise worlds are sampled from `seat`'s belief
-        and certified against negative exchanges, all from one draw: a
-        rollout *acts* on them, and on another seat's turn they are read from
-        that seat's frame, which needs a whole hand for it (`_continue`)."""
+        keyed by candidate index. At `gate_plies == 0` each post-trade
+        position is read from `seat`'s own frame (`_after`), never the true
+        hand: on its own turn always, and on another seat's under
+        `gate_own_frame` (the default) with `gate_frames` `one`. Otherwise
+        worlds are sampled from `seat`'s belief and certified against negative
+        exchanges, all from one draw: a rollout *acts* on them, and on another
+        seat's turn they are read from the frames `_frames` names, which need
+        a whole hand (`_continue`). Every sampled world shows `seat`'s own
+        hand whole (`_shown`): read from another seat's frame, only what
+        `seat` cannot know is guessed."""
         game = self._seated
         assert game is not None  # callers check this first
         hand = list(view.known[seat])
@@ -220,6 +235,7 @@ class NetworkBot(trading.DeclaredTrade):
         if not coverable:
             return (), {}
 
+        to_act = to_move(game)
         if self._reads_own_frame(game, seat):
             afters = {
                 i: self._after(seat, them, hand, bundle, view)
@@ -251,6 +267,7 @@ class NetworkBot(trading.DeclaredTrade):
         # may read.
         before = imagine(game, rng, randomize_deck=False, seat=seat)
         before.set_state(sampled)
+        _shown(before, seat)
 
         afters: dict[int, Game] = {}
         for i, them, bundle in coverable:
@@ -260,10 +277,11 @@ class NetworkBot(trading.DeclaredTrade):
             exchange(exchanged, seat, them, bundle)
             after.set_state(exchanged)
             after.ledger.apply_hand_diff(hands_before, exchanged.hands)
+            _shown(after, seat)
             afters[i] = after
 
         worlds = [before] + list(afters.values())
-        values = self._continue(to_move(game), seat, worlds, self.gate_plies)
+        values = self._continue(to_act, seat, worlds, self.gate_plies)
         afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
         return values[0], afters_values
 
@@ -288,7 +306,8 @@ class NetworkBot(trading.DeclaredTrade):
     def _reads_own_frame(self, game: Game, seat: int) -> bool:
         """Whether a trade at `game` is priced in `seat`'s own frame, one
         value-head read a position (`_after`), rather than over sampled worlds."""
-        return self.gate_plies == 0 and (self.trade.gate_own_frame or to_move(game) == seat)
+        own = self.trade.gate_own_frame and self.trade.gate_frames == "one"
+        return self.gate_plies == 0 and (own or to_move(game) == seat)
 
     def gains_across(
         self, seat: int, asks: Sequence[tuple[Game, Sequence[Bundle], Sequence[int]]]
@@ -327,9 +346,12 @@ class NetworkBot(trading.DeclaredTrade):
             values = self.policy.value_rows(rows) if rows else []
         finally:
             self._seated, self._memo = seated, memo
+        own = (lambda v: v) if self.own_calibration is None else (
+            lambda v: calibrate_own(v, seat, self.own_calibration))
         for k, before, afters in slots:
+            base = own(values[before])[seat]
             for i, row in afters.items():
-                out[k][i] = float(values[row][seat] - values[before][seat])
+                out[k][i] = float(own(values[row])[seat] - base)
         return out
 
     def _world_rng(self, view: View, seat: int) -> random.Random:
@@ -346,8 +368,9 @@ class NetworkBot(trading.DeclaredTrade):
     ) -> list[tuple[float, ...]]:
         """Each world's value vector after `mover`'s best play from it, `plies`
         deep, read from the frame of the seat to move there -- the frame a
-        value head is trained in -- or from `seat`'s under `gate_own_frame`.
-        Values are in board-seat order either way. Worlds advance in
+        value head is trained in -- or from `seat`'s under `gate_own_frame`;
+        where another seat than `seat` is to move, averaged over the frames
+        `gate_frames` names (`_frames`). Values are in board-seat order. Worlds advance in
         lockstep, one batched `act_rows` per ply, and must be belief-sampled
         copies, never the live table's own state."""
         live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == mover]
@@ -373,13 +396,31 @@ class NetworkBot(trading.DeclaredTrade):
             else:
                 pending.append(i)
         if pending:
-            own = self.trade.gate_own_frame
+            frames = {i: self._frames(seat, to_move(worlds[i])) for i in pending}
             values = self.policy.value_rows(
-                [(worlds[i], seat if own else to_move(worlds[i])) for i in pending]
+                [(worlds[i], f) for i in pending for f in frames[i]]
             )
-            for i, v in zip(pending, values):
-                out[i] = tuple(v)
+            at = 0
+            for i in pending:
+                n = len(frames[i])
+                rows = values[at:at + n]
+                at += n
+                out[i] = tuple(sum(v[k] for v in rows) / n for k in range(self.players))
         return out  # type: ignore[return-value]
+
+    def _frames(self, seat: int, to_act: int) -> tuple[int, ...]:
+        """The frames a position with `to_act` to move is read from for
+        `seat`: its own alone when it is to move; otherwise `gate_frames`'
+        choice -- the mover's, or `seat`'s under `gate_own_frame` (`one`),
+        both (`pair`), or every seat's (`all`)."""
+        if to_act == seat:
+            return (seat,)
+        frames = self.trade.gate_frames
+        if frames == "all":
+            return tuple(range(self.players))
+        if frames == "pair":
+            return (seat, to_act)
+        return (seat,) if self.trade.gate_own_frame else (to_act,)
 
     def _after(
         self, seat: int, them: int, hand: Sequence[int], bundle: Bundle, view: View
@@ -423,6 +464,19 @@ class NetworkBot(trading.DeclaredTrade):
         after.set_state(state)
         after.ledger = ledger
         return after
+
+
+def _shown(world: Game, seat: int) -> None:
+    """Make `seat`'s hand in `world` fully known on its ledger: every card
+    certified, none unknown. A world sampled from `seat`'s belief holds its
+    true hand, so read from another seat's frame the encoding then carries
+    all `seat` knows -- its own cards exactly -- and guesses only the rest.
+    A seat whose hand the public record tracks exactly reads the same way."""
+    ledger = world.ledger.seats[seat]
+    hand = world.state(seat).state.hands[seat]
+    ledger.known = list(hand)
+    ledger.most = list(hand)
+    ledger.unknown = 0
 
 
 @dataclass
@@ -509,6 +563,7 @@ class GatedSearch(trading.DeclaredTrade, Search):
 def bot_for(
     checkpoint: Checkpoint, *, rng: random.Random | None = None,
     trade: TradeParams | None = None,
+    own_calibration: tuple[float, float] | None = None,
 ) -> NetworkBot:
     """`checkpoint`, playing one position at a time.
 
@@ -518,13 +573,15 @@ def bot_for(
     one that asks for nothing bargains the way every checkpoint always has.
     `trade` replaces what the checkpoint declares -- that is how a no-trade
     arm is built -- and `rng` seeds a `gate_plies > 0` checkpoint's sampled
-    worlds."""
+    worlds. `own_calibration` reads the seat's own chance through
+    `hexset.mcts.calibrate_own` wherever the gate prices a trade."""
     trade = gate_config_of(checkpoint) if trade is None else trade
     return NetworkBot(
         policy=checkpoint.policy,
         players=checkpoint.players,
         trade=trade,
         rng=random.Random() if rng is None else rng,
+        own_calibration=own_calibration,
     )
 
 
@@ -537,6 +594,8 @@ def searcher_for(
     inference_batch: int | None = None,
     rng: random.Random | None = None,
     trade: TradeParams | None = None,
+    own_calibration: tuple[float, float] | None = None,
+    decisive: float | None = None,
 ) -> GatedSearch:
     """`checkpoint` as a batched PUCT search, trading through its own value-head
     gate. `rng` seeds both the search and, derived from it, the gate's sampling
@@ -544,18 +603,21 @@ def searcher_for(
 
     `k` is how many determinizations of the seat's own belief each decision is
     searched in (`hexset.mcts.Search.worlds`); the tree is never rooted on the
-    true state from here."""
+    true state from here. `decisive` plays a root whose prior on one move
+    reaches it without searching (`hexset.mcts.Search`)."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedSearch(
         LeafEvaluator(
             policy=checkpoint.policy,
             pad_to=inference_batch,
         ),
-        bot_for(checkpoint, rng=gate_rng, trade=trade),
+        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration),
         simulations=simulations,
         wave=wave,
         k=k,
         rng=rng,
+        own_calibration=own_calibration,
+        decisive=decisive,
     )
 
 
@@ -583,7 +645,8 @@ def register_entrants(loader) -> None:
         checkpoint = loader(path, board.topology)
         trader = own_trader(entrant, checkpoint, path)
         bot = bot_for(checkpoint, rng=rng, trade=entrant.trade)
-        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint))
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
+                      veto_picks=trader_veto_pick_of(checkpoint))
 
     def spawn_mcts(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "mcts")
@@ -592,9 +655,10 @@ def register_entrants(loader) -> None:
         bot = searcher_for(
             checkpoint,
             simulations=entrant.simulations, wave=entrant.wave, k=entrant.k,
-            rng=rng, trade=entrant.trade,
+            rng=rng, trade=entrant.trade, decisive=entrant.option("decisive"),
         )
-        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint))
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
+                      veto_picks=trader_veto_pick_of(checkpoint))
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)

@@ -37,6 +37,7 @@ __all__ = [
     "STANCE_ROWS",
     "lost_value",
     "side_value",
+    "calibrate_own",
     "Search",
     "visit_policy",
 ]
@@ -208,6 +209,30 @@ def side_value(vector: Sequence[float], against: Sequence[int]) -> float:
     return 1.0 - float(sum(vector[s] for s in against))
 
 
+def calibrate_own(
+    vector: Sequence[float], seat: int, calibration: tuple[float, float]
+) -> tuple[float, ...]:
+    """`vector` with `seat`'s win chance moved to `sigmoid(a + b * logit(p))`
+    for `calibration = (a, b)`, and the other seats' chances scaled together so
+    the vector still sums to what it did. A recalibration of the value head's
+    reading of one seat -- the searching seat's -- against outcomes it was not
+    trained on (a table whose players are weaker or stronger than its own
+    self-play copies), not a change of what the search plays for. `(0, 1)` is
+    the identity."""
+    a, b = calibration
+    values = [float(v) for v in vector]
+    total = sum(values)
+    p = min(max(values[seat], 1e-6), 1.0 - 1e-6)
+    lifted = 1.0 / (1.0 + math.exp(-(a + b * math.log(p / (1.0 - p)))))
+    lifted *= total
+    rest = total - values[seat]
+    if rest <= 0.0:
+        share = (total - lifted) / max(1, len(values) - 1)
+        return tuple(lifted if s == seat else share for s in range(len(values)))
+    scale = (total - lifted) / rest
+    return tuple(lifted if s == seat else v * scale for s, v in enumerate(values))
+
+
 @lru_cache(maxsize=None)
 def lost_value(stance: str, seats: int) -> float:
     """What `stance` reads a game another seat won as: the bottom of the
@@ -243,6 +268,17 @@ class Search:
     `relative`, [-1, 1] for `paranoid`. `stance` is restricted to `STANCE_ROWS`'s keys, what this
     tree's backup implements; anything else is refused at construction.
 
+    `own_calibration = (a, b)` recalibrates, at every evaluated position, the
+    win chance of the seat the search decides for (each decision's root
+    mover) as `calibrate_own` does; finished games keep their exact values.
+    `None`, the default, reads the evaluator's values as they are.
+
+    `decisive` plays a confident root without searching it: where the
+    evaluator's prior on one of the root's moves is at least `decisive`, that
+    move is credited with the whole budget at the root's own value, as a root
+    with one legal move is, and no simulation is spent. `None`, the default,
+    searches every root with more than one move.
+
     `against` names seats the search plays against as one side (`side_value`):
     at a node whose mover is not one of them, the mover ranks a position by
     the chance none of them wins, on [0, 1] like `own`; a seat in `against`
@@ -264,6 +300,8 @@ class Search:
         hold: HoldReading | None = None,
         rng: random.Random | None = None,
         against: Collection[int] = (),
+        own_calibration: tuple[float, float] | None = None,
+        decisive: float | None = None,
     ) -> None:
         if stance not in STANCE_ROWS:
             raise ValueError(
@@ -274,6 +312,8 @@ class Search:
             raise ValueError("a search needs at least one simulation and one wave")
         if k < 1:
             raise ValueError("a search needs at least one determinized world")
+        if decisive is not None and not 0.0 < decisive <= 1.0:
+            raise ValueError(f"decisive is a prior in (0, 1], not {decisive!r}")
         self.evaluator = evaluator
         self.simulations = simulations
         self.wave = wave
@@ -286,6 +326,11 @@ class Search:
         self.hidden = hidden
         self.hold = hold
         self.rng = rng or random.Random()
+        self.own_calibration = (
+            None if own_calibration is None
+            else (float(own_calibration[0]), float(own_calibration[1]))
+        )
+        self.decisive = None if decisive is None else float(decisive)
         self.play_against(against)
 
     def play_against(self, seats: Collection[int]) -> None:
@@ -393,18 +438,33 @@ class Search:
         # not the mean of what it read per visit; ranking the mean is the max^n
         # backup, and the two differ for the non-linear `paranoid`. A descent
         # still in flight counts as a lost visit (`lost_value`).
-        if self._sided(node.mover):
-            # A side's loss is one of `against` winning: 0, as for `own`.
-            totals = node.ranked
-        else:
-            totals = (
-                self.rank_rows(node.totals, node.mover)
-                if self.stance == "paranoid"
-                else node.ranked
-            ) + lost_value(self.stance, node.totals.shape[1]) * node.virtual
-        means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
-        bonus = self.exploration * node.prior * math.sqrt(max(total, 1e-8)) / (1 + counts)
-        return int(np.argmax(means + bonus))
+        sided = self._sided(node.mover)
+        if not sided and self.stance == "paranoid":
+            totals = self.rank_rows(node.totals, node.mover) + lost_value(
+                self.stance, node.totals.shape[1]
+            ) * node.virtual
+            means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
+            bonus = self.exploration * node.prior * math.sqrt(max(total, 1e-8)) / (1 + counts)
+            return int(np.argmax(means + bonus))
+        # The same scores as the array form above, edge by edge in plain
+        # floats -- the same operations in the same order, so the same bits --
+        # since a node's few edges cost less as a loop than as array calls.
+        # A side's loss is one of `against` winning: 0, as for `own`.
+        lost = 0.0 if sided else lost_value(self.stance, node.totals.shape[1])
+        root = math.sqrt(max(total, 1e-8))
+        exploration = self.exploration
+        best, best_score = 0, -math.inf
+        for i, (count, ranked, virtual, prior) in enumerate(zip(
+            counts.tolist(), node.ranked.tolist(), node.virtual.tolist(), node.prior.tolist()
+        )):
+            if count > 0:
+                mean = (ranked if sided else ranked + lost * virtual) / (count if count > 1 else 1)
+            else:
+                mean = 0.0
+            score = mean + exploration * prior * root / (1 + count)
+            if score > best_score:
+                best, best_score = i, score
+        return best
 
     def _perturb(self, roots: Sequence[Node]) -> None:
         """Dirichlet noise on root priors, self-play only.
@@ -473,26 +533,34 @@ class Search:
 
     def _backup(self, path: Sequence[tuple[Node, int]], value: Sequence[float]) -> None:
         vector = np.asarray(value, dtype=np.float64)
+        # One visit each, so `_credit`'s products are the vector itself; its
+        # sum is the same at every node of the path, so it is taken once.
+        total = float(vector.sum())
         for node, index in path:
             node.virtual[index] -= 1
-            self._credit(node, index, vector, 1)
+            self._credit(node, index, vector, 1, total)
 
-    def _credit(self, node: Node, index: int, vector: np.ndarray, visits: int) -> None:
-        """`visits` visits of edge `index`, each worth `vector`."""
+    def _credit(
+        self, node: Node, index: int, vector: np.ndarray, visits: int, total: float | None = None
+    ) -> None:
+        """`visits` visits of edge `index`, each worth `vector`; `total`, the
+        vector's sum where the caller has it."""
         node.visits[index] += visits
-        node.totals[index] += visits * vector
+        node.totals[index] += vector if visits == 1 else visits * vector
         if self._sided(node.mover):
             node.ranked[index] += visits * side_value(vector, self.against)
         elif self.stance == "own":
             node.ranked[index] += visits * vector[node.mover]
         elif self.stance == "relative":
             seats = vector.size
-            node.ranked[index] += visits * (
-                vector[node.mover] * seats - float(vector.sum())
-            ) / (seats - 1)
+            if total is None:
+                total = float(vector.sum())
+            node.ranked[index] += visits * (vector[node.mover] * seats - total) / (seats - 1)
 
-    def _expand(self, nodes: Sequence[Node]) -> None:
-        """Give a whole wave of leaves its prior and value in one call."""
+    def _expand(self, nodes: Sequence[Node], seats: Sequence[int] | None = None) -> None:
+        """Give a whole wave of leaves its prior and value in one call.
+        `seats`, one per node, is the seat each node's decision is searched
+        for: the seat `own_calibration` recalibrates."""
         wanted = [Leaf(node.game, node.mover, node.options) for node in nodes]
         scored = self.evaluator.evaluate(wanted)
         if len(scored) != len(wanted):
@@ -504,6 +572,9 @@ class Search:
                     f"prior over {node.prior.shape} for {len(node.options)} options"
                 )
             node.value = tuple(float(v) for v in value)
+        if self.own_calibration is not None and seats is not None:
+            for node, seat in zip(nodes, seats):
+                node.value = calibrate_own(node.value, seat, self.own_calibration)
 
     def _combine(self, group: Sequence[_Run]) -> Node:
         """One root from this decision's worlds: root statistics summed
@@ -568,7 +639,8 @@ class Search:
         A root with one legal move is evaluated but not searched: its only
         edge is credited with `simulations` visits at the root's own value,
         which is what the evaluator says that move leads to. Its value and
-        visits read like any other root's.
+        visits read like any other root's. Under `decisive`, so is a root
+        whose prior on one move reaches it: that move takes the visits.
 
         The tree is built fresh each decision: reuse is unsound, since the roll
         that happened is one of eleven the subtree averaged over."""
@@ -588,13 +660,23 @@ class Search:
             if run.root.terminal:
                 run.done = run.budget
         if searchable:
-            self._expand([run.root for run in searchable])
+            self._expand([run.root for run in searchable], [run.root.mover for run in searchable])
             forced = [run for run in searchable if len(run.root.options) == 1]
             for run in forced:
                 vector = np.asarray(run.root.value, dtype=np.float64)
                 self._credit(run.root, 0, vector, run.budget)
                 run.done = run.budget
-            self._perturb([run.root for run in searchable if len(run.root.options) > 1])
+            open_roots = [run for run in searchable if len(run.root.options) > 1]
+            if self.decisive is not None:
+                for run in open_roots:
+                    # Read before any root noise: the evaluator's own prior.
+                    best = int(np.argmax(run.root.prior))
+                    if float(run.root.prior[best]) >= self.decisive:
+                        vector = np.asarray(run.root.value, dtype=np.float64)
+                        self._credit(run.root, best, vector, run.budget)
+                        run.done = run.budget
+                open_roots = [run for run in open_roots if run.done < run.budget]
+            self._perturb([run.root for run in open_roots])
 
         while any(run.done < run.budget for run in runs):
             # Virtual loss makes collisions rare, not impossible: a wave wider
@@ -604,6 +686,7 @@ class Search:
                 int, tuple[_Run, Node, list[list[tuple[Node, int]]]]
             ] = {}
             wanted: list[Node] = []
+            wanted_seats: list[int] = []
             for run in runs:
                 for _ in range(min(self.wave, run.budget - run.done)):
                     path, leaf = self._descend(run.root)
@@ -616,10 +699,11 @@ class Search:
                         entry = (run, leaf, [])
                         waiting[id(leaf)] = entry
                         wanted.append(leaf)
+                        wanted_seats.append(run.root.mover)
                     entry[2].append(path)
 
             if wanted:
-                self._expand(wanted)
+                self._expand(wanted, wanted_seats)
                 for run, leaf, paths in waiting.values():
                     for path in paths:
                         self._backup(path, leaf.value or ())

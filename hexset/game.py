@@ -252,6 +252,12 @@ class Game:
     # not simulate turns for it. Whether and when a seat retires is the
     # caller's policy; `lock_seat` restricts neither.
     locked: frozenset[int] = field(default_factory=frozenset)
+    # Trade embargoes: `(seat, against)` pairs, each a seat refusing every
+    # trade with another. An embargo closes trading between the two both
+    # ways -- neither offers to the other nor answers it -- and leaves
+    # everything else alone; an exchange the host executed still stands. Set by the host
+    # (`Seat.set_embargoes`); copied by `imagine`.
+    embargoes: frozenset[tuple[int, int]] = field(default_factory=frozenset)
     # The seat `start()` opened the setup snake at; read-only afterwards.
     # Its own field rather than `setup_queue[0]` because a
     # `hexset.record.Record` carries it to rebuild the snake on replay, and
@@ -432,6 +438,7 @@ def imagine(
         trade_event_turn=game.trade_event_turn,
         trade_rule=game.trade_rule,
         locked=game.locked,
+        embargoes=game.embargoes,
         first=game.first,
         turn_cap=game.turn_cap,
     )

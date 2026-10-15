@@ -53,3 +53,14 @@ def test_disconnected_islands_are_supported():
 def test_empty_layout_rejected():
     with pytest.raises(ValueError):
         topo.build([])
+
+
+def test_a_topology_hashes_on_its_tuples_and_pickles_without_its_hash():
+    import pickle
+
+    t = topo.build(hexagon(2))
+    assert hash(t) == hash(topo.build(hexagon(2)))
+    assert t == topo.build(hexagon(2))
+    copy = pickle.loads(pickle.dumps(t))
+    assert "_hash" not in copy.__dict__
+    assert copy == t and hash(copy) == hash(t)

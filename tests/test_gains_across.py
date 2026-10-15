@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+import pytest
 
 from hexset.actions import ActionSpace, build_space
 from hexset.board.board import random_base_board
@@ -89,12 +91,14 @@ def swaps(game, seat):
     return received, counterparties
 
 
-def test_gains_across_prices_each_position_as_gains_many_does_in_one_forward():
+@pytest.mark.parametrize("own_frame", [True, False])
+def test_gains_across_prices_each_position_as_gains_many_does_in_one_forward(own_frame):
     found = positions()
     board = found[0][0]._state.board
     space = build_space(board.topology.num_vertices, board.topology.num_edges,
                         board.topology.num_hexes, PLAYERS)
-    bot = bot_for(Checkpoint(policy=HandPolicy(space), space=space), rng=random.Random(0))
+    bot = bot_for(Checkpoint(policy=HandPolicy(space), space=space), rng=random.Random(0),
+                  trade=replace(UNLIMITED, gate_own_frame=own_frame))
     home = found[0][0]
     bot.seat_at(home)
     for seat in range(PLAYERS):
@@ -107,10 +111,11 @@ def test_gains_across_prices_each_position_as_gains_many_does_in_one_forward():
             expected.append(bot.gains_many(g.state(seat), received, counterparties))
         bot.seat_at(home)
         bot.policy.calls = 0
-        own = sum(1 for g, *_ in group if to_move(g) == seat)
+        own = sum(1 for g, *_ in group if own_frame or to_move(g) == seat)
         across = bot.gains_across(seat, group)
         assert across == expected
         assert any(x not in (-1.0, 0.0) for row in across for x in row)
         assert bot._seated is home                      # left seated where it was
-        # One forward for every own-frame position; the others are priced on their own.
+        # One forward for every own-frame position (all of them under `gate_own_frame`);
+        # the others are priced on their own.
         assert bot.policy.calls == (1 if own else 0) + (len(group) - own)

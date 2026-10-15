@@ -48,6 +48,21 @@ def test_an_mcts_entrant_names_its_determinized_worlds():
     assert (alone.name, alone.simulations, alone.k) == ("mctsk8", 128, 8)
 
 
+def test_an_mcts_entrant_can_play_its_confident_roots_without_search():
+    """`decisive` rides as an entrant option, so an entrant without it is the
+    entrant it always was, down to the journal's lineup."""
+    sure = entrant_from_name("mcts:/tmp/x.pt@128:decisive=0.95")
+    assert (sure.name, sure.simulations, sure.option("decisive")) == ("mcts128d0.95", 128, 0.95)
+    assert entrant_from_name("mcts:/tmp/x.pt@:k=2:decisive=0.9").name == "mctsk2d0.9"
+    assert entrant_from_name("mcts:/tmp/x.pt@:decisive=1").name == "mctsd1"
+    plain = entrant_from_name("mcts:/tmp/x.pt@128")
+    assert plain.options == () and plain.option("decisive") is None
+    assert pickle.loads(pickle.dumps(sure)) == sure
+    for bad in ("0", "1.5", "often"):
+        with pytest.raises(ValueError, match="decisive"):
+            entrant_from_name(f"mcts:/tmp/x.pt@128:decisive={bad}")
+
+
 def test_a_network_spec_can_switch_its_own_trading_off():
     """`@0` is the only meaningful value: an off switch, not a budget. A
     budget is a thing a checkpoint declares in its own metadata."""

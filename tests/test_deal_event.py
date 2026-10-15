@@ -578,3 +578,175 @@ def test_a_seat_answers_unless_it_says_otherwise():
     assert deal_params_of(None) is None
     none = DealParams.parse("none")
     assert not none.answer and not none.ask
+
+
+# --- the answer, off a value head -------------------------------------------
+
+
+class AnswerNet:
+    """A stand-in network for the answering seat 1: its win chance is `low`
+    with the robber on `target` and `high` elsewhere; it prices giving wood
+    to the mover for any card at `gain`."""
+
+    def __init__(self, target, gain, high=0.5, low=0.4):
+        self.target, self.gain, self.high, self.low = target, gain, high, low
+        self.policy = self
+
+    def value_rows(self, rows):
+        return [tuple(self.low if g._state.robber == self.target else self.high for _ in range(4))
+                for g, seat in rows]
+
+    def seat_at(self, game):
+        pass
+
+    def gains_many(self, view, received, counterparties):
+        return [self.gain if c == 0 and b[WOOD] == -1 else -1.0 for b, c in zip(received, counterparties)]
+
+
+class Reading:
+    """A robber model: the mover puts the robber on `target` with chance
+    `silent`, or `sure` once seat 1 has promised, else on `other`; it robs
+    any seat there alike."""
+
+    stay = 5.0
+
+    def __init__(self, target, other, silent=0.9, sure=0.3):
+        self.target, self.other, self.silent, self.sure = target, other, silent, sure
+
+    def hexes(self, state, mover, allowed, promised):
+        p = self.sure if 1 in promised else self.silent
+        return {self.target: p, self.other: 1.0 - p}
+
+    def victims(self, state, mover, hex_index, promised):
+        seats = victims(state, hex_index, mover)
+        return {s: 1.0 / len(seats) for s in seats}
+
+
+_READINGS: dict = {}
+
+
+def a_value_answer(gain, silent=0.9, sure=0.3):
+    """Mover 0 asks seat 1 for wood; the mover's reading puts the robber on
+    a hex of seat 1's alone, or on a hex nobody is on."""
+    game = a_table()
+    deal(game, 0, ORE)
+    deal(game, 1, WOOD)
+    deal(game, 1, SHEEP)
+    state = game._state
+    game.phase = Phase.ROBBER
+    target = min(h for h in hexes_of(game, 1) - hexes_of(game, 2) - hexes_of(game, 3) if h != state.robber)
+    other = min(h for h in robber_hexes_free(game) if h != state.robber)
+    name = f"test-reading-{target}-{other}-{silent}-{sure}"
+    if name not in _READINGS:
+        reading = Reading(target, other, silent, sure)
+        _READINGS[name] = lambda: reading
+        D.register_robber_model(name, _READINGS[name])
+    params = D.DealParams(answer=True, model=name, answerer="value")
+    return game, D.ValueDealer(AnswerNet(target, gain), params, random.Random(0)), D.Ask(0, D.NO_BLOCK, WOOD)
+
+
+def robber_hexes_free(game) -> set[int]:
+    state = game._state
+    return {h for h in range(state.board.num_hexes) if not occupants(state, h)} & set(robber_hexes(game))
+
+
+def test_the_value_answer_prices_the_promise_in_win_chance():
+    # Silent: 0.9 x 0.4 + 0.1 x 0.5 = 0.41. Promising: 0.3 x 0.4 + 0.7 x (0.5 + gain).
+    game, dealer, ask = a_value_answer(gain=-0.05)
+    assert dealer.promise_worth(game, 1, ask, ()) == pytest.approx(0.06 + 0.7 * -0.05)
+    assert dealer.promise(game, 1, ask, ())
+    game, dealer, ask = a_value_answer(gain=-0.2)
+    assert dealer.promise_worth(game, 1, ask, ()) == pytest.approx(0.06 + 0.7 * -0.2)
+    assert not dealer.promise(game, 1, ask, ())
+
+
+def test_the_value_answer_promises_nothing_the_promise_does_not_move():
+    game, dealer, ask = a_value_answer(gain=0.01, silent=0.9, sure=0.9)
+    assert dealer.promise_worth(game, 1, ask, ()) == pytest.approx(0.1 * 0.01)
+    game, dealer, ask = a_value_answer(gain=-0.01, silent=0.9, sure=0.9)
+    assert not dealer.promise(game, 1, ask, ())
+
+
+def test_the_value_answer_speaks_only_as_the_likeliest_target():
+    game, dealer, ask = a_value_answer(gain=0.2)
+    assert not dealer.promise(game, 2, D.Ask(0, D.NO_BLOCK, WOOD), ())     # seat 2 is not on the hex
+
+
+def test_a_dealing_seat_answers_off_its_value_head():
+    net = AnswerNet(0, 0.0)
+    bot = D.Dealing(net, D.DealParams(answer=True, answerer="value"))
+    assert isinstance(bot.deal_answerer, D.ValueDealer) and bot.deal_answerer.net is net
+    assert bot.deal_dealer is None
+    both = D.Dealing(net, D.DealParams(answer=True, answerer="value", ask=True, mover="value"))
+    assert both.deal_answerer is both.deal_dealer
+    p = D.DealParams.parse("answer,answerer=value,model=reading")
+    assert p.answerer == D.VALUE_ANSWERER and D.DealParams.parse(p.spec()) == p
+
+
+def test_the_value_answer_reads_nothing_hidden_whatever_the_phase():
+    """Asked before the roll or during discards, on the answerer's own game
+    (the mover's hand and cards hidden), it prices as at the robber move."""
+    from hexset.game import observe
+
+    game, dealer, ask = a_value_answer(gain=-0.05)
+    deal(game, 0, WHEAT)
+    game._state.dev_cards[0][DevCard.KNIGHT] += 1
+    want = dealer.promise_worth(game, 1, ask, ())
+    for phase in (Phase.ROLL, Phase.DISCARD, Phase.ROBBER):
+        game.phase = phase
+        assert dealer.promise_worth(observe(game, 1), 1, ask, ()) == pytest.approx(want)
+
+
+# --- trade embargoes --------------------------------------------------------
+
+
+def test_closed_reads_an_embargo_either_way():
+    game = a_table()
+    game.embargoes = frozenset({(1, 0), (2, 3)})
+    assert D.closed(game, 0) == {1} and D.closed(game, 1) == {0}
+    assert D.closed(game, 2) == {3} and D.closed(game, 3) == {2}
+
+
+@pytest.mark.parametrize("pair", [(1, 0), (0, 1)])
+def test_a_seat_under_an_embargo_with_the_mover_promises_nothing(pair):
+    game = a_table()
+    deal(game, 0, ORE)
+    for s in (1, 2):
+        deal(game, s, WOOD)
+    game.embargoes = frozenset({pair})
+    seat(game, [Gate(ASKER, ask=D.Ask(0, D.NO_BLOCK, WOOD), accept=lambda p: p),
+                Gate(ANSWERS, answer=True), Gate(ANSWERS, answer=True), Gate()])
+    roll_dice(game, 7)
+    (d,) = game.deal_log
+    assert d.promised == (2,) and d.accepted == (2,) and game.robber_promised == ((2, D.NO_BLOCK),)
+
+
+def test_the_plain_mover_asks_nobody_it_is_under_an_embargo_with():
+    game = a_table()
+    deal(game, 0, ORE)
+    gate = Gate(ASKER)
+    assert D.default_ask(game, 0, gate, ASKER) is not None
+    game.embargoes = frozenset({(1, 0), (0, 2), (3, 0)})
+    assert D.default_ask(game, 0, gate, ASKER) is None
+
+
+@pytest.mark.parametrize("pair", [(1, 0), (0, 1)])
+def test_the_value_mover_neither_asks_for_nor_spares_a_seat_under_an_embargo(pair):
+    game, dealer = a_value_mover(gain=0.2)
+    game.embargoes = frozenset({pair})
+    assert dealer.ask(game, 0) is None
+    assert dealer.accept(game, 0, D.Ask(0, D.NO_BLOCK, WOOD), (1,)) == ()
+
+
+def test_a_promise_from_a_seat_under_an_embargo_is_ignored(monkeypatch):
+    game = a_table()
+    deal(game, 0, ORE)
+    deal(game, 1, WOOD)
+    game.embargoes = frozenset({(1, 0)})
+    # Seat 1's promise reaching the mover all the same, as a client might hand it in.
+    monkeypatch.setattr(D, "answer", lambda game, s, *a, **k: s == 1)
+    seat(game, [Gate(ASKER, ask=D.Ask(0, D.NO_BLOCK, WOOD), accept=lambda p: p),
+                Gate(ANSWERS, answer=True), Gate(), Gate()])
+    roll_dice(game, 7)
+    d = game.deal_log[-1]
+    assert d.promised == (1,) and d.ignored == (1,) and d.accepted == () and game.robber_promised == ()

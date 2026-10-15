@@ -405,7 +405,8 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     return bot if entrant.deals is None else Dealing(bot, entrant.deals, deal_seed(rng))
 
 
-def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, veto: bool = False) -> Bot:
+def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, veto: bool = False,
+           veto_picks: bool = False) -> Bot:
     """`bot`'s moves over `trader`'s trading (`hexset.bots.TradesBy`), the
     trader named as a lineup names it; `bot` itself where `trader` is `None`.
     The trader is seeded off `rng`'s state without drawing from it, so it
@@ -415,7 +416,8 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
     With `veto`, `bot`'s own gate vetoes the trader (`hexset.bots.Vetoed`):
     every exchange the trader would make must also clear `bot`'s gain above
     `bot`'s own floor. `bot` must trade (`max_offers` not `0`), or it would
-    veto everything."""
+    veto everything. With `veto_picks` as well, the veto also chooses which
+    taker of the seat's own offer to deal with (`Vetoed` ``picks``)."""
     if trader is None:
         return bot
     from .bots import TradesBy, Vetoed
@@ -425,7 +427,7 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
     if veto:
         if not params_of(bot).trades:
             raise ValueError(f"a seat that does not trade cannot veto its trader {trader!r}")
-        gate = Vetoed(gate, bot)
+        gate = Vetoed(gate, bot, picks=veto_picks)
     return TradesBy(bot, gate)
 
 
@@ -1536,13 +1538,15 @@ def _network(name: str) -> Entrant:
     )
 
 
-_MCTS_FORM = "mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>]]"
+_MCTS_FORM = "mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>][:decisive=<prior>]]"
 
 
 def _mcts(name: str) -> Entrant:
-    # `mcts:<path>@<simulations>w<wave>:k=<worlds>`; every part after the
-    # path is optional. `k` is `Entrant.k`: determinized worlds searched
-    # per decision.
+    # `mcts:<path>@<simulations>w<wave>:k=<worlds>:decisive=<prior>`; every
+    # part after the path is optional. `k` is `Entrant.k`: determinized worlds
+    # searched per decision. `decisive` is the prior at which a root is played
+    # without searching (`hexset.mcts.Search`), carried as the entrant option
+    # of that name so an entrant without it is unchanged.
     path, at, search = name[len(MCTS) :].partition("@")
     if not at and any("=" in part for part in path.split(":")[1:]):
         raise ValueError(
@@ -1556,6 +1560,7 @@ def _mcts(name: str) -> Entrant:
     simulations = int(budget) if budget else 128
     width = int(wave) if separator else 16
     worlds = 1
+    decisive = None
     seen = set()
     for option in (part for part in options.split(":") if part):
         key, assigned, value = option.partition("=")
@@ -1564,19 +1569,42 @@ def _mcts(name: str) -> Entrant:
         seen.add(key)
         if key == "k" and assigned and value.isdigit() and int(value) >= 1:
             worlds = int(value)
+        elif key == "decisive" and assigned and _prior(value) is not None:
+            decisive = _prior(value)
         else:
-            raise ValueError(f"unknown MCTS option: {option!r}; use k=<n>")
+            raise ValueError(
+                f"unknown MCTS option: {option!r}; use k=<n> or decisive=<prior in (0, 1]>"
+            )
     label = f"mcts{simulations}w{width}" if separator else f"mcts{budget}"
     if worlds > 1:
         label = f"{label}k{worlds}" if (budget or separator) else f"mctsk{worlds}"
+    named = bool(budget or separator or worlds > 1)
+    if decisive is not None:
+        label = f"{label if named else 'mcts'}d{_value_text(decisive)}"
+        named = True
     return Entrant(
-        name=label if budget or separator or worlds > 1 else "mcts",
+        name=label if named else "mcts",
         kind="mcts",
         weights=path,
         simulations=simulations,
         wave=width,
         k=worlds,
+        options=() if decisive is None else (("decisive", decisive),),
     )
+
+
+def _prior(text: str) -> float | None:
+    """`text` as a prior in (0, 1], or `None` where it is not one."""
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return value if 0.0 < value <= 1.0 else None
+
+
+def _value_text(value: float) -> str:
+    """A float as a label reads it: `0.95`, not `0.9500000001`."""
+    return f"{value:g}"
 
 
 def entrant_from_name(name: str) -> Entrant:

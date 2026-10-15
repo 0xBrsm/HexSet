@@ -35,7 +35,8 @@ carries `DealParams` with `ask` on (`Dealing` attaches them to any bot) asks
 as the robber phase opens (`run_deal_event`) and the other seats answer in
 turn (`answer`). A promise binds nobody. The mover sets aside the promises
 it does not count (`void`: from a seat its own view says cannot hold the
-card; `ignored`: from a seat it has blacklisted, `blacklist`), chooses which
+card; `ignored`: from a seat it has blacklisted, `blacklist`, or one
+under an embargo with it, `closed`), chooses which
 of the rest to spare for (`accepted`), and its robber move then spares
 those (`keep_promises`, `Game.robber_promised`). Once the robber has moved
 and the turn is open to trading, if it spared a promiser it puts the deal's
@@ -63,6 +64,11 @@ the one promise worth most, and offers back the card it minds least.
 A seat may answer through a registered `Answerer` in place of its own rule
 (`register_answerer`, `DealParams.answerer`): it says whether the seat
 promises and, once spared, whether it honours the deal.
+
+A seat under a trade embargo with the mover (`Game.embargoes`, either
+way) is out of its deals altogether: it is never asked or counted
+(`closed`), never spared for a promise, and never promises it. A deal is
+paid by an exchange, which the embargo forbids.
 
 A game where no gate asks runs no deal and plays exactly as it would
 without this module.
@@ -97,6 +103,10 @@ DICE_STAY = 5.0
 #: How a mover may decide its deals (`DealParams.mover`).
 MOVERS = ("plain", "value")
 
+#: The answerer `DealParams.answerer` names to answer off the seat's own
+#: value head (`ValueDealer.promise`) rather than a registered `Answerer`.
+VALUE_ANSWERER = "value"
+
 
 @dataclass(frozen=True)
 class DealParams:
@@ -113,7 +123,8 @@ class DealParams:
     #: `default_return`) or `"value"` (`ValueDealer`, off the seat's value head).
     mover: str = "plain"
     #: A registered `Answerer` that promises and pays for this seat in place
-    #: of its own rule (`register_answerer`); `None`, its own rule.
+    #: of its own rule (`register_answerer`), or `"value"`, its own value head
+    #: (`ValueDealer.promise`); `None`, its own rule.
     answerer: str | None = None
     #: The mover's chance that a spared promiser pays, which `ValueDealer`
     #: weighs each payment by where it has no promise model.
@@ -228,10 +239,14 @@ class Dealing:
         object.__setattr__(self, "bot", bot)
         object.__setattr__(self, "deal_params", params)
         object.__setattr__(self, "deal_seed", seed)
-        answerer = None if params.answerer is None else answerer_for(params.answerer, random.Random(seed))
-        object.__setattr__(self, "deal_answerer", answerer)
         dealer = (ValueDealer(value_net(bot), params, random.Random(seed + 1), gate=bot)
                   if params.ask and params.mover == "value" else None)
+        if params.answerer == VALUE_ANSWERER:
+            answerer = dealer if dealer is not None else ValueDealer(
+                value_net(bot), params, random.Random(seed + 1), gate=bot)
+        else:
+            answerer = None if params.answerer is None else answerer_for(params.answerer, random.Random(seed))
+        object.__setattr__(self, "deal_answerer", answerer)
         object.__setattr__(self, "deal_dealer", dealer)
 
     def choose(self, game: "Game"):
@@ -326,7 +341,7 @@ class Deal:
     """One ask and what came of it, as the game keeps it (`Game.deal_log`).
     `promised` every seat that promised, in order; of those, `void` the ones
     the mover's own view said could not hold the card and `ignored` the ones
-    it had blacklisted, which it did not count; `accepted` the counted
+    it had blacklisted or was under an embargo with, which it did not count; `accepted` the counted
     promises it chose to spare for. Once the robber has moved: `hex` and
     `victim`, where it went and whom it robbed; `kept` and `broken`, the
     counted promisers it spared and did not. Once the turn opens to trading:
@@ -589,9 +604,11 @@ def answer(game: "Game", seat: int, gate: object, params: DealParams | None, ask
     seat's registered answerer where it has one (`Dealing.deal_answerer`);
     otherwise never as a seat the mover is not likeliest to hit
     (`targeted`), and then the gate's own `deal_answer` where it has one,
-    else `default_answer`."""
+    else `default_answer`. Never under a trade embargo with the mover
+    (`closed`): the deal could not be paid."""
     if (params is None or not params.answer or ask.kind not in params.kinds or seat == ask.mover
-            or game.state(seat).state.hands[seat][ask.resource] <= 0):
+            or game.state(seat).state.hands[seat][ask.resource] <= 0
+            or seat in closed(game, ask.mover)):
         return False
     answerer = getattr(gate, "deal_answerer", None)
     if answerer is not None:
@@ -626,7 +643,8 @@ def default_ask(game: "Game", seat: int, gate: object, params: DealParams) -> As
         received.append(tuple(bundle))
     # Priced against each seat that might pay, the best of them counting:
     # the mover takes whichever promises it likes.
-    others = [s for s in range(game.num_players) if s != seat and s not in game.locked]
+    shut = closed(game, seat)
+    others = [s for s in range(game.num_players) if s != seat and s not in game.locked and s not in shut]
     if not others:
         return None
     gains = valued_many(gate, view, received * len(others), [s for s in others for _ in received])
@@ -681,6 +699,14 @@ def blacklist(game: "Game", mover: int) -> frozenset[int]:
             out.update(d.void)
             out.update(d.rejected)
     return frozenset(out)
+
+
+def closed(game: "Game", seat: int) -> frozenset[int]:
+    """The seats under a trade embargo with `seat` now, either way
+    (`Game.embargoes`). A deal is paid by an exchange the embargo forbids, so
+    a mover neither asks these seats nor counts their promises, and they
+    promise it nothing."""
+    return frozenset(b if a == seat else a for a, b in game.embargoes if seat in (a, b) and a != b)
 
 
 # --- the mover's side, off a value head -------------------------------------
@@ -801,7 +827,8 @@ class ValueDealer:
       the seats that promise, each seat by the chance it holds the card and,
       under a promise model, promises it. It asks for the card worth most,
       where that beats what an ask costs (`DealParams.ask_cost`). Blacklisted
-      seats (`blacklist`) are not considered.
+      seats (`blacklist`) and seats under an embargo with it (`closed`) are
+      not considered.
     * **Spare** (`accept`): of the counted promises, the one whose deal is
       worth most, where that beats the pick; one, since a deal is one
       exchange, priced as the ask priced it. A promiser it had not considered
@@ -809,6 +836,18 @@ class ValueDealer:
     * **Offer back** (`give_back`): of the cards its own trading would take
       the exchange for from a spared promiser, the one it minds least,
       priced after the steal; none such, no offer.
+
+    * **Answer** (`promise`, as the seat's `Answerer` under
+      `DealParams(answerer="value")`): asked by another mover, the seat
+      promises where its win chance promising beats its win chance silent.
+      Either way the mover's robber move is read off the params' robber
+      model (`model`), the promises already made taken as kept, and each
+      move is valued card by card of its steal, as above. Promising, the
+      model reads the seat as promised too, and where the move spares it,
+      the exchange is priced after the move, the asked card for each card
+      the mover may give back, by the chance the mover holds it (the card
+      for nothing where it holds none). Only the seat the mover is likeliest
+      to hit answers (`targeted`). A spared promiser pays (`pays`).
 
     One plan per robber move (keyed by the turn, the seat and where the
     robber stands), kept from the ask to the choice of whom to spare."""
@@ -862,7 +901,7 @@ class ValueDealer:
         from .actions import ActionType, legal_actions
 
         view = game.state(seat)
-        banned = blacklist(game, seat)
+        banned = blacklist(game, seat) | closed(game, seat)
         others = [s for s in range(game.num_players) if s != seat and s not in game.locked and s not in banned]
         self.net.seat_at(game)
         wants = self._menu(game, seat, others)
@@ -1030,7 +1069,7 @@ class ValueDealer:
         priced in one batch (`_gains_across`)."""
         out: dict[tuple[int, int], float] = {}
         asks, where = [], []
-        banned = blacklist(game, seat)
+        banned = blacklist(game, seat) | closed(game, seat)
         for s, r in pairs:
             i = plan.spare_at.get(s)
             if i is None or s in banned:
@@ -1108,6 +1147,82 @@ class ValueDealer:
                 return y
         return None
 
+    def promise(self, game: "Game", seat: int, ask: "Ask", promised: Sequence[int]) -> bool:
+        if not targeted(game, seat, ask, promised, robber_model(self.params.model)):
+            return False
+        return self.promise_worth(game, seat, ask, promised) > 0.0
+
+    def pays(self, game: "Game", seat: int, deal: "Deal") -> bool:
+        return True
+
+    def promise_worth(self, game: "Game", seat: int, ask: "Ask", promised: Sequence[int]) -> float:
+        """What promising `ask` is worth to `seat` over staying silent, in its win chance."""
+        from .actions import ActionType, _robber_targets, victim_of
+        from .game import Phase, imagine
+
+        view = game.state(seat)
+        state = view.state
+        mover, r, kind = ask.mover, ask.resource, ask.kind
+        if game.current_player != mover:
+            return 0.0
+        # The mover's robber moves read off the board, whatever the phase the ask
+        # comes in (before the roll, or while seats discard), and valued from a
+        # copy standing at the move: the mover's own cards are never read.
+        self.net.seat_at(game)
+        at = imagine(game, self.rng, randomize_deck=False, seat=seat)
+        at.phase = Phase.ROBBER
+        options = _robber_targets(at, ActionType.MOVE_ROBBER)
+        if not options:
+            return 0.0
+        plan = _Plan(("answer", game.turns, seat, game._state.robber), {}, options, [], -1,
+                     {}, {}, {}, {}, {}, {}, {}, None)
+        self._beliefs(view, plan, [s for s in range(game.num_players) if s not in game.locked])
+        model = robber_model(self.params.model)
+        allowed = allowed_targets(state, mover, game.robber_allowed)
+        taken = {s: kind for s in promised if s != seat}
+        silent = self._move_chances(game, model, state, mover, allowed, taken, options)
+        sure = self._move_chances(game, model, state, mover, allowed, {**taken, seat: kind}, options)
+        self._value(at, seat, plan, {i for i, p in (*silent.items(), *sure.items()) if p > 0})
+
+        def spares(i: int) -> bool:
+            if kind == NO_BLOCK:
+                return seat not in occupants(state, options[i].a)
+            return victim_of(game, options[i].b) != seat
+
+        backs = {y: plan.held.get((mover, y), 0.0) for y in range(NUM_RESOURCES) if y != r}
+        total = sum(backs.values())
+        bundles = ([(_swap(y, r), p / total) for y, p in backs.items() if p > 0] if total > 0
+                   else [(tuple(-int(k == r) for k in range(NUM_RESOURCES)), 1.0)])
+        spared = [i for i, p in sure.items() if p > 0 and spares(i)]
+        asks = [(g, [b for b, _ in bundles], [mover] * len(bundles)) for i in spared for g, _ in plan.after[i]]
+        gains = iter(self._gains_across(seat, asks))
+        exchange = {}
+        for i in spared:
+            exchange[i] = 0.0
+            for _, p in plan.after[i]:
+                # -1 is the network's "cannot be covered": no payment is made.
+                exchange[i] += p * sum(w * (g if g > -1.0 else 0.0) for (_, w), g in zip(bundles, next(gains)))
+        worth = sum(p * (plan.value[i] + exchange.get(i, 0.0)) for i, p in sure.items())
+        return worth - sum(p * plan.value[i] for i, p in silent.items())
+
+    @staticmethod
+    def _move_chances(game: "Game", model: "RobberModel", state: GameState, mover: int,
+                      allowed: frozenset[int] | None, promised: Mapping[int, str], options) -> dict[int, float]:
+        """The chance of each of `options` under one reading of the mover:
+        its hex's chance, times its victim's chance there."""
+        from .actions import victim_of
+
+        hexes = model.hexes(state, mover, allowed, promised)
+        robbed = {h: model.victims(state, mover, h, promised) for h in hexes}
+        out = {}
+        for i, o in enumerate(options):
+            p = hexes.get(o.a, 0.0)
+            if p > 0 and robbed[o.a]:
+                p *= robbed[o.a].get(victim_of(game, o.b), 0.0)
+            if p > 0:
+                out[i] = p
+        return out
+
 
 def _swap(get: int, give: int) -> tuple[int, ...]:
     """The exchange, signed towards the mover, of one `give` for one `get`."""
@@ -1155,7 +1270,7 @@ def run_deal_event(game: "Game") -> None:
     into `Phase.ROBBER`, and a no-op unless the mover's gate asks. Promises
     the mover does not count are set aside first (`Deal.void`, from a seat
     its view says cannot hold the card; `Deal.ignored`, from a seat it has
-    blacklisted). Its choice is `Game.robber_promised`, which its robber
+    blacklisted or one under an embargo with it). Its choice is `Game.robber_promised`, which its robber
     move's legality then keeps."""
     gates = game.gates
     mover = game.current_player
@@ -1187,7 +1302,7 @@ def run_deal_event(game: "Game") -> None:
 
     view = game.state(mover)
     card = tuple(int(r == ask.resource) for r in range(NUM_RESOURCES))
-    banned = blacklist(game, mover)
+    banned = blacklist(game, mover) | closed(game, mover)
     deal = Deal(game.turns, mover, ask.kind, ask.resource, promised=tuple(promised),
                 void=tuple(s for s in promised if not has_room(view, s, card)),
                 ignored=tuple(s for s in promised if s in banned and has_room(view, s, card)))
@@ -1305,6 +1420,6 @@ __all__ = [
     "register_robber_model", "robber_model", "candidate_hexes", "weights_on", "softmax", "hit_chances",
     "targeted", "promise_value", "default_answer", "answer", "deal_params_of", "Dealing", "Deal", "default_ask",
     "default_accept", "default_return", "keep_promises", "holds", "run_deal_event", "close_deal",
-    "settle_deals", "blacklist", "MOVERS", "deal_seed", "Answerer", "register_answerer", "answerer_for",
+    "settle_deals", "blacklist", "closed", "MOVERS", "deal_seed", "Answerer", "register_answerer", "answerer_for",
     "STEAL_SAMPLES", "value_net", "ValueDealer", "PromiseModel", "register_promise_model", "promise_model",
 ]

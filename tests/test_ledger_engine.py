@@ -88,8 +88,9 @@ def _steal_action(game, thief: int, victim: int):
 
 
 def _ledger_block(obs, players: int = 4) -> np.ndarray:
-    """Each opponent's `known[5]` then `unknown`, seat-relative, own seat excluded."""
-    return obs.globals[global_columns(players)["ledger"]]
+    """Each opponent's expected hand as the perspective's ledger rows give it,
+    seat-relative, own seat excluded."""
+    return obs.globals[global_columns(players)["opponent_hand"]]
 
 
 

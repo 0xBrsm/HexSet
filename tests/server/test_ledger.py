@@ -68,10 +68,10 @@ def test_a_steal_is_identity_independent_in_the_record():
     thief_brick = record_for(world_brick, thief)
     thief_wood = record_for(world_wood, thief)
     assert thief_brick.keys() == thief_wood.keys()
-    # The thief's own ledger row names the card it took; the record carries
-    # it, and `RecordEncoder` drops it for `own_hand`.
+    # The thief's own ledger row and expected hand name the card it took; the
+    # record carries them, and `RecordEncoder` drops them for `own_hand`.
     for record in (thief_brick, thief_wood):
-        for key in ("ledger_known", "ledger_unknown"):
+        for key in ("ledger_known", "ledger_unknown", "expected_hand"):
             record[key] = record[key].copy()
             record[key][thief] = 0
     differing = {

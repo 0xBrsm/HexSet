@@ -11,10 +11,15 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DECK_SIZE
 from hexset.encoding import (
+    AGE_FILL,
+    AGE_SCALE,
     BANK_SCALE,
+    DEV_SCALE,
     HAND_SCALE,
     HEX_FEATURES,
-    NUM_BUILDINGS,
+    PLAYABLE_KINDS,
+    POINTS_SCALE,
+    RULE_BLOCKS,
     TURN_SCALE,
     _building_points,
     _seat,
@@ -27,7 +32,8 @@ from hexset.encoding import (
     to_frame,
     vertex_features,
 )
-from hexset.game import Phase, is_over, observe, start
+from hexset.game import ROLL_ODDS, Phase, is_over, observe, roll_odds, start
+from hexset.rules import DUEL_VARIANT, DUEL_VARIANT_GAME
 from hexset.play import step_randomly
 from hexset.state import NO_OWNER, Building
 from hexset.victory import building_points, public_victory_points
@@ -117,11 +123,22 @@ def test_shapes_match_the_declared_widths(players):
 
 
 def test_everything_is_finite_and_bounded():
-    obs = encode(a_game())
-    for array in arrays(obs):
-        assert np.isfinite(array).all()
-        assert array.min() >= 0.0
-        assert array.max() <= 1.0
+    """Non-negative; the one-hots and the closeness reads in [0, 1]. Counts and ages are not capped: a hand of 12
+    reads 1.2, as it does."""
+    players = 4
+    for seed in range(6):
+        obs = encode(a_game(seed=seed, steps=400))
+        for array in arrays(obs):
+            assert np.isfinite(array).all()
+        buildings = obs.vertices[:, :players]
+        assert buildings.min() >= 0.0 and buildings.max() <= 2.0
+        assert obs.vertices[:, players:].min() >= 0.0 and obs.vertices[:, players:].max() <= 1.0
+        for array in (obs.hexes, obs.edges):
+            assert array.min() >= 0.0 and array.max() <= 1.0
+        columns = global_columns(players)
+        assert obs.globals.min() >= 0.0
+        for name in ("seat_longest_road", "seat_largest_army", "opponent_to_move", "dev_odds", "phase"):
+            assert obs.globals[columns[name]].max() <= 1.0
 
 
 def test_observations_on_one_board_do_not_share_memory():
@@ -143,6 +160,7 @@ def test_the_robber_is_marked_on_exactly_one_hex():
     game = a_game()
     obs = encode(game)
     flags = obs.hexes[:, HEX_FEATURES - 1]
+    assert HEX_FEATURES == 7
     assert flags.sum() == 1.0
     assert flags[game._state.robber] == 1.0
 
@@ -188,13 +206,11 @@ def test_opponent_development_cards_show_only_as_a_count():
 def _canonical_vertex_block(state, perspective):
     """`encode` reaches the same rows by table lookup on a combined key."""
     players = state.num_players
-    width = NUM_BUILDINGS + players + 1
-    out = np.zeros((state.board.topology.num_vertices, width), dtype=np.float32)
+    out = np.zeros((state.board.topology.num_vertices, players), dtype=np.float32)
     for v in range(out.shape[0]):
-        out[v, int(state.vertex_building[v])] = 1.0
         owner = state.vertex_owner[v]
-        slot = players if owner == NO_OWNER else _seat(owner, perspective, players)
-        out[v, NUM_BUILDINGS + slot] = 1.0
+        if owner != NO_OWNER:
+            out[v, _seat(owner, perspective, players)] = float(state.vertex_building[v])
     return out
 
 
@@ -205,8 +221,8 @@ def _canonical_edges(state, perspective):
     )
     for e in range(out.shape[0]):
         owner = state.edge_owner[e]
-        slot = players if owner == NO_OWNER else _seat(owner, perspective, players)
-        out[e, slot] = 1.0
+        if owner != NO_OWNER:
+            out[e, _seat(owner, perspective, players)] = 1.0
     return out
 
 
@@ -214,7 +230,7 @@ def _check_blocks(game, players):
     state = game._state
     for perspective in range(players):
         obs = encode(game, perspective=perspective)
-        block = obs.vertices[:, : NUM_BUILDINGS + players + 1]
+        block = obs.vertices[:, :players]
         assert np.array_equal(block, _canonical_vertex_block(state, perspective))
         assert np.array_equal(obs.edges, _canonical_edges(state, perspective))
 
@@ -281,37 +297,30 @@ def _set_hand(game, player: int, resource, n: int) -> None:
     game.ledger.seats[player].known[resource] = n
 
 
-def _ledger_width(players: int = 4) -> int:
-    return (players - 1) * (NUM_RESOURCES + 1)
+def _opponent_hand(obs, players: int = 4):
+    """Each opponent's expected count of each resource, seat-relative."""
+    block = obs.globals[global_columns(players)["opponent_hand"]]
+    return block.reshape(players - 1, NUM_RESOURCES) * HAND_SCALE
 
 
-
-
-def _ledger_tail(obs, players: int = 4):
-    """Each opponent's known[5] + unknown, seat-relative, own seat excluded."""
-    tail = obs.globals[global_columns(players)["ledger"]]
-    assert len(tail) == _ledger_width(players)
-    known = [tail[i * 6 : i * 6 + 5] for i in range(players - 1)]
-    unknown = [tail[i * 6 + 5] for i in range(players - 1)]
-    return known, unknown
-
-
-def test_global_features_counts_the_ledger_block():
+def test_the_widths_are_pinned():
     """Pinned so a layout change has to own the new width."""
-    assert global_features(4) == 75
-    assert global_features(4) - global_features(3) == (
-        1 + 1 + 1 + 1 + 2 + (NUM_RESOURCES + 1) + 1 + 1
-    )
+    assert global_features(4) == 90
+    assert HEX_FEATURES == 7
+    assert vertex_features(4) == 14
+    assert edge_features(4) == 4
+    # Per opponent: a hand, a card count, three ages; per seat: points,
+    # Longest Road and Largest Army; per opponent, its turn.
+    assert global_features(4) - global_features(3) == (NUM_RESOURCES + 1 + 3) + 3 + 1
 
 
-def test_the_roads_and_mover_blocks_come_last():
-    """Appended after the ledger, so every older column keeps its offset."""
-    players = 4
-    columns = global_columns(players)
-    assert columns["ledger"].stop == 67
-    assert columns["roads_to_take"] == slice(67, 67 + players)
-    assert columns["to_move"] == slice(67 + players, 67 + 2 * players)
-    assert columns["to_move"].stop == global_features(players)
+def test_the_blocks_are_in_contract_order():
+    assert list(global_columns(4)) == [
+        "own_hand", "own_dev", "own_dev_playable", "opponent_hand",
+        "opponent_dev_count", "opponent_dev_ages", "seat_points", "seat_longest_road", "seat_largest_army",
+        "opponent_to_move", "bank", "deck", "dev_odds", "phase",
+        "free_roads", "turn", "rules", "roll_odds",
+    ]
 
 
 def _roads_position(seed: int = 5):
@@ -327,9 +336,9 @@ def _roads_position(seed: int = 5):
     return game
 
 
-def test_roads_to_take_and_the_mover_read_seat_relative():
+def test_longest_road_and_the_mover_read_seat_relative():
     from hexset.game import to_move
-    from hexset.roads import ROADS_TO_TAKE_CAP, roads_to_take_all
+    from hexset.roads import roads_to_take_all
 
     players = 4
     game = _roads_position()
@@ -342,14 +351,15 @@ def test_roads_to_take_and_the_mover_read_seat_relative():
     for perspective in range(players):
         obs = encode(game, perspective)
         seats = to_frame(range(players), perspective)
-        roads = obs.globals[columns["roads_to_take"]]
-        assert list(roads) == pytest.approx([counts[s] / ROADS_TO_TAKE_CAP for s in seats])
-        assert roads[_seat(holder, perspective, players)] == 0.0
-        assert all(0.0 <= r <= 1.0 for r in roads)
-        moving = obs.globals[columns["to_move"]]
-        assert moving.sum() == 1.0
-        assert moving[_seat(mover, perspective, players)] == 1.0
-        assert (moving[0] == 1.0) == (perspective == mover)
+        roads = obs.globals[columns["seat_longest_road"]]
+        assert list(roads) == pytest.approx([1.0 / (1.0 + counts[s]) for s in seats])
+        assert roads[_seat(holder, perspective, players)] == 1.0
+        assert all(0.2 <= r <= 1.0 for r in roads)
+        moving = obs.globals[columns["opponent_to_move"]]
+        slot = _seat(mover, perspective, players)
+        assert moving.sum() == (0.0 if slot == 0 else 1.0)
+        if slot:
+            assert moving[slot - 1] == 1.0
 
     # The batched path, from every seat, byte for byte.
     batch = encode_batch([game] * players, list(range(players)))
@@ -363,8 +373,8 @@ def test_the_mover_block_follows_a_discard_not_the_turn():
     game.current_player = 0
     game.discard_quota = [0, 0, 4, 0]
     game._state.hands[2] = [0, 8, 0, 0, 0]
-    moving = encode(game, 1).globals[global_columns(4)["to_move"]]
-    assert list(moving) == [0.0, 1.0, 0.0, 0.0]  # seat 2, one after seat 1
+    moving = encode(game, 1).globals[global_columns(4)["opponent_to_move"]]
+    assert list(moving) == [1.0, 0.0, 0.0]  # seat 2, one after seat 1
 
 
 def test_a_steal_from_a_certified_one_resource_hand_is_typed_for_the_table():
@@ -377,6 +387,7 @@ def test_a_steal_from_a_certified_one_resource_hand_is_typed_for_the_table():
     game.phase = Phase.ROBBER
     thief, victim, bystander = 0, 1, 2
     game.current_player = thief
+    game._state.hands[thief] = [0, 0, 0, 0, 0]
     game.ledger.seats[thief] = SeatLedger()
     game.ledger.seats[victim] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=0)
     game._state.hands[victim] = [1, 0, 0, 0, 0]
@@ -393,16 +404,215 @@ def test_a_steal_from_a_certified_one_resource_hand_is_typed_for_the_table():
 
     assert game.ledger.seats[thief].unknown == 0
     assert game.ledger.seats[thief].known == [1, 0, 0, 0, 0]
-    assert game.ledger.seats[victim].known == [0, 0, 0, 0, 0]
-    assert game.ledger.seats[victim].unknown == 0
 
-    known, unknown = _ledger_tail(encode(game, bystander))
-    thief_slot = _seat(thief, bystander, 4) - 1
-    victim_slot = _seat(victim, bystander, 4) - 1
-    assert unknown[thief_slot] == pytest.approx(0.0)
-    assert known[thief_slot][0] == pytest.approx(0.1)
-    assert not known[victim_slot].any()
-    assert unknown[victim_slot] == pytest.approx(0.0)
+    hands = _opponent_hand(encode(game, bystander))
+    assert hands[_seat(thief, bystander, 4) - 1] == pytest.approx([1, 0, 0, 0, 0])
+    assert hands[_seat(victim, bystander, 4) - 1] == pytest.approx([0, 0, 0, 0, 0])
+
+
+def _brute_expected(known, hidden, room, pool):
+    """Every split of `hidden` cards within `room`, weighed by its
+    hypergeometric chance from `pool`."""
+    from itertools import product
+    from math import comb
+
+    total, sums = 0, [0] * NUM_RESOURCES
+    for split in product(*(range(r + 1) for r in room)):
+        if sum(split) != hidden:
+            continue
+        w = 1
+        for n, p in zip(split, pool):
+            w *= comb(p, n)
+        total += w
+        sums = [a + w * n for a, n in zip(sums, split)]
+    return [k + a / total for k, a in zip(known, sums)]
+
+
+def test_opponent_hands_are_the_exact_expected_counts_within_the_bounds():
+    from hexset.view import View
+
+    for seed in range(40):
+        game = a_game(seed=seed, steps=300)
+        if is_over(game):
+            continue
+        for perspective in range(4):
+            view = View.from_game(game, perspective)
+            hands = _opponent_hand(encode(game, perspective))
+            for i, seat in enumerate(to_frame(range(4), perspective)[1:]):
+                expected = view.expected_counts(seat)
+                assert hands[i] == pytest.approx(expected, abs=1e-5)
+                assert sum(expected) == pytest.approx(view.sizes[seat])
+                if view.unknown[seat]:
+                    assert expected == pytest.approx(_brute_expected(
+                        view.known[seat], view.unknown[seat],
+                        [min(r, p) for r, p in zip(view.room[seat], view.pool)], view.pool))
+
+
+def test_a_binding_bound_is_enumerated_not_spread():
+    """Two hidden cards, room for at most one wood: the closed form would put
+    more than one there."""
+    from hexset.view import View
+
+    game = a_game(steps=0)
+    view = View.from_game(game, 0)
+    view.known[1] = [0, 0, 0, 0, 0]
+    view.unknown[1] = 2
+    view.room[1] = [1, 2, 2, 2, 2]
+    view.bounded[1] = True
+    view.pool = [12, 1, 1, 1, 1]
+    view.pool_size = 16
+    got = view.expected_counts(1)
+    assert got == pytest.approx(_brute_expected([0] * 5, 2, [1, 1, 1, 1, 1], view.pool))
+    assert got[0] <= 1.0
+    assert sum(got) == pytest.approx(2.0)
+
+
+def _settled_position(seed: int = 3):
+    for attempt in range(40):
+        game = a_game(seed=seed + attempt, steps=200)
+        if not is_over(game) and game.phase is not Phase.SETUP_SETTLEMENT:
+            return game
+    raise AssertionError("no position past setup")
+
+
+def test_reach_is_zero_distance_on_the_network_and_grows_one_road_a_step():
+    from hexset.roads import reach_all
+
+    game = _settled_position()
+    state = game._state
+    topology = state.board.topology
+    reach = reach_all(state)
+    for seat in range(4):
+        for v, owner in enumerate(state.vertex_owner):
+            if owner == seat:
+                assert reach[seat][v] == 0
+        for v, d in enumerate(reach[seat]):
+            if d > 0:
+                # One road from a vertex one step nearer, through a junction
+                # no opponent building blocks, on an edge holding no road.
+                assert any(
+                    reach[seat][w] == d - 1 and state.vertex_owner[w] in (NO_OWNER, seat)
+                    and state.edge_owner[e] == NO_OWNER
+                    for e in topology.vertex_edges[v]
+                    for w in topology.edges[e] if w != v
+                )
+    obs = encode(game, 1)
+    block = obs.vertices[:, 4 + 1 + NUM_RESOURCES:]
+    for i, seat in enumerate(to_frame(range(4), 1)):
+        want = [0.0 if d < 0 else 1.0 / (1.0 + d) for d in reach[seat]]
+        assert list(block[:, i]) == pytest.approx(want)
+
+
+def test_a_seat_without_a_building_reaches_nothing():
+    from hexset.roads import reach_all
+
+    game = a_game(steps=0)
+    assert all(d == -1 for row in reach_all(game._state) for d in row)
+    assert not encode(game).vertices[:, 4 + 1 + NUM_RESOURCES:].any()
+
+
+def test_reach_stops_at_an_opponent_building():
+    from hexset.roads import reach_all
+
+    game = _settled_position()
+    state = game._state
+    topology = state.board.topology
+    seat = 0
+    mine = next(v for v, o in enumerate(state.vertex_owner) if o == seat)
+    # An opponent settles every neighbour: the seat reaches them, and no
+    # further from here.
+    for w in topology.vertex_neighbors[mine]:
+        if state.vertex_owner[w] == NO_OWNER:
+            state.vertex_owner[w] = 1
+            state.vertex_building[w] = Building.SETTLEMENT
+    reach = reach_all(state)[seat]
+    for w in topology.vertex_neighbors[mine]:
+        if state.vertex_owner[w] == 1:
+            assert reach[w] in (0, 1)
+
+
+def test_largest_army_counts_down_and_reads_zero_out_of_reach():
+    from hexset.cards import DevCard
+
+    players, perspective = 4, 0
+    game = _main_phase_game()
+    state = game._state
+    state.knights_played = [1, 3, 0, 0]
+    state.largest_army_holder = 1
+    state.dev_cards[perspective][DevCard.KNIGHT] = 2
+    columns = global_columns(players)
+    army = encode(game, perspective).globals[columns["seat_largest_army"]]
+    assert army[_seat(1, perspective, players)] == 1.0
+    # Seat 0 must play 3 more to beat 3: it holds 2 and has not seen the rest.
+    assert army[0] == pytest.approx(1.0 / 4.0)
+    assert army[_seat(2, perspective, players)] == pytest.approx(1.0 / 5.0)
+    # Every unseen knight accounted for: seat 2 needs 4, more than are left.
+    from hexset.cards import DECK_COMPOSITION
+    state.dev_cards_played[DevCard.KNIGHT] = 0
+    state.knights_played = [1, 3, 0, 0]
+    total = DECK_COMPOSITION[DevCard.KNIGHT]
+    state.dev_cards[perspective][DevCard.KNIGHT] = total - 4 - 3
+    army = encode(game, perspective).globals[columns["seat_largest_army"]]
+    assert army[_seat(2, perspective, players)] == 0.0
+    assert army[_seat(3, perspective, players)] == 0.0
+
+
+def test_only_matured_cards_are_playable_and_none_after_a_play():
+    from hexset.cards import DevCard
+
+    game = _main_phase_game()
+    state = game._state
+    me = 0
+    state.dev_cards[me] = [1, 1, 0, 1, 0]
+    state.new_dev_cards[me] = [1, 0, 1, 0, 0]
+    columns = global_columns(4)
+    obs = encode(game, me)
+    assert list(obs.globals[columns["own_dev"]]) == pytest.approx([2 / DEV_SCALE, 1 / DEV_SCALE, 1 / DEV_SCALE, 1 / DEV_SCALE, 0])
+    assert list(obs.globals[columns["own_dev_playable"]]) == pytest.approx(
+        [state.dev_cards[me][k] / DEV_SCALE for k in PLAYABLE_KINDS])
+    assert PLAYABLE_KINDS[0] == DevCard.KNIGHT
+    game.dev_card_played = True
+    assert not encode(game, me).globals[columns["own_dev_playable"]].any()
+
+
+def test_card_ages_read_oldest_first_and_fill_where_unknown():
+    game = _main_phase_game()
+    state = game._state
+    perspective, seat = 0, 2
+    state.dev_cards[seat] = [2, 0, 1, 0, 1]
+    state.new_dev_cards[seat] = [0, 0, 0, 0, 0]
+    state.dev_ages[seat] = [1, 9, 4, 2]
+    columns = global_columns(4)
+    slot = _seat(seat, perspective, 4) - 1
+    ages = encode(game, perspective).globals[columns["opponent_dev_ages"]].reshape(3, 3)[slot]
+    assert list(ages) == pytest.approx([10 / AGE_SCALE, 5 / AGE_SCALE, 3 / AGE_SCALE])
+    state.dev_cards[seat] = [1, 0, 0, 0, 1]
+    state.dev_ages[seat] = None
+    ages = encode(game, perspective).globals[columns["opponent_dev_ages"]].reshape(3, 3)[slot]
+    assert list(ages) == pytest.approx([(AGE_FILL[0] + 1) / AGE_SCALE, (AGE_FILL[1] + 1) / AGE_SCALE, 0.0])
+
+
+def test_nothing_of_trading_is_read():
+    """Shown wants and spares stay with the trade gate: they move nothing."""
+    game = _main_phase_game()
+    before = encode(game, 0)
+    rows = game.ledger.seats
+    rows[3].want = [0, 2, 0, 0, 0]
+    rows[3].waste = [0, 0, 0, 3, 0]
+    after = encode(game, 0)
+    for lhs, rhs in zip(arrays(before), arrays(after)):
+        assert np.array_equal(lhs, rhs)
+
+
+def test_dev_odds_are_the_unseen_cards_by_kind():
+    from hexset.view import View
+
+    game = a_game(steps=300)
+    for perspective in range(4):
+        odds = encode(game, perspective).globals[global_columns(4)["dev_odds"]]
+        unseen = View.from_game(game, perspective).unseen_dev_cards()
+        assert odds.sum() == pytest.approx(1.0)
+        assert list(odds) == pytest.approx([n / sum(unseen) for n in unseen])
 
 
 #
@@ -469,88 +679,52 @@ def test_global_columns_read_the_value_the_encoder_wrote():
         game._state.new_dev_cards[player] = [0, 0, 1, 0, 0]
     game._state.knights_played = [0, 2, 1, 3]
     game._state.longest_road_holder = 2
-    game._state.largest_army_holder = 0
+    game._state.largest_army_holder = 3
     game.phase = Phase.MAIN
     game.free_roads = 1
     game._state.deck = game._state.deck[:7]
     game.turns = 42
-    game.ledger.seats[0] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=0)
-    game.ledger.seats[2] = SeatLedger(known=[0, 2, 0, 0, 0], unknown=1)
-    game.ledger.seats[3] = SeatLedger(known=[0, 0, 0, 3, 0], unknown=0)
+    for seat in (0, 2, 3):
+        game.ledger.seats[seat] = SeatLedger(known=list(game._state.hands[seat]), unknown=0)
 
     obs = encode(game, perspective)
     columns = global_columns(players)
     seats = to_frame(range(players), perspective)
 
-    own_hand = obs.globals[columns["own_hand"]]
-    assert own_hand == pytest.approx(
+    assert obs.globals[columns["own_hand"]] == pytest.approx(
         np.array(game._state.hands[perspective]) / HAND_SCALE
     )
-
-    opponent_hand_sizes = obs.globals[columns["opponent_hand_sizes"]]
-    for i, seat in enumerate(seats[1:]):
-        assert opponent_hand_sizes[i] == pytest.approx(
-            sum(game._state.hands[seat]) / HAND_SCALE
-        )
-
-    assert obs.globals[columns["bank"]] == pytest.approx(
-        np.array(game._state.bank) / BANK_SCALE
-    )
-
     own_dev = [
         h + f
         for h, f in zip(
             game._state.dev_cards[perspective], game._state.new_dev_cards[perspective]
         )
     ]
-    assert obs.globals[columns["own_dev_cards"]] == pytest.approx(
-        np.array(own_dev) / 5.0
-    )
-
-    opponent_dev_counts = obs.globals[columns["opponent_dev_card_counts"]]
+    assert obs.globals[columns["own_dev"]] == pytest.approx(np.array(own_dev) / DEV_SCALE)
+    hands = _opponent_hand(obs)
     for i, seat in enumerate(seats[1:]):
-        expected = sum(game._state.dev_cards[seat]) + sum(
-            game._state.new_dev_cards[seat]
-        )
-        assert opponent_dev_counts[i] == pytest.approx(expected / 5.0)
+        assert hands[i] == pytest.approx(game._state.hands[seat])
 
-    knights = obs.globals[columns["knights_played"]]
+    counts = obs.globals[columns["opponent_dev_count"]]
+    for i, seat in enumerate(seats[1:]):
+        expected = sum(game._state.dev_cards[seat]) + sum(game._state.new_dev_cards[seat])
+        assert counts[i] == pytest.approx(expected / DEV_SCALE)
+
+    points = obs.globals[columns["seat_points"]]
     for i, seat in enumerate(seats):
-        assert knights[i] == pytest.approx(game._state.knights_played[seat] / 5.0)
+        assert points[i] == pytest.approx(public_victory_points(game._state, seat) / 10.0)
 
-    vp = obs.globals[columns["victory_points"]]
-    for i, seat in enumerate(seats):
-        assert vp[i] == pytest.approx(public_victory_points(game._state, seat) / 10.0)
+    assert obs.globals[columns["seat_longest_road"]][_seat(2, perspective, players)] == 1.0
+    assert obs.globals[columns["seat_largest_army"]][_seat(3, perspective, players)] == 1.0
 
-    longest = obs.globals[columns["longest_road_holder"]]
-    assert longest[_seat(game._state.longest_road_holder, perspective, players)] == 1.0
-    assert longest.sum() == 1.0
-
-    largest = obs.globals[columns["largest_army_holder"]]
-    assert largest[_seat(game._state.largest_army_holder, perspective, players)] == 1.0
-    assert largest.sum() == 1.0
-
+    assert obs.globals[columns["bank"]] == pytest.approx(np.array(game._state.bank) / BANK_SCALE)
     phase_block = obs.globals[columns["phase"]]
+    assert len(phase_block) == len(Phase) - 1
     assert phase_block[int(game.phase)] == 1.0
     assert phase_block.sum() == 1.0
-
-    assert obs.globals[columns["free_roads"]][0] == pytest.approx(
-        game.free_roads / 2.0
-    )
-    assert obs.globals[columns["deck_size"]][0] == pytest.approx(
-        len(game._state.deck) / DECK_SIZE
-    )
-    assert obs.globals[columns["turn"]][0] == pytest.approx(
-        min(game.turns / TURN_SCALE, 1.0)
-    )
-
-    ledger_block = obs.globals[columns["ledger"]]
-    for i, seat in enumerate(seats[1:]):
-        entry = game.ledger.seats[seat]
-        known = ledger_block[i * 6 : i * 6 + 5]
-        unknown = ledger_block[i * 6 + 5]
-        assert known == pytest.approx(np.array(entry.known) / HAND_SCALE)
-        assert unknown == pytest.approx(entry.unknown / HAND_SCALE)
+    assert obs.globals[columns["free_roads"]][0] == pytest.approx(game.free_roads / 2.0)
+    assert obs.globals[columns["deck"]][0] == pytest.approx(len(game._state.deck) / DECK_SIZE)
+    assert obs.globals[columns["turn"]][0] == pytest.approx(min(game.turns / TURN_SCALE, 1.0))
 
 
 def test_default_encoding_uses_discarding_seat_instead_of_turn_owner():
@@ -564,3 +738,50 @@ def test_default_encoding_uses_discarding_seat_instead_of_turn_owner():
     for actual, expected in zip(arrays(default), arrays(discarder), strict=True):
         np.testing.assert_array_equal(actual, expected)
     assert not np.array_equal(default.globals, owner.globals)
+
+
+def a_duel(seed: int = 0, steps: int = 400):
+    rng = random.Random(seed)
+    game = start(random_base_board(rng), 2, rng, game_type=DUEL_VARIANT_GAME)
+    for _ in range(steps):
+        if is_over(game):
+            break
+        step_randomly(game, rng)
+    return game
+
+
+def test_contract_8_1_appends_its_blocks_after_every_contract_8_column():
+    columns = global_columns(4)
+    assert list(columns)[-len(RULE_BLOCKS):] == list(RULE_BLOCKS)
+    assert columns[RULE_BLOCKS[-1]].stop == global_features(4)
+
+
+def test_the_rules_block_states_the_tables_rules():
+    standard = encode(a_game(steps=0))
+    assert standard.globals[global_columns(4)["rules"]].tolist() == pytest.approx([1.0, 0.7, 0.0, 0.0])
+    duel = encode(a_duel(steps=0))
+    assert duel.globals[global_columns(2)["rules"]].tolist() == pytest.approx(
+        [DUEL_VARIANT.winning_points / POINTS_SCALE, DUEL_VARIANT.discard_limit / HAND_SCALE, 1.0, 1.0]
+    )
+
+
+def test_points_are_read_against_the_points_the_game_is_played_to():
+    for game, players in ((a_game(), 4), (a_duel(), 2)):
+        state = game._state
+        obs = encode(game, 0)
+        expected = [public_victory_points(state, s) / state.rules.winning_points for s in range(players)]
+        assert obs.globals[global_columns(players)["seat_points"]].tolist() == pytest.approx(expected)
+
+
+def test_the_roll_odds_are_the_next_rolls():
+    plain = encode(a_game()).globals[global_columns(4)["roll_odds"]]
+    assert plain.tolist() == pytest.approx([chance for _, chance in ROLL_ODDS])
+    moved = False
+    for seed in range(4):
+        game = a_duel(seed)
+        odds = dict(roll_odds(game))
+        block = encode(game).globals[global_columns(2)["roll_odds"]]
+        assert block.tolist() == pytest.approx([odds.get(total, 0.0) for total in range(2, 13)])
+        assert block.sum() == pytest.approx(1.0)
+        moved |= not np.allclose(block, plain)
+    assert moved, "the balanced dice deck never moved off the plain odds"

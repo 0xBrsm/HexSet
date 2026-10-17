@@ -2,9 +2,13 @@
 
 HexSet loads ONNX checkpoints through `hexset.clients.onnxbot` (the
 `clients` extra). A checkpoint provides metadata, record inputs and named
-outputs. The current contract is `7`. Contract `6` is still loaded: its record
-is contract 7's without `roads_to_take` and `to_move`, and the loader feeds a
-graph only the inputs it declares. A file with no `contract` key or any other
+outputs. The current contract is `8`. Contracts `7` and `6` are still loaded:
+the record keeps every field they read, and the loader feeds a graph only the
+inputs it declares. A contract-8 graph declares the 27 fields it reads, which
+are all but `knights_played`, `longest_road_holder`, `largest_army_holder`,
+`hand_totals`, `ledger_known` and `ledger_unknown`; contract 7 declares the
+first 26 fields below, and contract 6 those less `roads_to_take` and
+`to_move`. A file with no `contract` key or any other
 value is refused at load. Changing the number alone does not make an older
 graph compatible.
 
@@ -18,7 +22,7 @@ ONNX `metadata_props` values are strings.
 
 | Key | Meaning | Default or validation |
 | --- | --- | --- |
-| `contract` | Record and action-space version | Required: `"7"` or `"6"` |
+| `contract` | Record and action-space version | Required: `"8"`, `"7"` or `"6"` |
 | `players` | Seat count the graph was trained for | Required integer; seating it at a game of another count raises, and so does `spawn` given the table's count |
 | `num_hexes` | Board hex count | Required integer |
 | `num_vertices` | Board vertex count | Required integer |
@@ -112,6 +116,13 @@ record does not carry raises when the first inference request is built.
 | `dev_totals` | `(B, players)` | int64 |
 | `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 |
 | `ledger_unknown` | `(B, players)` | int64 |
+| `reach` | `(B, players, num_vertices)` | int64 |
+| `own_matured` | `(B, NUM_DEV_CARDS)` | int64 |
+| `dev_card_played` | `(B,)` | int64 |
+| `expected_hand` | `(B, players, NUM_RESOURCES)` | float32 |
+| `dev_ages` | `(B, players, 3)` | float32 |
+| `knights_needed` | `(B, players)` | int64 |
+| `unseen_dev` | `(B, NUM_DEV_CARDS)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
 
 | Encoding | Values |
@@ -134,6 +145,20 @@ needs to take Longest Road, `0` for the holder and `ROADS_TO_TAKE_CAP` (4) for
 four or more or out of reach. `to_move` is `hexset.game.to_move`, the seat
 whose decision it is, which differs from `perspective` when the record is a
 value read for another seat. Contract 6 has neither field.
+
+Contract 8's fields are in board-seat order where they are per seat, and read
+what the perspective may know. `reach` is `hexset.roads.reach_all`: per seat,
+per vertex, the fewest new roads its network needs to touch the vertex, `-1`
+where it cannot. `own_matured` is the perspective's cards held since before
+this turn, and `dev_card_played` whether it has played one this turn.
+`expected_hand` is each seat's expected count of each resource on the
+perspective's view (`hexset.view.View.expected_counts`), its own row exact.
+`dev_ages` is each seat's longest-held cards' ages in its own turns, oldest
+first, `-1` past the cards it holds (`hexset.encoding.dev_age_rows`).
+`knights_needed` is the knights each seat must still play to take Largest
+Army, `0` for the holder and `-1` where the perspective can prove it out of
+reach (`hexset.encoding.knights_needed_all`). `unseen_dev` is the cards the
+perspective has not seen, by kind (`View.unseen_dev_cards`).
 
 `action_mask` is the perspective seat's own legal actions. A record for a
 seat with no move of its own (a value-only row the trade gate prices for a

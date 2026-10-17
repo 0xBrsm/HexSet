@@ -4,10 +4,10 @@ onnxruntime's half of the model boundary: loading a `.onnx` file, checking what
 it declares, and answering `hexset.clients.policy.Policy` for it. How one is
 *played* lives in `hexset.clients.netbot`; `spawn` is the only entry point the
 package needs. A checkpoint's `contract` metadata names its record shape
-(`hexset.onnx_record.CONTRACT_VERSION`, `7`: the graph masks, normalises,
-argmaxes and un-rotates itself). Contract 6, whose record is contract 7's
-minus `roads_to_take` and `to_move`, is still served; anything else is refused
-at load (`hexset.server.constants.RECORD_CONTRACTS`).
+(`hexset.onnx_record.CONTRACT_VERSION`, `8.1`: the graph masks, normalises,
+argmaxes and un-rotates itself). Contracts 6 and 7, whose records are subsets
+of contract 8's, are still served; anything else is refused at load
+(`hexset.server.constants.RECORD_CONTRACTS`).
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ from hexset.mcts import Search
 from hexset.onnx_record import record_from_game, record_rows
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
-    SearchConfig, gate_config, search_config, trader_config, trader_veto_config, trader_veto_of,
-    trader_veto_pick_config, trader_veto_pick_of,
+    SearchConfig, gate_config, robber_tip_config, search_config, trader_config, trader_veto_config,
+    trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
 
@@ -182,6 +182,8 @@ class Loaded:
     trader_veto: bool = False
     #: Whether that veto picks which taker to deal with (`trader_veto_pick`).
     trader_veto_pick: bool = False
+    #: How far its robber moves lean towards the leader (`robber_tip`).
+    robber_tip: float = 0.0
 
     @property
     def trade_params(self) -> TradeParams:
@@ -268,6 +270,7 @@ def _load_cached(
         trader=trader_config(meta),
         trader_veto=trader_veto_config(meta),
         trader_veto_pick=trader_veto_pick_config(meta),
+        robber_tip=robber_tip_config(meta),
     )
 
 

@@ -236,6 +236,29 @@ def test_a_file_naming_a_trader_nothing_registers_fails_at_spawn_naming_the_fix(
     assert "--runtime" in message
 
 
+def test_a_file_that_asks_for_a_robber_tip_spawns_a_bot_that_tips(checkpoint_v2, tmp_path):
+    """`robber_tip` in the file's metadata reaches the spawned seat, one
+    forward and searched; a file without it plays its robber moves untouched."""
+    onnx = pytest.importorskip("onnx")
+    from hexset.clients.onnxbot import load, spawn
+
+    path, board = checkpoint_v2
+    for searched in (False, True):
+        model = onnx.load(path)
+        for key, value in [("robber_tip", "0.5")] + (
+            [("search", "mcts"), ("simulations", "8")] if searched else []
+        ):
+            entry = model.metadata_props.add()
+            entry.key, entry.value = key, value
+        named = tmp_path / f"tipped-{searched}.onnx"
+        onnx.save(model, str(named))
+        assert load(str(named), board.topology).robber_tip == 0.5
+        seat = spawn(str(named), board, rng=random.Random(0))
+        assert (seat.gate if searched else seat).robber_tip == 0.5
+    assert load(path, board.topology).robber_tip == 0.0
+    assert spawn(path, board, rng=random.Random(0)).robber_tip == 0.0
+
+
 def test_spawn_refuses_a_checkpoint_trained_for_another_player_count(checkpoint_v2):
     from hexset.clients.onnxbot import spawn
 

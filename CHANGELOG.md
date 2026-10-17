@@ -5,6 +5,68 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.15.0
+
+### Breaking
+
+- **Contract 8.1: the observation states the table's rules.** The globals
+  gain two blocks after every contract-8 column (`RULE_BLOCKS`; 90 at four
+  seats): `rules`, the points the game is played to over 10, the discard
+  limit over 10, the friendly robber and the balanced dice; and `roll_odds`,
+  each sum 2..12's chance on the next roll of the seat on turn
+  (`game.roll_odds`: the plain two-dice odds, or the balanced dice deck's).
+  Each seat's points read against the points the game is played to rather
+  than against 10, the same number in a 10-point game. The record carries
+  the same as `winning_points`, `discard_limit`, `friendly_robber`,
+  `balanced_dice` and `roll_odds` (float32); `CONTRACT_VERSION` is `"8.1"`,
+  and a contract-8 graph, which declares none of them, is still served.
+
+- **Contract 8: the observation is re-encoded.** At four seats a hex reads
+  7 features, a vertex 14, an edge 4 and the globals 75 (`HEX_FEATURES`,
+  `vertex_features`, `edge_features`, `global_features`; `global_columns`
+  names every global block). Opponents' cards become what the perspective
+  can know of them: each opponent's expected count of each resource on its
+  own view (`View.expected_counts`, new: `known` plus the hidden cards' exact
+  expected split within the ledger's upper bounds), its card count, its
+  three longest-held cards' ages; the odds
+  of each kind among the cards the perspective has not seen. Awards read as
+  closeness, `1 / (1 + n)`: each seat's roads to take Longest Road and
+  knights to take Largest Army, 1 for the holder, 0 for Largest Army out of
+  reach; the holder one-hots and `knights_played` are gone. Each vertex
+  reads each seat's building there (1 a settlement, 2 a city) and its reach
+  (`roads.reach_all`, new: the fewest new roads its network needs to touch
+  the vertex), and each edge each seat's road; the "nobody" columns, the
+  has-token column, and the desert, sea and gold terrains are gone. Own
+  cards read whole and playable now (`own_dev_playable`, 0 once a card is
+  played this turn), the turn's mover as which opponent is to move, and the
+  phase without `GAME_OVER`. `encode` and `encode_batch` agree byte for
+  byte. A network trained on an earlier contract does not read it.
+
+- **Record contract 8.** `hexset.onnx_record.RECORD_FIELDS` adds `reach`,
+  `own_matured`, `dev_card_played`, `expected_hand` (float32), `dev_ages`
+  (float32), `knights_needed` and `unseen_dev`; `CONTRACT_VERSION` is `"8"`.
+  `record_from_game` and `record_rows` build them alike. Every earlier field
+  stays, so contract-6 and contract-7 graphs still load and play: the loader
+  feeds a graph only the inputs it declares
+  (`hexset.server.constants.RECORD_CONTRACTS` is `{"6", "7", "8"}`). Older
+  and newer contracts are refused by name.
+
+### Added
+
+- **`GET /api` points to the API reference.** The bare route (and `/api/`)
+  answers `{"api": <version>, "docs": <URL of docs/api.md>}` with no token,
+  where it was a 404 (and a 401 with the slash).
+
+- **`robber_tip`: a checkpoint's robber move can lean to the leader.** A
+  network file whose metadata sets `robber_tip` to a fraction in (0, 1]
+  plays, on its own robber moves, the option robbing the seat its value head
+  rates likeliest to win (of the others) in place of the move it picked,
+  when the policy's prior for that option is at least `robber_tip` times the
+  picked move's. A pick that already robs that seat stands. One forward, it
+  reads the prior and value of the forward it already makes; searched, the
+  root's own (`hexset.clients.netbot.tip_robber`). Absent, `0`, or unreadable,
+  robber moves are played as before.
+
 ## 1.14.0
 
 ### Breaking

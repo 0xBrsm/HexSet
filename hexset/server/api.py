@@ -87,6 +87,7 @@ from .wire import action_to_wire, board_layout, round_offer_from_wire, signed_bu
 
 __all__ = [
     "API_VERSION",
+    "API_DOCS",
     "MAX_SEATS",
     "CODE_ALPHABET",
     "CODE_LENGTH",
@@ -117,6 +118,10 @@ __all__ = [
 # leaves it alone. Not `hexset.__version__`, a checkpoint's `contract`, or the
 # per-table `version` an acting route carries.
 API_VERSION = 4
+
+# Where a caller who lands on the bare `GET /api` finds the routes: this API's
+# reference in the published repository.
+API_DOCS = "https://github.com/0xBrsm/HexSet/blob/main/docs/api.md"
 
 
 def your_move(view: dict) -> tuple[str, list[int]]:
@@ -1715,6 +1720,8 @@ class Tables:
         transport says the request came from: it is journalled with every seat
         a request claims, and limits who may deal (`admit`)."""
         path, _, query = path.partition("?")
+        if method == "GET" and path in ("/api", "/api/"):
+            return {"api": API_VERSION, "docs": API_DOCS}
         if method == "GET" and path == "/api/version":
             return {"api": API_VERSION}
         if method == "GET" and path == "/api/models":

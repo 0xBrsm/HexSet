@@ -3,9 +3,18 @@
 
 *Seat-relative*: seats are rotated so the perspective seat -- the player to
 move unless `encode` is told another -- is always seat 0.
-*Information-set correct*: own hand and development cards are exact, opponents
-contribute counts plus what `hexset.ledger` reconstructs from public events
-and the steals the perspective saw.
+*Information-set correct*: own hand and development cards are exact; every
+other seat's hand is its expected count of each resource on the perspective's
+own view (`hexset.view.View`: `hexset.ledger`'s rows from public events and
+the steals the perspective saw), and its development cards a count, their
+ages, and the odds of each kind among the cards the perspective has not seen.
+Nothing of trading or robber deals is read: those stay with the trade gate.
+
+Record contract 8.1: contract 8 with the table's rules and the next roll's
+odds appended to the globals, and each seat's points read against the
+points the game is played to. Closeness reads (`1 / (1 + n)`: a seat's distance to a
+vertex, to Longest Road, to Largest Army) read 1 at the goal and 0 where it is
+out of reach, so 0 is the far end of the scale, never a stand-in.
 """
 
 from __future__ import annotations
@@ -16,15 +25,16 @@ from typing import Sequence
 
 import numpy as np
 
-from .board.board import Board, pips
+from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
 from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
-from .cards import NUM_DEV_CARDS, DECK_SIZE
+from .cards import NUM_DEV_CARDS, DECK_SIZE, DevCard
 from .devcards import dev_count
-from .economy import hand_size
-from .game import Game, Phase, to_move
-from .roads import ROADS_TO_TAKE_CAP, roads_to_take_all
+from .game import Game, Phase, roll_odds, to_move
+from .roads import reach_all, roads_to_take_all
 from .state import NO_OWNER, Building, GameState
+from .victory import MIN_LARGEST_ARMY, award_points
+from .view import View
 
 __all__ = [
     "NUM_TERRAIN",
@@ -34,6 +44,16 @@ __all__ = [
     "BANK_SCALE",
     "HAND_SCALE",
     "TURN_SCALE",
+    "DEV_SCALE",
+    "AGE_SCALE",
+    "AGE_SLOTS",
+    "AGE_FILL",
+    "PLAYABLE_KINDS",
+    "ENCODED_PHASES",
+    "RULE_BLOCKS",
+    "dev_age_rows",
+    "knights_needed_all",
+    "expected_hands",
     "StaticGraph",
     "static_graph",
     "Observation",
@@ -57,6 +77,23 @@ MAX_TOKEN_PIPS = 5
 BANK_SCALE = 19.0
 HAND_SCALE = 10.0
 TURN_SCALE = 200.0
+DEV_SCALE = 5.0
+POINTS_SCALE = 10.0
+FREE_ROADS_SCALE = 2.0
+# A held card's age, in its holder's own turns, reads (age + 1) / AGE_SCALE,
+# so a card bought this turn reads above 0, which means no card.
+AGE_SCALE = 20.0
+# How many of each opponent's longest-held cards are read, oldest first.
+AGE_SLOTS = 3
+# Where a seat's card ages are unknown (a state built without its history),
+# each card it holds reads the typical age of a card in that slot: unknown,
+# not absent.
+AGE_FILL = (5.2, 3.1, 2.2)
+# The kinds a seat can play, in `DevCard` order: every kind but the VP card.
+PLAYABLE_KINDS = (DevCard.KNIGHT, DevCard.ROAD_BUILDING, DevCard.YEAR_OF_PLENTY, DevCard.MONOPOLY)
+# `Phase` one-hot columns: every phase a decision is made in, so all but
+# `GAME_OVER`, the last.
+ENCODED_PHASES = NUM_PHASES - 1
 
 
 @dataclass(frozen=True)
@@ -124,45 +161,65 @@ class Observation:
             "globals": self.globals.shape,
         }
 
-
-HEX_FEATURES = NUM_TERRAIN + 3
+# Terrain columns: the five that produce, in `Resource` order (`Terrain`'s
+# first five); the desert, sea and gold set none.
+HEX_TERRAIN = NUM_RESOURCES
+HEX_FEATURES = HEX_TERRAIN + 2
+_PIPS = HEX_TERRAIN
+_ROBBER = HEX_TERRAIN + 1
 
 
 def vertex_features(players: int) -> int:
-    """Width of a vertex row for `players` seats: the building, the
-    seat-relative owner or nobody, a generic port, and one resource port per
-    resource."""
-    return NUM_BUILDINGS + (players + 1) + 1 + NUM_RESOURCES
+    """Width of a vertex row for `players` seats: per seat its building here
+    (1 a settlement, 2 a city), a generic port and one port per resource, and
+    per seat its reach (`roads.reach_all`, read `1 / (1 + d)`, 0 unreachable)."""
+    return players + 1 + NUM_RESOURCES + players
 
 
 def edge_features(players: int) -> int:
-    """Width of an edge row for `players` seats: the seat-relative road owner
-    or nobody."""
-    return players + 1
+    """Width of an edge row for `players` seats: per seat, 1 for its road here."""
+    return players
+
+
+def _port_base(players: int) -> int:
+    return players
+
+
+def _reach_base(players: int) -> int:
+    return players + 1 + NUM_RESOURCES
 
 
 def _global_blocks(players: int) -> list[tuple[str, int]]:
-    """Every block `_encode_globals` writes, in write order, named and sized."""
+    """Every block `_encode_globals` writes, in write order, named and sized.
+    `own_` is the perspective, `opponent_` each other seat in seat-relative
+    order, `seat_` every seat with the perspective first, no prefix the table."""
+    opponents = players - 1
     return [
         ("own_hand", NUM_RESOURCES),
-        ("opponent_hand_sizes", players - 1),
+        ("own_dev", NUM_DEV_CARDS),
+        ("own_dev_playable", len(PLAYABLE_KINDS)),
+        ("opponent_hand", opponents * NUM_RESOURCES),
+        ("opponent_dev_count", opponents),
+        ("opponent_dev_ages", opponents * AGE_SLOTS),
+        ("seat_points", players),
+        ("seat_longest_road", players),
+        ("seat_largest_army", players),
+        ("opponent_to_move", opponents),
         ("bank", NUM_RESOURCES),
-        ("own_dev_cards", NUM_DEV_CARDS),
-        ("opponent_dev_card_counts", players - 1),
-        ("knights_played", players),
-        ("victory_points", players),
-        ("longest_road_holder", players + 1),
-        ("largest_army_holder", players + 1),
-        ("phase", NUM_PHASES),
+        ("deck", 1),
+        ("dev_odds", NUM_DEV_CARDS),
+        ("phase", ENCODED_PHASES),
         ("free_roads", 1),
-        ("deck_size", 1),
         ("turn", 1),
-        # known[5] + unknown per opponent.
-        ("ledger", (players - 1) * (NUM_RESOURCES + 1)),
-        # `roads.roads_to_take` per seat over `ROADS_TO_TAKE_CAP`.
-        ("roads_to_take", players),
-        ("to_move", players),
+        # Contract 8.1, appended so every contract-8 column keeps its place.
+        ("rules", 4),
+        ("roll_odds", MAX_ROLL - MIN_ROLL + 1),
     ]
+
+
+#: The blocks contract 8.1 appends to contract 8's globals, in order: a
+#: contract-8 net reads exactly the columns before them.
+RULE_BLOCKS: tuple[str, ...] = ("rules", "roll_odds")
 
 
 def global_features(players: int) -> int:
@@ -204,9 +261,70 @@ def from_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
     )
 
 
+# --- rules-level reads, shared with `hexset.onnx_record` ----------------------
+
+
+def dev_age_rows(state: GameState) -> np.ndarray:
+    """`(players, AGE_SLOTS)` float: per seat, the ages of its longest-held
+    development cards (`GameState.dev_ages`, in its own turns), oldest first,
+    `-1` past the cards it holds. A seat whose ages the state was built
+    without reads `AGE_FILL` for each card it holds."""
+    players = state.num_players
+    out = np.full((players, AGE_SLOTS), -1.0, dtype=np.float32)
+    for seat in range(players):
+        ages = state.dev_ages[seat]
+        if ages is None:
+            held = dev_count(state, seat)
+            for k in range(min(held, AGE_SLOTS)):
+                out[seat, k] = AGE_FILL[k]
+            continue
+        for k, age in enumerate(sorted(ages, reverse=True)[:AGE_SLOTS]):
+            out[seat, k] = age
+    return out
+
+
+def knights_needed_all(state: GameState, perspective: int, unseen_knights: int) -> tuple[int, ...]:
+    """Per seat, in seat order, the knights it must still play to take
+    Largest Army: 0 for the holder, otherwise enough to beat the holder and
+    at least `MIN_LARGEST_ARMY`. `-1` where the perspective can prove it out
+    of reach: more than the knights it has not seen (`unseen_knights`), plus,
+    for the perspective itself, its own."""
+    holder = state.largest_army_holder
+    played = state.knights_played
+    target = MIN_LARGEST_ARMY if holder == NO_OWNER else max(MIN_LARGEST_ARMY, played[holder] + 1)
+    out = []
+    for seat in range(state.num_players):
+        if seat == holder:
+            out.append(0)
+            continue
+        need = max(1, target - played[seat])
+        can = unseen_knights
+        if seat == perspective:
+            can += state.dev_cards[seat][DevCard.KNIGHT] + state.new_dev_cards[seat][DevCard.KNIGHT]
+        out.append(need if need <= can else -1)
+    return tuple(out)
+
+
+def expected_hands(view: View) -> np.ndarray:
+    """`(players, NUM_RESOURCES)` float: every seat's expected count of each
+    resource on `view` (`View.expected_counts`), the perspective's own hand
+    exact."""
+    return np.asarray(
+        [view.expected_counts(seat) for seat in range(view.num_players)], dtype=np.float64
+    )
+
+
+def _closeness(n: int) -> float:
+    """`1 / (1 + n)`, and 0 for `-1`, out of reach."""
+    return 0.0 if n < 0 else 1.0 / (1.0 + n)
+
+
+# --- board blocks -------------------------------------------------------------
+
+
 @dataclass(frozen=True)
 class _Template:
-    """The part of an observation no move can change: terrain, tokens, pips, ports."""
+    """The part of an observation no move can change: terrain, pips, ports."""
 
     hexes: np.ndarray
     vertices: np.ndarray
@@ -219,12 +337,12 @@ class _Template:
 def _template_by_value(board: Board, players: int) -> _Template:
     hexes = np.zeros((board.num_hexes, HEX_FEATURES), dtype=np.float32)
     for h in range(board.num_hexes):
-        hexes[h, int(board.terrain[h])] = 1.0
-        token = board.tokens[h]
-        hexes[h, NUM_TERRAIN] = 1.0 if token else 0.0
-        hexes[h, NUM_TERRAIN + 1] = pips(token) / MAX_TOKEN_PIPS
+        terrain = int(board.terrain[h])
+        if terrain < HEX_TERRAIN:
+            hexes[h, terrain] = 1.0
+        hexes[h, _PIPS] = pips(board.tokens[h]) / MAX_TOKEN_PIPS
 
-    port_base = NUM_BUILDINGS + players + 1
+    port_base = _port_base(players)
     vertices = np.zeros(
         (board.topology.num_vertices, vertex_features(players)), dtype=np.float32
     )
@@ -271,24 +389,24 @@ def _vertex_key(building: int, owner: int, players: int) -> int:
 
 @lru_cache(maxsize=32)
 def _vertex_rows(players: int, perspective: int) -> np.ndarray:
-    """`rows[key]` is the building and owner block of a vertex."""
-    width = NUM_BUILDINGS + players + 1
+    """`rows[key]` is the `seat_building` block of a vertex: the building's
+    points (`Building`'s value: 1 a settlement, 2 a city) in its owner's
+    seat-relative column."""
     slots = _slots(players, perspective)
-    rows = np.zeros((NUM_BUILDINGS * (players + 1), width), dtype=np.float32)
-    for building in range(NUM_BUILDINGS):
-        for owner in range(NO_OWNER, players):
-            key = _vertex_key(building, owner, players)
-            rows[key, building] = 1.0
-            rows[key, NUM_BUILDINGS + slots[owner]] = 1.0
+    rows = np.zeros((NUM_BUILDINGS * (players + 1), players), dtype=np.float32)
+    for building in range(1, NUM_BUILDINGS):
+        for owner in range(players):
+            rows[_vertex_key(building, owner, players), slots[owner]] = float(building)
     rows.flags.writeable = False
     return rows
 
 
 @lru_cache(maxsize=32)
 def _edge_rows(players: int, perspective: int) -> np.ndarray:
-    """`rows[owner]` is the whole feature row of an edge."""
+    """`rows[owner]` is the whole feature row of an edge; `NO_OWNER`'s, the
+    last, is all 0."""
     rows = np.zeros((players + 1, edge_features(players)), dtype=np.float32)
-    for owner, slot in enumerate(_slots(players, perspective)):
+    for owner, slot in enumerate(_slots(players, perspective)[:players]):
         rows[owner, slot] = 1.0
     rows.flags.writeable = False
     return rows
@@ -310,23 +428,23 @@ def _edge_rows_all(players: int) -> np.ndarray:
     return rows
 
 
-_BUILDING_VALUE = np.arange(NUM_BUILDINGS, dtype=np.float32)
-
-
-def _building_points(vertices: np.ndarray, players: int) -> np.ndarray:
-    """Every seat's building victory points, in seat-relative order: a
-    contraction of the encoded vertex block, since 1 and 2 are both the
-    `Building` enum and the points it scores."""
-    unowned = NUM_BUILDINGS + players
-    return (vertices[:, :NUM_BUILDINGS] @ _BUILDING_VALUE) @ vertices[
-        :, NUM_BUILDINGS:unowned
-    ]
+@lru_cache(maxsize=1 << 12)
+def _reach_block(reach: tuple[tuple[int, ...], ...], perspective: int) -> np.ndarray:
+    """`(vertices, players)` `seat_reach` block, seat-relative, from
+    `roads.reach_all`."""
+    players = len(reach)
+    out = np.zeros((len(reach[0]), players), dtype=np.float32)
+    for i, seat in enumerate(to_frame(range(players), perspective)):
+        d = np.asarray(reach[seat], dtype=np.float32)
+        out[:, i] = np.where(d < 0, 0.0, 1.0 / (1.0 + np.maximum(d, 0.0)))
+    out.flags.writeable = False
+    return out
 
 
 def _encode_hexes(state: GameState, template: _Template) -> np.ndarray:
     out = template.hexes.copy()
     if state.robber >= 0:  # `OFF_BOARD` marks no hex
-        out[state.robber, NUM_TERRAIN + 2] = 1.0
+        out[state.robber, _ROBBER] = 1.0
     return out
 
 
@@ -334,16 +452,17 @@ def _encode_vertices(
     state: GameState, perspective: int, template: _Template
 ) -> np.ndarray:
     players = state.num_players
-    span = players + 1
     keys = np.asarray(
         [
-            building * span + owner + 1
+            _vertex_key(building, owner, players)
             for building, owner in zip(state.vertex_building, state.vertex_owner)
         ],
         dtype=np.intp,
     )
     out = template.vertices.copy()
-    out[:, : NUM_BUILDINGS + span] = _vertex_rows(players, perspective)[keys]
+    out[:, :players] = _vertex_rows(players, perspective)[keys]
+    base = _reach_base(players)
+    out[:, base : base + players] = _reach_block(reach_all(state), perspective)
     return out
 
 
@@ -352,189 +471,82 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
     return _edge_rows(state.num_players, perspective)[owners]
 
 
-def _ledger_parts(game: Game, perspective: int) -> list[float]:
-    """Each opponent's reconstructed hand composition as `perspective` knows
-    it (`hexset.ledger`, `PublicLedger.for_seat`), in seat-relative order, own
-    seat excluded: per opponent `known[5]` scaled like a hand then `unknown`,
-    so `(players - 1) * (NUM_RESOURCES + 1)` floats."""
-    players = game._state.num_players
-    rows = game.ledger.for_seat(perspective).seats
-    parts: list[float] = []
-    for seat in to_frame(range(players), perspective)[1:]:
-        seat_ledger = rows[seat]
-        parts.extend(k / HAND_SCALE for k in seat_ledger.known)
-        parts.append(seat_ledger.unknown / HAND_SCALE)
-    return parts
+# --- globals ------------------------------------------------------------------
 
 
-def _roads_to_take_parts(game: Game, perspective: int) -> list[float]:
-    """Every seat's `roads.roads_to_take` over `ROADS_TO_TAKE_CAP`, in
-    seat-relative order: 0 for the seat holding Longest Road, 1 for one that
-    needs `ROADS_TO_TAKE_CAP` or more new roads or cannot take it at all."""
-    counts = roads_to_take_all(game._state)
-    return [counts[s] / ROADS_TO_TAKE_CAP for s in to_frame(range(len(counts)), perspective)]
-
-
-def _encode_globals(
-    game: Game, perspective: int, building_points: np.ndarray
-) -> np.ndarray:
-    from .victory import award_points
-
+def _global_parts(game: Game, perspective: int, building_points: Sequence[float]) -> list[float]:
+    """Every global block but the ones `encode_batch` writes as arrays, in
+    `_global_blocks` order: the single source of their semantics, so the
+    batched path stays byte-identical to `encode` by construction."""
     state = game._state
+    rules = state.rules
     players = state.num_players
     seats = to_frame(range(players), perspective)
+    view = View.from_game(game, perspective)
+    unseen = view.unseen_dev_cards()
 
     parts: list[float] = []
     parts.extend(n / HAND_SCALE for n in state.hands[perspective])
-    parts.extend(hand_size(state, s) / HAND_SCALE for s in seats[1:])
-    parts.extend(n / BANK_SCALE for n in state.bank)
-
-    own_cards = [
-        held + fresh
-        for held, fresh in zip(
-            state.dev_cards[perspective], state.new_dev_cards[perspective]
-        )
-    ]
-    parts.extend(n / 5.0 for n in own_cards)
-    parts.extend(dev_count(state, s) / 5.0 for s in seats[1:])
-
-    parts.extend(state.knights_played[s] / 5.0 for s in seats)
+    held = state.dev_cards[perspective]
     parts.extend(
-        (building_points[i] + award_points(state, s)) / 10.0
+        (h + f) / DEV_SCALE for h, f in zip(held, state.new_dev_cards[perspective])
+    )
+    parts.extend(
+        0.0 if game.dev_card_played else held[kind] / DEV_SCALE for kind in PLAYABLE_KINDS
+    )
+
+    # The float blocks are rounded in float32 from the record's float32
+    # values, as `hexn.export_onnx.RecordEncoder` computes them.
+    hands = expected_hands(view).astype(np.float32)
+    for s in seats[1:]:
+        parts.extend(hands[s] / np.float32(HAND_SCALE))
+    parts.extend(dev_count(state, s) / DEV_SCALE for s in seats[1:])
+    ages = dev_age_rows(state)
+    for s in seats[1:]:
+        parts.extend(
+            np.where(ages[s] < 0, np.float32(0.0), (ages[s] + np.float32(1.0)) / np.float32(AGE_SCALE))
+        )
+
+    parts.extend(
+        (building_points[i] + award_points(state, s)) / rules.winning_points
         for i, s in enumerate(seats)
     )
+    roads = roads_to_take_all(state)
+    parts.extend(_closeness(roads[s]) for s in seats)
+    knights = knights_needed_all(state, perspective, unseen[DevCard.KNIGHT])
+    parts.extend(_closeness(knights[s]) for s in seats)
+    mover = _seat(to_move(game), perspective, players)
+    parts.extend(1.0 if mover == i else 0.0 for i in range(1, players))
 
-    for holder in (state.longest_road_holder, state.largest_army_holder):
-        slot = players if holder == NO_OWNER else _seat(holder, perspective, players)
-        one_hot = [0.0] * (players + 1)
-        one_hot[slot] = 1.0
-        parts.extend(one_hot)
-
-    phase = [0.0] * NUM_PHASES
-    phase[int(game.phase)] = 1.0
-    parts.extend(phase)
-
-    parts.append(game.free_roads / 2.0)
+    parts.extend(n / BANK_SCALE for n in state.bank)
     parts.append(len(state.deck) / DECK_SIZE)
+    total = sum(unseen)
+    parts.extend(n / total if total else 0.0 for n in unseen)
+    phase = int(game.phase)
+    parts.extend(1.0 if phase == i else 0.0 for i in range(ENCODED_PHASES))
+    parts.append(game.free_roads / FREE_ROADS_SCALE)
     parts.append(min(game.turns / TURN_SCALE, 1.0))
 
-    parts.extend(_ledger_parts(game, perspective))
+    # The table's rules, which every seat is told: the points the game is
+    # played to (10 reads 1), the hand size above which a seven discards, the
+    # friendly robber and the balanced dice.
+    parts.append(rules.winning_points / POINTS_SCALE)
+    parts.append(rules.discard_limit / HAND_SCALE)
+    parts.append(float(rules.friendly_robber))
+    parts.append(float(rules.balanced_dice))
+    # The chance of each sum 2..12 on the next roll of the seat on turn: the
+    # plain two-dice odds, or under balanced dice the deck's, read off the
+    # public rolls (`game.roll_odds`).
+    odds = dict(roll_odds(game))
+    parts.extend(odds.get(total, 0.0) for total in range(MIN_ROLL, MAX_ROLL + 1))
+    return parts
 
-    parts.extend(_roads_to_take_parts(game, perspective))
-    mover = [0.0] * players
-    mover[_seat(to_move(game), perspective, players)] = 1.0
-    parts.extend(mover)
 
-    return np.array(parts, dtype=np.float32)
-
-
-def _encode_globals_batch(
-    games: Sequence[Game], perspectives: np.ndarray, building_points: np.ndarray
-) -> np.ndarray:
-    """Write the small global blocks once per batch instead of once per game."""
-    batch = len(games)
-    players = games[0]._state.num_players
-    rows = np.arange(batch)[:, None]
-    seats = (perspectives[:, None] + np.arange(players)) % players
-
-    # Only the perspective's own piles are read by type; every other seat's by
-    # size (`hand_size`, `dev_count`), as `encode` does, so an observed state
-    # whose other piles are hidden encodes too.
-    own_hands = np.asarray(
-        [game._state.hands[p] for game, p in zip(games, perspectives)], dtype=np.int16
-    )
-    hand_sizes = np.asarray(
-        [[hand_size(game._state, s) for s in range(players)] for game in games],
-        dtype=np.int16,
-    )
-    banks = np.asarray([game._state.bank for game in games], dtype=np.int16)
-    own_cards = np.asarray(
-        [
-            [held + new for held, new in zip(game._state.dev_cards[p], game._state.new_dev_cards[p])]
-            for game, p in zip(games, perspectives)
-        ],
-        dtype=np.int16,
-    )
-    card_counts = np.asarray(
-        [[dev_count(game._state, s) for s in range(players)] for game in games],
-        dtype=np.int16,
-    )
-    knights = np.asarray(
-        [game._state.knights_played for game in games], dtype=np.int16
-    )
-
-    out = np.zeros((batch, global_features(players)), dtype=np.float32)
-    cursor = 0
-
-    def append(values: np.ndarray, scale: float) -> None:
-        nonlocal cursor
-        block = np.asarray(values, dtype=np.float64)
-        if block.ndim == 1:
-            block = block[:, None]
-        width = block.shape[1]
-        out[:, cursor : cursor + width] = block / scale
-        cursor += width
-
-    append(own_hands, HAND_SCALE)
-    append(hand_sizes[rows, seats[:, 1:]], HAND_SCALE)
-    append(banks, BANK_SCALE)
-
-    append(own_cards, 5.0)
-    append(card_counts[rows, seats[:, 1:]], 5.0)
-    append(knights[rows, seats], 5.0)
-
-    longest = np.asarray(
-        [game._state.longest_road_holder for game in games], dtype=np.intp
-    )
-    army = np.asarray(
-        [game._state.largest_army_holder for game in games], dtype=np.intp
-    )
-    awards = 2 * (longest[:, None] == seats) + 2 * (army[:, None] == seats)
-    append(building_points.astype(np.float64) + awards, 10.0)
-
-    batch_rows = np.arange(batch)
-    for holders in (longest, army):
-        slots = np.where(
-            holders == NO_OWNER,
-            players,
-            (holders - perspectives) % players,
-        )
-        out[batch_rows, cursor + slots] = 1.0
-        cursor += players + 1
-
-    phases = np.asarray([int(game.phase) for game in games], dtype=np.intp)
-    out[batch_rows, cursor + phases] = 1.0
-    cursor += NUM_PHASES
-
-    append(np.asarray([game.free_roads for game in games]), 2.0)
-    append(np.asarray([len(game._state.deck) for game in games]), DECK_SIZE)
-    turns = np.minimum(
-        np.asarray([game.turns for game in games], dtype=np.float64) / TURN_SCALE,
-        1.0,
-    )
-    append(turns, 1.0)
-
-    # `_ledger_parts` is the single source of the ledger block's semantics, so
-    # this fast path stays byte-identical to the oracle by construction.
-    ledger_block = np.asarray(
-        [_ledger_parts(game, int(p)) for game, p in zip(games, perspectives)],
-        dtype=np.float64,
-    )
-    append(ledger_block, 1.0)
-
-    roads_block = np.asarray(
-        [_roads_to_take_parts(game, int(p)) for game, p in zip(games, perspectives)],
-        dtype=np.float64,
-    )
-    append(roads_block, 1.0)
-
-    movers = np.asarray([to_move(game) for game in games], dtype=np.intp)
-    out[batch_rows, cursor + (movers - perspectives) % players] = 1.0
-    cursor += players
-
-    if cursor != out.shape[1]:
-        raise AssertionError(f"wrote {cursor} global features into {out.shape[1]}")
-    return out
+def _building_points(vertices: np.ndarray, players: int) -> np.ndarray:
+    """Every seat's building victory points, in seat-relative order: the
+    `seat_building` block summed over the board, since 1 and 2 are both the
+    `Building` enum and the points it scores."""
+    return vertices[..., :players].sum(axis=-2)
 
 
 def encode_batch(
@@ -583,7 +595,7 @@ def encode_batch(
     np.stack([template.hexes for template in templates], out=hexes)
     robbers = np.asarray([state.robber for state in states], dtype=np.intp)
     placed = robbers >= 0  # `OFF_BOARD` marks no hex
-    hexes[rows[placed], robbers[placed], NUM_TERRAIN + 2] = 1.0
+    hexes[rows[placed], robbers[placed], _ROBBER] = 1.0
 
     buildings = np.asarray(
         [state.vertex_building for state in states], dtype=np.intp
@@ -591,21 +603,17 @@ def encode_batch(
     owners = np.asarray([state.vertex_owner for state in states], dtype=np.intp)
     keys = buildings * (players + 1) + owners + 1
     np.stack([template.vertices for template in templates], out=vertices)
-    dynamic = NUM_BUILDINGS + players + 1
-    vertices[:, :, :dynamic] = _vertex_rows_all(players)[
-        perspective[:, None], keys
-    ]
+    vertices[:, :, :players] = _vertex_rows_all(players)[perspective[:, None], keys]
+    base = _reach_base(players)
+    for i, (state, p) in enumerate(zip(states, perspective)):
+        vertices[i, :, base : base + players] = _reach_block(reach_all(state), int(p))
 
     edge_owners = np.asarray([state.edge_owner for state in states], dtype=np.intp)
     edges[:] = _edge_rows_all(players)[perspective[:, None], edge_owners]
 
-    building_value = vertices[:, :, :NUM_BUILDINGS] @ _BUILDING_VALUE
-    building_points = np.sum(
-        building_value[:, :, None]
-        * vertices[:, :, NUM_BUILDINGS : NUM_BUILDINGS + players],
-        axis=1,
-    )
-    globals_[:] = _encode_globals_batch(games, perspective, building_points)
+    building_points = _building_points(vertices, players)
+    for i, (game, p) in enumerate(zip(games, perspective)):
+        globals_[i] = np.asarray(_global_parts(game, int(p), building_points[i]), dtype=np.float32)
 
     graph = static_graph(states[0].board.topology)
     return [
@@ -624,13 +632,12 @@ def encode(game: Game, perspective: int | None = None) -> Observation:
 
     template = _template(state.board, state.num_players)
     vertices = _encode_vertices(state, perspective, template)
+    building_points = _building_points(vertices, state.num_players)
 
     return Observation(
         hexes=_encode_hexes(state, template),
         vertices=vertices,
         edges=_encode_edges(state, perspective),
-        globals=_encode_globals(
-            game, perspective, _building_points(vertices, state.num_players)
-        ),
+        globals=np.asarray(_global_parts(game, perspective, building_points), dtype=np.float32),
         graph=static_graph(state.board.topology),
     )

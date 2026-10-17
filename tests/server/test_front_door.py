@@ -261,3 +261,13 @@ def test_over_http_a_game_limit_refusal_carries_retry_after_and_its_fields(serve
     assert refused.value.code == 429
     assert int(refused.value.headers["Retry-After"]) > 0
     assert body["contact"] == "ask@example.org" and body["next_slot"] in body["error"]
+
+
+def test_over_http_the_bare_api_route_answers_rather_than_404s(serve):
+    from hexset.server.api import API_DOCS
+
+    base = serve()
+    for path in ("/api", "/api/", "/api?x=1"):
+        with urllib.request.urlopen(base + path, timeout=5) as response:
+            assert response.status == 200
+            assert json.loads(response.read())["docs"] == API_DOCS

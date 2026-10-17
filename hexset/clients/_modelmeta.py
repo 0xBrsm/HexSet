@@ -124,6 +124,22 @@ def trader_veto_pick_config(meta: dict[str, str]) -> bool:
 def trader_veto_pick_of(checkpoint: object) -> bool:
     """Whether `checkpoint`'s veto picks the taker, read by name like `trader_of`."""
     return bool(getattr(checkpoint, "trader_veto_pick", False))
+def robber_tip_config(meta: dict[str, str]) -> float:
+    """How far `meta` asks its robber moves to lean towards the leader
+    (`robber_tip`, `hexset.clients.netbot.tip_robber`): the fraction of the
+    chosen move's prior that robbing the leader must reach to be played in its
+    place. `0.0`, off, when the key is absent or unreadable; held to [0, 1]."""
+    try:
+        tip = float(meta.get("robber_tip") or 0.0)
+    except ValueError:
+        return 0.0
+    return min(max(tip, 0.0), 1.0) if math.isfinite(tip) else 0.0
+
+
+def robber_tip_of(checkpoint: object) -> float:
+    """The robber tip `checkpoint` declares, read by name like `trader_of`:
+    a loader that carries none plays its robber moves untouched."""
+    return float(getattr(checkpoint, "robber_tip", 0.0))
 
 
 def search_config(meta: dict[str, str]) -> SearchConfig:

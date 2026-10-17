@@ -20,7 +20,9 @@ from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search, calibrate_own
 from hexset.actions import options_for
-from hexset.clients._modelmeta import gate_config_of, trader_of, trader_veto_of, trader_veto_pick_of
+from hexset.clients._modelmeta import (
+    gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
+)
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
@@ -36,6 +38,7 @@ __all__ = [
     "GatedSearch",
     "bot_for",
     "searcher_for",
+    "tip_robber",
     "register_entrants",
     "declared_trader",
 ]
@@ -86,6 +89,9 @@ class NetworkBot(trading.DeclaredTrade):
     #: same map its search reads positions with, so a gain and the clearing
     #: floor are on that scale.
     own_calibration: tuple[float, float] | None = None
+    #: How far this seat's robber moves lean towards the leader (`tip_robber`);
+    #: `0.0` plays them as the policy picks.
+    robber_tip: float = 0.0
     _seated: Game | None = field(default=None, repr=False, compare=False)
     _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
     _protocol: "TradeProtocol | None" = field(
@@ -118,7 +124,13 @@ class NetworkBot(trading.DeclaredTrade):
     def choose(self, game: Game) -> Action:
         self.seat_at(game)
         seat = to_move(game)
-        return self.policy.act_rows([(game, seat, tuple(options_for(game)))])[0]
+        options = tuple(options_for(game))
+        if self.robber_tip and options[0].type is ActionType.MOVE_ROBBER:
+            # The same forward `act_rows` makes, read for its prior and value.
+            ((prior, value),) = self.policy.score_rows([(game, seat, options)])
+            picked = max(range(len(options)), key=lambda i: prior[i])
+            return options[tip_robber(options, prior, value, seat, picked, self.robber_tip)]
+        return self.policy.act_rows([(game, seat, options)])[0]
 
     def _perspective(self, view: View) -> int:
         if self.seat is not None and view.perspective != self.seat:
@@ -536,7 +548,17 @@ class GatedSearch(trading.DeclaredTrade, Search):
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
-        return super().choose(game)
+        tip = self.gate.robber_tip
+        if not tip:
+            return super().choose(game)
+        root, options, visits = self.run(game)
+        if not options:
+            raise ValueError("no legal action to choose from")
+        picked = int(visits.argmax())
+        if options[0].type is ActionType.MOVE_ROBBER:
+            # The root's own prior and value: no forward beyond the search's.
+            picked = tip_robber(options, root.prior, root.value, root.mover, picked, tip)
+        return options[picked]
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
         return self.gate.accepts(view, received, counterparty)
@@ -558,6 +580,30 @@ class GatedSearch(trading.DeclaredTrade, Search):
 
     def estimate_many(self, view: View, candidates: Sequence[tuple[int, Bundle]]) -> list[float]:
         return self.gate.estimate_many(view, candidates)
+
+
+def tip_robber(
+    options: Sequence[Action], prior: Sequence[float], value: Sequence[float],
+    seat: int, picked: int, tip: float,
+) -> int:
+    """`picked`, or a robber move onto the leader where the policy rates it
+    nearly as highly: the index of the option to play.
+
+    The leader is the other seat `value` gives the highest win chance. A
+    `picked` that already robs it stands. Otherwise the leader's best option
+    by `prior` is played in its place when its prior is at least `tip` times
+    `picked`'s; with none that close, `picked` stands. `tip` is in (0, 1]: `1`
+    moves only an exact tie, smaller reaches further down the policy's own
+    ranking. Board-seat order for `value`; `options` are robber moves, whose
+    `b` names the seat robbed."""
+    leader = max((s for s in range(len(value)) if s != seat), key=lambda s: value[s])
+    if options[picked].b == leader:
+        return picked
+    robs = [i for i, option in enumerate(options) if option.b == leader]
+    if not robs:
+        return picked
+    best = max(robs, key=lambda i: prior[i])
+    return best if prior[best] >= tip * prior[picked] else picked
 
 
 def bot_for(
@@ -582,6 +628,7 @@ def bot_for(
         trade=trade,
         rng=random.Random() if rng is None else rng,
         own_calibration=own_calibration,
+        robber_tip=robber_tip_of(checkpoint),
     )
 
 

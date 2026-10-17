@@ -101,6 +101,85 @@ def test_the_record_carries_roads_to_take_and_the_mover_in_board_seat_order():
         assert row["to_move"].shape == () and int(row["to_move"]) == to_move(game)
 
 
+_FLOAT_FIELDS = {"expected_hand", "dev_ages", "roll_odds"}
+
+
+def test_every_field_has_its_declared_shape_and_dtype():
+    from hexset.encoding import static_graph
+    from hexset.onnx_record import record_shapes
+
+    game = a_game(seed=4, steps=300)
+    space = space_for(game)
+    shapes = record_shapes(static_graph(game._state.board.topology), 4, space)
+    row = record_from_game(game, None, space)
+    assert set(shapes) == set(RECORD_FIELDS)
+    for name in RECORD_FIELDS:
+        assert row[name].shape == shapes[name], name
+        want = np.bool_ if name == "action_mask" else np.float32 if name in _FLOAT_FIELDS else np.int64
+        assert row[name].dtype == want, name
+
+
+def test_the_contract_8_fields_read_the_rules_in_board_seat_order():
+    from hexset.encoding import dev_age_rows, expected_hands, knights_needed_all
+    from hexset.roads import reach_all
+    from hexset.view import View
+
+    game = a_game(seed=5, steps=300)
+    space = space_for(game)
+    state = game._state
+    for perspective in range(state.num_players):
+        row = record_from_game(game, perspective, space)
+        view = View.from_game(game, perspective)
+        unseen = view.unseen_dev_cards()
+        assert row["reach"].tolist() == [list(r) for r in reach_all(state)]
+        assert row["own_matured"].tolist() == list(state.dev_cards[perspective])
+        assert int(row["dev_card_played"]) == int(game.dev_card_played)
+        np.testing.assert_allclose(row["expected_hand"], expected_hands(view), rtol=1e-6)
+        assert row["expected_hand"][perspective].tolist() == list(state.hands[perspective])
+        np.testing.assert_array_equal(row["dev_ages"], dev_age_rows(state))
+        assert tuple(row["knights_needed"]) == knights_needed_all(state, perspective, unseen[0])
+        assert row["unseen_dev"].tolist() == list(unseen)
+
+
+def test_the_contract_8_1_fields_state_the_tables_rules_and_the_next_rolls_odds():
+    from hexset.game import roll_odds
+    from hexset.rules import DUEL_VARIANT_GAME, STANDARD_GAME
+
+    for game_type, players in ((STANDARD_GAME, 4), (DUEL_VARIANT_GAME, 2)):
+        rng = random.Random(3)
+        game = start(random_base_board(rng), players, rng, game_type=game_type)
+        for _ in range(250):
+            if is_over(game):
+                break
+            step_randomly(game, rng)
+        rules = game_type.rules
+        row = record_from_game(game, None, space_for(game))
+        assert int(row["winning_points"]) == rules.winning_points
+        assert int(row["discard_limit"]) == rules.discard_limit
+        assert int(row["friendly_robber"]) == int(rules.friendly_robber)
+        assert int(row["balanced_dice"]) == int(rules.balanced_dice)
+        odds = dict(roll_odds(game))
+        np.testing.assert_allclose(row["roll_odds"], [odds.get(t, 0.0) for t in range(2, 13)], rtol=1e-6)
+
+
+def test_a_seats_observed_position_records_as_the_true_position_does():
+    """A live client holds an observed state: every other seat's hand and
+    cards hidden. The record from that seat must build there, and match the
+    true position's record from the same seat."""
+    from hexset.game import observe
+
+    for seed in range(6):
+        game = a_game(seed=seed, steps=150 + 11 * seed)
+        if is_over(game):
+            continue
+        space = space_for(game)
+        seat = seed % 4
+        seen = record_from_game(observe(game, seat), seat, space, options=())
+        true = record_from_game(game, seat, space, options=())
+        for name in RECORD_FIELDS:
+            np.testing.assert_array_equal(seen[name], true[name], err_msg=name)
+
+
 def test_record_rows_builds_the_rows_record_from_game_builds_one_at_a_time():
     games = [a_game(seed=seed, steps=steps) for seed, steps in ((0, 40), (1, 90), (2, 150))]
     space = space_for(games[0])

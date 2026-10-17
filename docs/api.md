@@ -7,6 +7,7 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 
 | Method and route | Request or result |
 | --- | --- |
+| `GET /api` | `{"api": 4, "docs": "<this page's URL>"}` |
 | `GET /api/version` | `{"api": 4}`, this API's contract version |
 | `GET /api/models` | `{"models": [...]}`, the names `bots` and `model` accept |
 | `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals a game |
@@ -26,7 +27,7 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `GET /api/table/<code>/board` | Board layout |
 | `GET /api/table/<code>/replay?round=N` | The position at the end of round `N` |
 
-`version`, `models`, `games`, `join`, `reclaim` and the three
+`/api`, `version`, `models`, `games`, `join`, `reclaim` and the three
 `/api/table/<code>` reads take no token. Codes are six characters from
 `23456789abcdefghjkmnpqrstuvwxyz`, matched case-insensitively. Names are
 trimmed and cut to 40 characters; an unnamed seat is named `human`, `api` or

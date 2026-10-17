@@ -1,11 +1,12 @@
 """Which graph shape a checkpoint's `contract` metadata routes to, and whether
 a record-contract graph loads and plays. The rule: a contract number names
 exactly one graph shape, this repo reads it and never assigns it, and
-anything else is refused **by name**. Contract 7 is current; contract 6, whose
-record is contract 7's minus `roads_to_take` and `to_move`, is still served.
+anything else is refused **by name**. Contract 8 is current; contract 7, whose
+record is contract 8's minus seven fields, and contract 6, contract 7's minus
+`roads_to_take` and `to_move`, are still served.
 
-The contract-7 stub is 26-input and the two contract-6 stubs are 24- and
-22-input: a loader that feeds a graph every field it happens to have, rather
+The contract-8 stub is 27-input, the contract-7 one 26 and the two contract-6
+stubs 24 and 22: a loader that feeds a graph every field it happens to have, rather
 than the ones it *declares*, breaks on the shorter ones.
 
 Every fixture here is a stub. `dev-contract2.onnx` and `tiny.onnx` were
@@ -36,6 +37,7 @@ from hexset.actions import options_for  # noqa: E402
 FIXTURES = Path(__file__).parent / "fixtures"
 STUB = FIXTURES / "stub-contract6.onnx"
 STUB7 = FIXTURES / "stub-contract7.onnx"
+STUB8 = FIXTURES / "stub-contract8.onnx"
 STUB_PARTIAL = FIXTURES / "stub-contract6-partial.onnx"
 DEV_CONTRACT2 = FIXTURES / "dev-contract2.onnx"
 CONTRACT1 = FIXTURES / "tiny.onnx"
@@ -73,32 +75,44 @@ def test_the_contract_2_fixture_is_export_shaped():
 # --- Dispatch ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", [STUB7, STUB])
+@pytest.mark.parametrize("path", [STUB8, STUB7, STUB])
 def test_a_contract_7_or_6_graph_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
 
 
-def test_the_served_contracts_are_the_current_one_and_six():
+def test_the_served_contracts_are_the_current_one_six_and_seven():
     from hexset.onnx_record import CONTRACT_VERSION
     from hexset.server.constants import RECORD_CONTRACTS
 
-    assert CONTRACT_VERSION == "7"
-    assert RECORD_CONTRACTS == {"6", "7"}
+    assert CONTRACT_VERSION == "8.1"
+    assert RECORD_CONTRACTS == {"6", "7", "8", "8.1"}
+    assert _metadata(STUB8)["contract"] == "8"
     assert _metadata(STUB7)["contract"] == "7"
     assert _metadata(STUB)["contract"] == "6"
 
 
-def test_a_contract_6_graph_declares_a_subset_of_the_current_record():
-    """What keeps contract 6 servable: every input it declares is still in
-    the record, and the two it lacks are exactly what contract 7 added."""
+def test_older_graphs_declare_a_subset_of_the_current_record():
+    """What keeps contracts 6, 7 and 8 servable: every input they declare is
+    still in the record, and what they lack is exactly what came after."""
     from hexset.onnx_record import RECORD_FIELDS
 
-    six, seven = set(_declared_inputs(STUB)), set(_declared_inputs(STUB7))
-    assert seven == set(RECORD_FIELDS)
+    six, seven, eight = (set(_declared_inputs(p)) for p in (STUB, STUB7, STUB8))
+    assert set(RECORD_FIELDS) - (seven | eight) == {
+        "winning_points", "discard_limit", "friendly_robber", "balanced_dice", "roll_odds",
+    }
     assert seven - six == {"roads_to_take", "to_move"}
+    assert eight - seven == {
+        "reach", "own_matured", "dev_card_played", "expected_hand",
+        "dev_ages", "knights_needed", "unseen_dev",
+    }
+    # A contract-8 graph declares only what it reads.
+    assert seven - eight == {
+        "knights_played", "longest_road_holder", "largest_army_holder",
+        "hand_totals", "ledger_known", "ledger_unknown",
+    }
 
 
-@pytest.mark.parametrize("contract", ["5", "8"])
+@pytest.mark.parametrize("contract", ["5", "9"])
 def test_a_contract_either_side_of_the_served_ones_is_refused_by_name(contract, tmp_path):
     onnx = pytest.importorskip("onnx")
     model = onnx.load(str(STUB7))
@@ -120,7 +134,7 @@ def test_a_file_declaring_no_contract_is_refused_as_declaring_none():
         load(str(CONTRACT1), _board().topology)
     message = str(caught.value)
     assert "declares no contract" in message and "contract='" not in message
-    assert "6" in message and "7" in message
+    assert "6" in message and "7" in message and "8" in message
 
 
 def test_an_offer_protocol_contract_is_refused_by_name():
@@ -133,7 +147,7 @@ def test_an_offer_protocol_contract_is_refused_by_name():
 
 
 @pytest.mark.parametrize(
-    "path,expected_inputs", [(STUB7, 26), (STUB, 24), (STUB_PARTIAL, 22)]
+    "path,expected_inputs", [(STUB8, 27), (STUB7, 26), (STUB, 24), (STUB_PARTIAL, 22)]
 )
 def test_a_record_contract_checkpoint_plays_legal_actions_from_every_phase(
     path, expected_inputs

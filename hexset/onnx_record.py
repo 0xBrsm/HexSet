@@ -4,7 +4,9 @@
 A position stated **in the rules' own terms, already filtered to what the
 perspective seat may legally know** -- own hand and own development cards
 exact, every other seat by count plus `hexset.ledger`'s reconstruction as
-the perspective knows it (`PublicLedger.for_seat`). There is nowhere in it for a hidden card to be. Everything
+the perspective knows it (`PublicLedger.for_seat`), and from contract 8 the
+expected counts and odds the perspective's own view gives (`hexset.view.View`).
+There is nowhere in it for a hidden card to be. Everything
 downstream (one-hot encoding, rotation, scaling) is mechanical and lives in
 `hexn.export_onnx.RecordEncoder`, which also rotates the perspective seat to
 slot 0; rows here stay in board-seat order. **Everything here is numpy, and
@@ -18,16 +20,18 @@ from typing import Sequence
 import numpy as np
 
 from .actions import Action, ActionSpace, ActionType, legal_actions
-from .board.board import Board
+from .board.board import MAX_ROLL, MIN_ROLL, Board
 from .board.terrain import NUM_RESOURCES
 from .cards import NUM_DEV_CARDS
 from .devcards import dev_count
 from .economy import hand_size
-from .encoding import StaticGraph
-from .game import Game, to_move
-from .roads import roads_to_take_all
+from .cards import DevCard
+from .encoding import AGE_SLOTS, StaticGraph, dev_age_rows, expected_hands, knights_needed_all
+from .game import Game, roll_odds, to_move
+from .roads import reach_all, roads_to_take_all
 from .state import NO_OWNER
 from .victory import award_points
+from .view import View
 
 __all__ = [
     "CONTRACT_VERSION",
@@ -42,10 +46,16 @@ __all__ = [
 
 # The record/graph contract, read off an exported graph's metadata. Bump only
 # when `RECORD_FIELDS`, the export's output tuple, or the action space changes.
-# Contract 7 adds `roads_to_take` and `to_move` to contract 6's record; a
-# contract-6 graph declares a subset of these fields and is still served
-# (`hexset.server.constants.RECORD_CONTRACTS`).
-CONTRACT_VERSION = "7"
+# Contract 7 adds `roads_to_take` and `to_move` to contract 6's record.
+# Contract 8 adds `reach`, `own_matured`, `dev_card_played`, `expected_hand`,
+# `dev_ages`, `knights_needed` and `unseen_dev`, and keeps every
+# earlier field: a contract-6 or -7 graph declares a subset of these fields and
+# is still served (`hexset.server.constants.RECORD_CONTRACTS`). Contract 8.1
+# adds the table's rules (`winning_points`, `discard_limit`, `friendly_robber`,
+# `balanced_dice`) and the next roll's odds (`roll_odds`), so a contract-8
+# graph is still served beside it. The record is int64 throughout but for
+# `expected_hand`, `dev_ages` and `roll_odds` (float32) and `action_mask` (bool).
+CONTRACT_VERSION = "8.1"
 
 # Board, then position, then information set, then legality.
 # `hexn.export_onnx` reuses this order for the graph's input names.
@@ -75,6 +85,18 @@ RECORD_FIELDS: tuple[str, ...] = (
     "dev_totals",
     "ledger_known",
     "ledger_unknown",
+    "reach",
+    "own_matured",
+    "dev_card_played",
+    "expected_hand",
+    "dev_ages",
+    "knights_needed",
+    "unseen_dev",
+    "winning_points",
+    "discard_limit",
+    "friendly_robber",
+    "balanced_dice",
+    "roll_odds",
     "action_mask",
 )
 
@@ -108,6 +130,18 @@ def record_shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[
         "dev_totals": (players,),
         "ledger_known": (players, NUM_RESOURCES),
         "ledger_unknown": (players,),
+        "reach": (players, graph.num_vertices),
+        "own_matured": (NUM_DEV_CARDS,),
+        "dev_card_played": (),
+        "expected_hand": (players, NUM_RESOURCES),
+        "dev_ages": (players, AGE_SLOTS),
+        "knights_needed": (players,),
+        "unseen_dev": (NUM_DEV_CARDS,),
+        "winning_points": (),
+        "discard_limit": (),
+        "friendly_robber": (),
+        "balanced_dice": (),
+        "roll_odds": (MAX_ROLL - MIN_ROLL + 1,),
         "action_mask": (space.size,),
     }
 
@@ -179,6 +213,9 @@ def _row(
     # drops the perspective seat's own entry (exact via `own_hand` below).
     rows = game.ledger.for_seat(perspective).seats
     seats = range(players)
+    view = View.from_game(game, perspective)
+    unseen = view.unseen_dev_cards()
+    odds = dict(roll_odds(game))
     return {
         "robber": state.robber,
         "vertex_owner": state.vertex_owner,
@@ -204,19 +241,46 @@ def _row(
         "dev_totals": [dev_count(state, s) for s in seats],
         "ledger_known": [rows[s].known for s in seats],
         "ledger_unknown": [rows[s].unknown for s in seats],
+        # Contract 8, board-seat order like the rest. `reach`: per seat, per
+        # vertex, the new roads its network needs to touch it, -1 unreachable
+        # (`roads.reach_all`).
+        "reach": reach_all(state),
+        "own_matured": state.dev_cards[perspective],
+        "dev_card_played": game.dev_card_played,
+        # Each seat's expected count of each resource on the perspective's
+        # view (`View.expected_counts`); its own row exact.
+        "expected_hand": expected_hands(view),
+        # Each seat's longest-held cards' ages, oldest first, -1 past its cards.
+        "dev_ages": dev_age_rows(state),
+        # Knights each seat must still play for Largest Army, -1 out of reach.
+        "knights_needed": knights_needed_all(state, perspective, unseen[DevCard.KNIGHT]),
+        "unseen_dev": unseen,
+        # Contract 8.1: the table's rules, and each sum 2..12's chance on the
+        # next roll of the seat on turn (`game.roll_odds`), 0 for a sum the
+        # balanced dice deck has run out of.
+        "winning_points": state.rules.winning_points,
+        "discard_limit": state.rules.discard_limit,
+        "friendly_robber": int(state.rules.friendly_robber),
+        "balanced_dice": int(state.rules.balanced_dice),
+        "roll_odds": [odds.get(total, 0.0) for total in range(MIN_ROLL, MAX_ROLL + 1)],
         "mask": indices,
     }
 
 
-#: The fields `_row` states, in `RECORD_FIELDS` order, every one int64, and
-#: those of them that are one number a row.
+#: The fields `_row` states, in `RECORD_FIELDS` order; those of them that are
+#: one number a row; and each one's dtype, int64 but for the float32 few.
 _ROW_FIELDS: tuple[str, ...] = tuple(
     name for name in RECORD_FIELDS if name not in BOARD_FIELDS and name != "action_mask"
 )
 _SCALAR_FIELDS = frozenset({
     "robber", "longest_road_holder", "largest_army_holder", "phase", "free_roads",
-    "deck_size", "turns", "to_move", "perspective",
+    "deck_size", "turns", "to_move", "perspective", "dev_card_played",
+    "winning_points", "discard_limit", "friendly_robber", "balanced_dice",
 })
+_DTYPES: dict[str, type] = {
+    name: np.float32 if name in ("expected_hand", "dev_ages", "roll_odds") else np.int64
+    for name in _ROW_FIELDS
+}
 
 
 def record_from_game(
@@ -235,8 +299,8 @@ def record_from_game(
     row = _row(game, perspective, space, options, None)
     out = {name: field.copy() for name, field in _board_fields(game._state.board).items()}
     for name in _ROW_FIELDS:
-        out[name] = (np.int64(row[name]) if name in _SCALAR_FIELDS
-                     else np.asarray(row[name], dtype=np.int64))
+        out[name] = (_DTYPES[name](row[name]) if name in _SCALAR_FIELDS
+                     else np.asarray(row[name], dtype=_DTYPES[name]))
     mask = np.zeros(space.size, dtype=bool)
     mask[row["mask"]] = True
     out["action_mask"] = mask
@@ -269,7 +333,7 @@ def record_rows(
         for name in BOARD_FIELDS:
             out[name] = np.stack([_board_fields(board)[name] for board in boards])
     for name in _ROW_FIELDS:
-        out[name] = np.asarray([row[name] for row in built], dtype=np.int64)
+        out[name] = np.asarray([row[name] for row in built], dtype=_DTYPES[name])
     mask = np.zeros((n, space.size), dtype=bool)
     for i, row in enumerate(built):
         mask[i, row["mask"]] = True

@@ -32,6 +32,9 @@ KEY_HEADER = "X-HexSet-Key"
 # is the same graph shape over a record with two more fields (`roads_to_take`,
 # `to_move`), so a contract-6 graph's declared inputs are a subset of today's
 # record and it is still served: the loader feeds a graph only the inputs it
-# declares. Every other value, and a file with no `contract` key at all, is
-# refused by name at load.
-RECORD_CONTRACTS = frozenset({"6", "7"})
+# declares. Contract 8 adds eight more record fields and keeps every earlier
+# one, so contracts 6 and 7 are still served beside it. Contract 8.1 adds the
+# table's rules and the next roll's odds, and keeps every contract-8 field.
+# Every other value, and a file with no `contract` key at all, is refused by
+# name at load.
+RECORD_CONTRACTS = frozenset({"6", "7", "8", "8.1"})

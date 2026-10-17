@@ -1,5 +1,6 @@
 """Build a record-contract stub graph: right names, right shapes, no weights.
 
+    python build_stub.py 8              # 27 inputs -> stub-contract8.onnx
     python build_stub.py 7              # 26 inputs -> stub-contract7.onnx
     python build_stub.py 6              # 24 inputs -> stub-contract6.onnx
     python build_stub.py 6 --partial    # declares only a subset
@@ -10,8 +11,9 @@ Semantics are deliberately trivial and deliberately *legal*: uniform over the
 legal mask, first legal slot, zero value. A stub that could emit an illegal
 action would send whoever builds against it chasing a phantom engine bug.
 
-Contract 6 is contract 7 without `roads_to_take` and `to_move`; its stubs
-stand for the contract-6 graphs that are still served. `--partial` drops the
+Contract 7 is contract 8 without contract 8's eight fields, and contract 6 is
+contract 7 without `roads_to_take` and `to_move`; their stubs stand for the
+graphs that are still served. `--partial` drops the
 two ledger fields, the shape a graph trained before
 them would have; `--fixed-batch` pins the batch axis to `1`, which
 `V2Policy._batchable` must detect and fall back from.
@@ -60,17 +62,37 @@ INPUTS = [
     ("dev_totals", TP.INT64, [B, PLAYERS]),
     ("ledger_known", TP.INT64, [B, PLAYERS, RESOURCES]),
     ("ledger_unknown", TP.INT64, [B, PLAYERS]),
+    ("reach", TP.INT64, [B, PLAYERS, NUM_VERTICES]),
+    ("own_matured", TP.INT64, [B, DEV]),
+    ("dev_card_played", TP.INT64, [B]),
+    ("expected_hand", TP.FLOAT, [B, PLAYERS, RESOURCES]),
+    ("dev_ages", TP.FLOAT, [B, PLAYERS, 3]),
+    ("knights_needed", TP.INT64, [B, PLAYERS]),
+    ("unseen_dev", TP.INT64, [B, DEV]),
     ("action_mask", TP.BOOL, [B, SPACE]),
 ]
 
 # The `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
 LEDGER_FIELDS = ("ledger_known", "ledger_unknown")
-# What contract 7 added to contract 6's record.
+# What contract 7 added to contract 6's record, and contract 8 to contract 7's.
 CONTRACT_7_FIELDS = ("roads_to_take", "to_move")
+CONTRACT_8_FIELDS = (
+    "reach", "own_matured", "dev_card_played", "expected_hand",
+    "dev_ages", "knights_needed", "unseen_dev",
+)
 
-CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "7"
-if CONTRACT not in ("6", "7"):
-    raise SystemExit("contract must be 6 or 7")
+CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "8"
+if CONTRACT not in ("6", "7", "8"):
+    raise SystemExit("contract must be 6, 7 or 8")
+# What a contract-8 graph no longer reads, and so does not declare.
+CONTRACT_8_UNREAD = (
+    "knights_played", "longest_road_holder", "largest_army_holder",
+    "hand_totals", "ledger_known", "ledger_unknown",
+)
+if CONTRACT in ("6", "7"):
+    INPUTS = [row for row in INPUTS if row[0] not in CONTRACT_8_FIELDS]
+else:
+    INPUTS = [row for row in INPUTS if row[0] not in CONTRACT_8_UNREAD]
 if CONTRACT == "6":
     INPUTS = [row for row in INPUTS if row[0] not in CONTRACT_7_FIELDS]
 PARTIAL = "--partial" in sys.argv
@@ -133,7 +155,8 @@ if VALUED:
     nodes.append(helper.make_node("Mul", ["hand_value", "players_ones"], ["value"]))
 else:
     # Value rides the batch axis off an input so the shape follows B, then is
-    nodes.append(helper.make_node("Cast", ["hand_totals"], ["ht_f"], to=TP.FLOAT))
+    totals = "dev_totals" if CONTRACT == "8" else "hand_totals"
+    nodes.append(helper.make_node("Cast", [totals], ["ht_f"], to=TP.FLOAT))
     nodes.append(helper.make_node("Mul", ["ht_f", "zero"], ["value"]))
 
 tag = "".join(

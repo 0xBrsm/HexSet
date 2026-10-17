@@ -16,7 +16,7 @@ from hexset.board.board import make_board
 from hexset.board.maps import MINI_LAYOUT
 from hexset.board.terrain import Terrain
 from hexset.board.topology import build as build_topology
-from hexset.encoding import NUM_TERRAIN, encode, encode_batch
+from hexset.encoding import HEX_FEATURES, encode, encode_batch
 from hexset.game import Phase, move_robber_to, start
 from hexset.robber import occupants
 from hexset.state import OFF_BOARD
@@ -58,7 +58,7 @@ def test_its_first_move_takes_any_terrain_hex_and_never_the_sea():
 
 def test_a_robber_beside_the_board_marks_no_hex():
     game = start(island_board(), 2, random.Random(0))
-    robber_column = NUM_TERRAIN + 2
+    robber_column = HEX_FEATURES - 1
     assert not encode(game, 0).hexes[:, robber_column].any()
     (batched,) = encode_batch([game], [0])
     assert not batched.hexes[:, robber_column].any()

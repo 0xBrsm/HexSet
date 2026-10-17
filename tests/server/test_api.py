@@ -528,6 +528,15 @@ def test_version_route_answers_the_api_contract_not_the_package():
     assert not hasattr(hexset, "build_info")
 
 
+def test_the_bare_api_route_names_the_contract_and_its_reference_without_a_token():
+    from hexset.server.api import API_DOCS, API_VERSION
+
+    registry = tables()
+    for path in ("/api", "/api/", "/api?x=1"):
+        assert registry.handle("GET", path, {}, None) == {"api": API_VERSION, "docs": API_DOCS}
+    assert API_DOCS.endswith("/docs/api.md")
+
+
 def test_action_with_a_stale_version_409s_and_the_current_one_acts():
     registry = tables()
     code, token = deal(registry)

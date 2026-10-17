@@ -291,6 +291,42 @@ class View:
                 open_.remove(r)
         return [k + e for k, e in zip(known, spread)]
 
+    def expected_counts(self, seat: int) -> list[float]:
+        """`known` plus each resource's exact expected share of the hidden
+        cards, dealt from the pool without replacement within the seat's
+        upper bounds: closed form where no bound binds (`expected_hand`
+        agrees there), every split of the hidden cards weighed by its
+        hypergeometric chance where one does. The seat is read alone: that
+        other seats draw from the same pool is ignored. Deterministic."""
+        known = self.known[seat]
+        hidden = self.unknown[seat]
+        if not hidden or not self.pool_size or not self.bounded[seat]:
+            return self.expected_hand(seat)
+        caps = [min(r, p) for r, p in zip(self.room[seat], self.pool)]
+        total = 0
+        sums = [0] * NUM_RESOURCES
+        split = [0] * NUM_RESOURCES
+
+        def deal(r: int, left: int, weight: int) -> None:
+            nonlocal total
+            if r == NUM_RESOURCES - 1:
+                if left > caps[r]:
+                    return
+                split[r] = left
+                w = weight * math.comb(self.pool[r], left)
+                total += w
+                for i in range(NUM_RESOURCES):
+                    sums[i] += w * split[i]
+                return
+            for n in range(min(left, caps[r]) + 1):
+                split[r] = n
+                deal(r + 1, left - n, weight * math.comb(self.pool[r], n))
+
+        deal(0, hidden, 1)
+        if not total:
+            return self.expected_hand(seat)
+        return [k + s / total for k, s in zip(known, sums)]
+
     def sample(self, rng: random.Random, hold: HoldReading | None = None) -> GameState:
         """One determinized world consistent with everything public: a concrete
         `GameState` matching the real position's hand and card counts, hidden

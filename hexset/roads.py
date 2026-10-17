@@ -10,6 +10,7 @@ __all__ = [
     "ROADS_TO_TAKE_CAP",
     "longest_road",
     "longest_with_new_roads",
+    "reach_all",
     "road_lengths",
     "roads_to_take",
     "roads_to_take_all",
@@ -200,6 +201,58 @@ def _roads_to_take(topology, seat: int, beat: int, budget: int,
         if longest_with_new_roads(probe, seat, k)[k] >= beat:
             return k
     return ROADS_TO_TAKE_CAP
+
+
+def reach_all(state: GameState) -> tuple[tuple[int, ...], ...]:
+    """Per seat, per vertex, the fewest new roads that seat needs for its
+    network to touch the vertex: 0 on its network, `-1` where it cannot.
+
+    A seat's network is its buildings and the ends of its roads. A new road
+    goes on an edge holding no road, and a route may not pass through a
+    vertex holding an opponent's building, though it may end at one; nor can
+    it go on from a road's end at such a vertex. Unreachable means no route,
+    or one longer than the seat's road pieces left. Every vertex is read,
+    legal to settle or not. A seat with no building yet reaches nothing.
+    Cached on the position's roads and buildings, the only things it reads."""
+    return _reach_all(state.board.topology, tuple(state.edge_owner), tuple(state.vertex_owner),
+                      state.num_players)
+
+
+@lru_cache(maxsize=1 << 14)
+def _reach_all(topology, edge_owner: tuple[int, ...], vertex_owner: tuple[int, ...],
+               players: int) -> tuple[tuple[int, ...], ...]:
+    edges = topology.edges
+    out = []
+    for seat in range(players):
+        if seat not in vertex_owner:
+            out.append((-1,) * topology.num_vertices)
+            continue
+        left = MAX_ROADS - sum(1 for o in edge_owner if o == seat)
+        dist = [-1] * topology.num_vertices
+        frontier = [v for v, o in enumerate(vertex_owner) if o == seat]
+        for e, o in enumerate(edge_owner):
+            if o == seat:
+                frontier.extend(edges[e])
+        for v in frontier:
+            dist[v] = 0
+        steps = 0
+        while frontier and steps < left:
+            steps += 1
+            grown = []
+            for v in frontier:
+                if vertex_owner[v] not in (NO_OWNER, seat):
+                    continue  # an opponent's building: reached, not passed
+                for e in topology.vertex_edges[v]:
+                    if edge_owner[e] != NO_OWNER:
+                        continue
+                    a, b = edges[e]
+                    w = b if a == v else a
+                    if dist[w] < 0:
+                        dist[w] = steps
+                        grown.append(w)
+            frontier = grown
+        out.append(tuple(dist))
+    return tuple(out)
 
 
 class _Roads:

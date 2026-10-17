@@ -230,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(405)
         elif self.path in ("/", "/index.html") or is_code(self.path):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
-        elif self.path.startswith("/api/"):
+        elif self.path.startswith("/api/") or self.path.partition("?")[0] == "/api":
             self._serve("GET", {})
         elif looks_like_a_code_attempt(self.path):
             self._file(INDEX_HTML, "text/html; charset=utf-8")

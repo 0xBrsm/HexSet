@@ -2,20 +2,24 @@
 from __future__ import annotations
 
 import random
+import copy
 
 import numpy as np
 import pytest
 
 from helpers import clear_hand, give
 
-from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
+from hexset.actions import Action, ActionType, apply, legal_actions, space_for, victim_of
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
 from hexset.ledger import SeatLedger
 from hexset.game import Phase, imagine, is_over, start, to_move
+from hexset.onnx_record import record_from_game
 from hexset.bots import STANCES
+from hexset.clients.netbot import LeafEvaluator
 from hexset.mcts import (
+    Evaluation,
     HIDDEN_DRAW,
     STANCE_ROWS,
     Leaf,
@@ -401,6 +405,144 @@ def test_a_mover_reads_the_value_vector_with_its_own_stance():
     search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
     search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 1
+
+
+@pytest.mark.parametrize("stance", ["relative", "paranoid"])
+@pytest.mark.parametrize("players", [2, 4])
+def test_observer_matrix_backup_uses_the_choosing_nodes_frame(stance, players):
+    game = a_game(players=players)
+    search = Search(Stub(), stance=stance, rng=random.Random(1))
+    node = search._node(imagine(game, search.rng))
+    node.options = node.options[:1]
+    node.prior = np.ones(1)
+    node.virtual = np.ones(1)
+    node.mover = players - 1
+    values = np.eye(players) * 0.7 + (np.ones((players, players)) - np.eye(players)) * (0.3 / (players - 1))
+    search._backup([(node, 0)], values)
+    assert node.totals[0] == pytest.approx(values[players - 1])
+
+
+def test_evaluation_preserves_the_legacy_two_item_result_contract():
+    prior, value = (0.4, 0.6), (0.2, 0.8)
+    result = Evaluation(prior, value, ((0.2, 0.8), (0.7, 0.3)))
+    assert tuple(result) == (prior, value)
+    assert len(result) == 2
+    assert result[0] is prior and result[1] is value
+
+
+def test_node_keeps_its_positional_constructor_order():
+    game = a_game()
+    prior = np.asarray([1.0])
+    node = Node(game, 0, (), (0.25,) * 4, prior)
+    assert node.prior is prior
+    assert node.observer_values is None
+
+
+@pytest.mark.parametrize("players", [2, 4])
+def test_leaf_evaluator_scores_the_mover_and_batches_other_observers(players):
+    class Policy:
+        def __init__(self):
+            self.scored = []
+            self.observed = []
+
+        def score_rows(self, rows):
+            self.scored.extend(rows)
+            return [
+                (np.asarray([1.0]), tuple(float(seat == i) for i in range(players)))
+                for _, seat, _ in rows
+            ]
+
+        def value_rows(self, rows):
+            self.observed.extend(rows)
+            return [tuple([float(observer == seat) for seat in range(players)])
+                    for _, observer in rows]
+
+    game = a_game(players=players)
+    seat = players - 1
+    leaf = Leaf(game, seat, (Action(ActionType.END_TURN),))
+    policy = Policy()
+    (result,) = LeafEvaluator(policy).evaluate([leaf])
+
+    assert isinstance(result, Evaluation)
+    assert len(policy.scored) == 1 and policy.scored[0][1] == seat
+    assert len(policy.observed) == players - 1
+    assert {observer for _, observer in policy.observed} == set(range(players)) - {seat}
+    assert result.observer_values[seat] == result.value
+    for observer in range(players):
+        assert result.observer_values[observer] == tuple(
+            float(observer == component) for component in range(players)
+        )
+
+
+def test_root_private_dev_identity_changes_its_value_not_opponent_prior():
+    game = a_game()
+    altered = copy.deepcopy(game)
+    for candidate, kind in ((game, DevCard.KNIGHT), (altered, DevCard.MONOPOLY)):
+        candidate._state.dev_cards[0] = [0] * len(DevCard)
+        candidate._state.dev_cards[0][kind] = 1
+    options = tuple(legal_actions(game))
+    space = space_for(game)
+
+    class RecordPolicy:
+        def vector(self, position, observer):
+            record = record_from_game(position, observer, space, options=())
+            own_dev = record["own_dev"]
+            private_score = float(np.dot(own_dev, np.arange(1, len(DevCard) + 1))) / 10.0
+            return tuple([private_score] + [0.0] * (game.num_players - 1))
+
+        def score_rows(self, rows):
+            return [
+                (np.full(len(row_options), 1 / len(row_options)), self.vector(position, seat))
+                for position, seat, row_options in rows
+            ]
+
+        def value_rows(self, rows):
+            return [self.vector(position, observer) for position, observer in rows]
+
+    policy = RecordPolicy()
+    evaluator = LeafEvaluator(policy)
+    leaf = Leaf(game, 1, options)
+    (first,) = evaluator.evaluate([leaf])
+    (second,) = evaluator.evaluate([Leaf(altered, 1, options)])
+
+    first_opponent_record = record_from_game(game, 1, space, options=())
+    second_opponent_record = record_from_game(altered, 1, space, options=())
+    first_root_record = record_from_game(game, 0, space, options=())
+    second_root_record = record_from_game(altered, 0, space, options=())
+    assert all(np.array_equal(first_opponent_record[k], second_opponent_record[k])
+               for k in first_opponent_record)
+    assert not np.array_equal(first_root_record["own_dev"], second_root_record["own_dev"])
+    assert first.prior == pytest.approx(second.prior)
+    assert first.observer_values[1] == second.observer_values[1]
+    assert first.observer_values[0] != second.observer_values[0]
+    assert first.observer_values[0][0] != second.observer_values[0][0]
+
+
+def test_observer_rows_keep_root_seat_calibration():
+    game = a_game()
+    matrix = np.asarray([
+        [0.4, 0.3, 0.2, 0.1],
+        [0.1, 0.4, 0.3, 0.2],
+        [0.2, 0.1, 0.4, 0.3],
+        [0.3, 0.2, 0.1, 0.4],
+    ])
+
+    class ObserverEvaluator(Stub):
+        def evaluate(self, leaves):
+            return [
+                Evaluation(np.full(len(leaf.options), 1 / len(leaf.options)),
+                           tuple(matrix[leaf.seat]), tuple(matrix))
+                for leaf in leaves
+            ]
+
+    calibration = (0.3, 1.0)
+    search = Search(ObserverEvaluator(), own_calibration=calibration, rng=random.Random(1))
+    node = search._node(imagine(game, search.rng))
+    search._expand([node], [0])
+    assert node.observer_values == tuple(
+        calibrate_own(row, 0, calibration) for row in matrix
+    )
+    assert node.value == node.observer_values[node.mover]
 
 
 def test_a_side_reads_the_value_vector_as_the_chance_none_of_its_targets_wins():

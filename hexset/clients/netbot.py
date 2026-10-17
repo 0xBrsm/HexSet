@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
-from hexset.mcts import Search, calibrate_own
+from hexset.mcts import Evaluation, Search, calibrate_own
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
     gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
@@ -493,7 +493,7 @@ def _shown(world: Game, seat: int) -> None:
 
 @dataclass
 class LeafEvaluator:
-    """A whole wave of `hexset.mcts` leaves in one forward."""
+    """A whole wave of `hexset.mcts` leaves in batched policy/value forwards."""
 
     policy: Policy
     pad_to: int | None = None
@@ -510,7 +510,52 @@ class LeafEvaluator:
         if self.pad_to is not None and count < self.pad_to:
             padded.extend([leaves[-1]] * (self.pad_to - count))
         rows = [(leaf.game, leaf.seat, leaf.options) for leaf in padded]
-        return self.policy.score_rows(rows)[:count]
+        scored = self.policy.score_rows(rows)
+        if len(scored) != len(rows):
+            raise ValueError(f"policy answered {len(scored)} of {len(rows)} MCTS leaves")
+
+        # Keep the leaf mover's prior (and value) in its own frame. The value
+        # head's other components are evaluated separately in each observer's
+        # frame so a root's private cards are not erased on its own path, and
+        # are not exposed to another mover's prior or value.
+        observer_rows = []
+        observer_slots = []
+        values_by_observer = []
+        for i, leaf in enumerate(leaves):
+            prior, value = scored[i]
+            value = tuple(float(v) for v in value)
+            if not 0 <= leaf.seat < len(value):
+                raise ValueError("leaf seat is outside its value vector")
+            row = [None] * len(value)
+            row[leaf.seat] = value
+            values_by_observer.append(row)
+            for observer in range(len(value)):
+                if observer == leaf.seat:
+                    continue
+                observer_rows.append((leaf.game, observer))
+                observer_slots.append((i, observer))
+
+        if observer_rows:
+            observer_values = self.policy.value_rows(observer_rows)
+            if len(observer_values) != len(observer_rows):
+                raise ValueError(
+                    f"policy answered {len(observer_values)} of {len(observer_rows)} observer values"
+                )
+            for (i, observer), vector in zip(observer_slots, observer_values):
+                values_by_observer[i][observer] = tuple(float(v) for v in vector)
+
+        answers = []
+        for i, leaf in enumerate(leaves):
+            rows_for_leaf = values_by_observer[i]
+            if any(row is None for row in rows_for_leaf):
+                raise ValueError("policy did not return every observer value")
+            prior, value = scored[i]
+            answers.append(Evaluation(
+                prior=prior,
+                value=tuple(float(v) for v in value),
+                observer_values=tuple(rows_for_leaf),
+            ))
+        return answers
 
     def terminal(self, game: Game) -> Sequence[float]:
         """`hexset.mcts.Evaluator.terminal`: the one-hot winner in board-seat

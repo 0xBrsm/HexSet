@@ -29,6 +29,7 @@ from .view import HoldReading
 
 __all__ = [
     "Leaf",
+    "Evaluation",
     "Evaluator",
     "HIDDEN_DRAW",
     "draws_hidden",
@@ -52,6 +53,35 @@ class Leaf:
     options: tuple[Action, ...]
 
 
+@dataclass(frozen=True)
+class Evaluation:
+    """A leaf's prior and value, optionally with a value vector per observer.
+
+    ``value`` is the vector for the leaf mover, preserving the ordinary
+    evaluator contract. ``observer_values[p]`` is the full board-seat value
+    vector as seen from seat ``p``'s information frame. Search uses the frame
+    of each choosing node when it backs a leaf up its path. Legacy evaluators
+    may continue returning ``(prior, value)``; that shared vector is used at
+    every ancestor as before.
+    """
+
+    prior: Sequence[float]
+    value: Sequence[float]
+    observer_values: Sequence[Sequence[float]] | None = None
+
+    # Keep the historical two-item evaluator result usable by callers that
+    # unpack, index, or take its length. Observer rows are additive metadata.
+    def __iter__(self):
+        yield self.prior
+        yield self.value
+
+    def __len__(self) -> int:
+        return 2
+
+    def __getitem__(self, index):
+        return (self.prior, self.value)[index]
+
+
 class Evaluator(Protocol):
     """Scores a whole wave of leaves at once: per leaf, a prior over that leaf's
     `options` and a value per seat. The prior must be normalised over the legal
@@ -60,7 +90,7 @@ class Evaluator(Protocol):
 
     def evaluate(
         self, leaves: Sequence[Leaf]
-    ) -> Sequence[tuple[Sequence[float], Sequence[float]]]: ...
+    ) -> Sequence[tuple[Sequence[float], Sequence[float]] | Evaluation]: ...
 
     def terminal(self, game: Game) -> Sequence[float]:
         """The per-seat value of a finished game, board-seat order, on this
@@ -160,6 +190,10 @@ class Node:
     # world's own node and lists itself; a root combining several is a
     # synthetic node whose `children` are empty and whose subtrees live here.
     worlds: tuple[tuple[float, "Node"], ...] = ()
+    # Full value vectors by observer, set by frame-aware evaluators. ``value``
+    # remains the vector from this node mover's frame for existing consumers.
+    # Appended to preserve the positional constructor of the public Node.
+    observer_values: tuple[tuple[float, ...], ...] | None = None
 
     @property
     def expanded(self) -> bool:
@@ -385,6 +419,7 @@ class Search:
         )
         if node.terminal:
             node.value = tuple(float(v) for v in self.evaluator.terminal(game))
+            node.observer_values = tuple(node.value for _ in node.value)
             node.prior = np.zeros(0)
         return node
 
@@ -531,14 +566,19 @@ class Search:
                 return roll
         return odds[-1][0]
 
-    def _backup(self, path: Sequence[tuple[Node, int]], value: Sequence[float]) -> None:
-        vector = np.asarray(value, dtype=np.float64)
-        # One visit each, so `_credit`'s products are the vector itself; its
-        # sum is the same at every node of the path, so it is taken once.
-        total = float(vector.sum())
+    def _backup(
+        self,
+        path: Sequence[tuple[Node, int]],
+        value: Sequence[float] | Sequence[Sequence[float]],
+    ) -> None:
+        vectors = np.asarray(value, dtype=np.float64)
         for node, index in path:
+            # An observer-aware evaluation keeps a coherent full vector for
+            # each seat. The parent node's mover is the chooser for this edge;
+            # do not use the child leaf's frame for its Q value.
+            vector = vectors[node.mover] if vectors.ndim == 2 else vectors
             node.virtual[index] -= 1
-            self._credit(node, index, vector, 1, total)
+            self._credit(node, index, vector, 1, float(vector.sum()))
 
     def _credit(
         self, node: Node, index: int, vector: np.ndarray, visits: int, total: float | None = None
@@ -565,16 +605,47 @@ class Search:
         scored = self.evaluator.evaluate(wanted)
         if len(scored) != len(wanted):
             raise ValueError(f"evaluator answered {len(scored)} of {len(wanted)} leaves")
-        for node, (prior, value) in zip(nodes, scored):
+        for node, result in zip(nodes, scored):
+            if isinstance(result, Evaluation):
+                prior, value = result.prior, result.value
+                observer_values = result.observer_values
+            else:
+                prior, value = result
+                observer_values = None
             node.prior = np.asarray(prior, dtype=np.float64)
             if node.prior.shape != (len(node.options),):
                 raise ValueError(
                     f"prior over {node.prior.shape} for {len(node.options)} options"
                 )
-            node.value = tuple(float(v) for v in value)
+            vector = np.asarray(value, dtype=np.float64)
+            seats_count = node.totals.shape[1]
+            if vector.shape != (seats_count,) or not np.isfinite(vector).all():
+                raise ValueError(f"value vector must have {seats_count} finite seats")
+            if observer_values is None:
+                matrix = None
+                node.value = tuple(float(v) for v in vector)
+            else:
+                matrix = np.asarray(observer_values, dtype=np.float64)
+                if matrix.shape != (seats_count, seats_count) or not np.isfinite(matrix).all():
+                    raise ValueError(
+                        f"observer values must be a finite {seats_count}x{seats_count} matrix"
+                    )
+                if not np.allclose(matrix[node.mover], vector, rtol=0.0, atol=1e-7):
+                    raise ValueError("value must match the leaf mover's observer row")
+                node.observer_values = tuple(
+                    tuple(float(v) for v in row) for row in matrix
+                )
+                node.value = node.observer_values[node.mover]
         if self.own_calibration is not None and seats is not None:
             for node, seat in zip(nodes, seats):
-                node.value = calibrate_own(node.value, seat, self.own_calibration)
+                if node.observer_values is None:
+                    node.value = calibrate_own(node.value, seat, self.own_calibration)
+                else:
+                    node.observer_values = tuple(
+                        calibrate_own(row, seat, self.own_calibration)
+                        for row in node.observer_values
+                    )
+                    node.value = node.observer_values[node.mover]
 
     def _combine(self, group: Sequence[_Run]) -> Node:
         """One root from this decision's worlds: root statistics summed
@@ -607,7 +678,7 @@ class Search:
             prior=np.zeros(len(options)),
             worlds=tuple((run.share, run.root) for run in group),
         )
-        value = np.zeros(seats)
+        values = np.zeros((seats, seats))
         for run in group:
             root, share = run.root, run.share
             where = [order[action] for action in root.options]
@@ -616,8 +687,12 @@ class Search:
             combined.totals[where] += share * root.totals
             if root.prior is not None and root.prior.size:
                 combined.prior[where] += share * root.prior
-            value += share * np.asarray(root.value)
-        combined.value = tuple(float(v) for v in value)
+            matrix = root.observer_values
+            if matrix is None:
+                matrix = tuple(root.value for _ in range(seats))
+            values += share * np.asarray(matrix)
+        combined.observer_values = tuple(tuple(float(v) for v in row) for row in values)
+        combined.value = combined.observer_values[combined.mover]
         mass = float(combined.prior.sum())
         if mass > 0:
             combined.prior = combined.prior / mass
@@ -691,7 +766,7 @@ class Search:
                 for _ in range(min(self.wave, run.budget - run.done)):
                     path, leaf = self._descend(run.root)
                     if leaf.expanded:
-                        self._backup(path, leaf.value or ())
+                        self._backup(path, leaf.observer_values or leaf.value or ())
                         run.done += 1
                         continue
                     entry = waiting.get(id(leaf))
@@ -706,7 +781,7 @@ class Search:
                 self._expand(wanted, wanted_seats)
                 for run, leaf, paths in waiting.values():
                     for path in paths:
-                        self._backup(path, leaf.value or ())
+                        self._backup(path, leaf.observer_values or leaf.value or ())
                         run.done += 1
 
         answers = [self._combine(group) for group in groups]

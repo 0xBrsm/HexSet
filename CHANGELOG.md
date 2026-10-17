@@ -5,6 +5,109 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.16.0
+
+### Added
+
+- **`hexset.threats`: what one rival build on its next turn takes from a seat.**
+  `threats(state, victim, hands=None)` lists every road, settlement and knight a
+  rival could make next turn that steals an award from `victim` (`kind`
+  `"steal"`) or costs it route length, roads or knights to an award, or spots
+  it could settle within one new road (`"block"`), each with its `Cost` and
+  the cards the rival still lacks by `hands` (a seat's `View.known` for what
+  it can certify). `spots(state, seat)` is the free vertices a seat can settle
+  at its road ends or one new road beyond.
+
+- **`hexset.decisions.closes`: where a seat's run of options ends.** A run
+  lasts from a seat's first option to the first that shows something or
+  hands the table on: a part in `REVEALING` (the roll, a dev card bought, a
+  robber move and its steal, a Monopoly, the end of the turn), the seat's
+  whole discard made, a trade event the seat may offer in run inside the
+  option (`event_before`, `Game.trade_event_turn` before it), the game over,
+  or another seat to act. A build, a bank trade, a knight before its robber,
+  Year of Plenty, Road Building and a setup turn the seat follows with its
+  own run on. Nothing inside a run is seen by another seat or tells the seat
+  anything new, so a learner can credit it as one decision.
+
+- **`LaneEnv` names every request's run**: `Request.decision_id` (counted
+  from 0 per game over every seat) and `Request.part` (its place in the run,
+  0 the first), and every `Decision` of an episode its `decision_id`. Bot
+  seats' moves are grouped by the same rule.
+
+- **`decisions.options` and `decisions.tensors` take `double_turn`**
+  (default `True`, as before): `False` states the snake seat's double turn
+  as its first setup turn alone, a `SETUP`, the second being the next
+  position's.
+
+- **`LaneEnv(discard_order="random")`**: a seven's discards are taken in an
+  order drawn per game among the seats that owe (`f"discard-order:{game_key}"`,
+  a stream of its own), each seat finishing its whole discard before the
+  next; bot seats are asked as the seat drawn. A discard out of seat order is
+  filed in `Record.actors` (`Tape.step(..., actor=)`), so the record replays.
+  `"seat"`, the default, is the lowest-first order lanes have always played.
+  `hexset.gym.lanes.DISCARD_ORDERS` names the two.
+
+- **`LaneEnv(decisions=...)`**: the policy IDs asked for whole decisions.
+  Their requests carry `Request.decision` (`hexset.decisions.tensors`) and
+  empty `options`; `step()` takes an action or a `Compound` and applies its
+  parts in order, each its own step of the action stream and the record, up
+  to a game's end or the action cap. Bots act a move at a time beside them.
+
+- **Contract 9's observation: one encoding for every seat** (`hexset.contract9`,
+  `CONTRACT` `"9"`). Four seat tokens of 39 features each, the
+  perspective's first: place in play order, on turn, the perspective; a hand
+  as the ledger's bounds (`hand.least`, `hand.most`) and its size; development
+  cards as the most of each kind the unseen cards allow, the count, the five
+  longest-held ages and the playable kinds (only the seat on turn loses them
+  to a card played); points, distance to Longest Road and Largest Army, the
+  discard owed and the pieces left. A table token of 20 (bank, the pool the
+  untyped cards come from, the deck, the unseen development cards, the turn
+  uncapped, setup, rolled, robber pending); hexes (terrain, pips, robber) and
+  vertices (port, building); a building's and a road's owner as a pointer to
+  a seat row, and each seat's reach to each vertex. One scale per unit, so
+  per resource `bank + pool + every hand.least` is 19. `encode9`, `flatten`,
+  `layout`, `incidences`.
+
+- **Compound decisions** (`hexset.decisions`): a setup settlement with its
+  road, the setup snake seat's two settlements and roads back to back, a Road
+  Building card with the roads it places, and a whole discard are one decision
+  each. `options` lists a seat's decisions in these terms; `apply_option`
+  applies a `Compound` as its atomic parts inside one call, so records,
+  replays and seats acting a piece at a time are unchanged; `tensors` and
+  `locate` state a decision as a network scores it (the ordinary actions'
+  flat mask with robber victims seat-relative, the setup incidences, the snake
+  seat's pairs without listing them, the Road Building and discard
+  candidates). `setup_parts`, `road_building_parts` and `discard_parts` build a compound's moves.
+
+### Changed
+
+- **Contract 9 states a decision for less.** `contract9.encode9` fills the
+  seat tokens in bulk, counts every seat's buildings in one pass over the
+  vertices, and reads a position's reach closeness once (keyed on
+  `roads.reach_all`'s cached result); `contract9.incidences` finds a board's
+  `Topology` by identity before comparing it; and the Road Building card's
+  second roads are `state.placeable_roads`, one pass instead of
+  `road_placeable` asked of every edge. The same encoding, decisions and
+  order, bit for bit.
+
+- **`LaneEnv(decisions=...)` asks the snake seat's double turn as two setup
+  turns**, the second on the board after the first, each a `SETUP` of its own
+  (`tensors(..., double_turn=False)`), so a seat asked for decisions is never
+  offered a `SETUP_DOUBLE`.
+
+- **`hexset.decisions` checks whether Road Building's first road wins off the
+  position**, without playing the card out on a copy of the game: the same
+  answer (Longest Road to its builder, two points short), a cost that was
+  most of a decision's tensors near a game's end.
+
+### Fixed
+
+- **MCTS values use each choosing seat's information frame.** A leaf now
+  retains a complete value vector per observer, so backup evaluates each
+  parent edge from the chooser's own view while keeping the leaf mover's
+  policy prior and value in its original frame. Legacy evaluators that return
+  `(prior, value)` keep their shared-vector behavior.
+
 ## 1.15.0
 
 ### Breaking

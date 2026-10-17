@@ -47,6 +47,31 @@ with per-seat decision histories, every cleared exchange and an `Outcome`.
 With `records=True`, `episode.record` holds a `hexset.record.Record` for
 replay.
 
+During a seven's discards several seats owe at once. `discard_order="seat"`
+(the default) asks the lowest owing seat first; `discard_order="random"`
+draws the next seat among those owing, from a stream of the game's own that
+shifts none of its dice or deck, and lets it finish its whole discard first.
+A discard taken out of seat order is filed in the record's `actors`.
+
+`decisions` names policy IDs asked for whole decisions (`hexset.decisions`):
+their requests carry `request.decision`, the decision's tensors
+(`decisions.tensors`), and empty `options`, and are answered with an action
+or a `Compound` among the decision's options. `step()` applies a compound's
+parts one at a time, each its own step of the action stream and the record,
+so a record replays as if the seat had acted a move at a time. Bot seats
+always act a move at a time. The snake seat's double setup is asked as two
+setup turns, the second on the board after the first.
+
+Every request names the run of options it belongs to: `request.decision_id`
+(counted from 0 per game, every seat's together) and `request.part` (0 for
+the run's first). A seat's run lasts from its first option to the first that
+shows something or hands the table on (`decisions.closes`: the roll, a dev
+card bought, a robber's steal, a Monopoly, a trade event the seat may offer
+in, its discard done, the end of its turn, another seat to act), so a
+learner can credit the run as one decision while each part stays what one
+forward chooses among. Each `Decision` of an episode carries its run's
+`decision_id`.
+
 `deal` bounds the number of games started; without it, finished lanes refill
 indefinitely. For evaluation, bound the games dealt so the result does not
 favour the games that finish first. `cohort(games)` re-arms a bounded

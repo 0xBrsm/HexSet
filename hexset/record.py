@@ -173,10 +173,12 @@ class Tape:
     actions: list[tuple[int, int, int]] = field(default_factory=list)
     trades: list[tuple[int, int, int, tuple[int, ...]]] = field(default_factory=list)
     shown: list[tuple[int, int, int, tuple[int, ...]]] = field(default_factory=list)
+    actors: list[tuple[int, int]] = field(default_factory=list)
 
     def step(
         self, action: Action, cleared: Sequence[Trade],
         shown: Sequence[tuple[int, int, tuple[int, ...]]] = (), *, before: int = 0,
+        actor: int | None = None,
     ) -> None:
         """File one applied action, the exchanges that cleared inside it and
         the offers and answers shown around them.
@@ -185,12 +187,17 @@ class Tape:
         and `before` its length going in; `shown` the `game.shown` slice across
         the same `apply`. The turn's trade event runs inside the action that
         enters the main phase (a `ROLL`, or the `MOVE_ROBBER` after a seven),
-        or, for a gate with `trade_now`, inside a later main-phase action."""
+        or, for a gate with `trade_now`, inside a later main-phase action.
+        `actor` names a `DISCARD`'s seat where it is not the one
+        `hexset.game.to_move` names (`Record.actors`); `None` leaves it to
+        `to_move`."""
         step = len(self.actions)
         for trade in cleared:
             self.trades.append((step, trade.a, trade.b, tuple(trade.received)))
         for traded, seat, received in shown:
             self.shown.append((step, int(traded) - before, int(seat), tuple(received)))
+        if actor is not None:
+            self.actors.append((step, int(actor)))
         self.actions.append((int(action.type), action.a, action.b))
 
     def sealed(self, game: Game, *, seed: int | str | None = None) -> Record:
@@ -219,6 +226,7 @@ class Tape:
             split_streams=getattr(chance.inner, "split", False),
             trades=tuple(self.trades),
             shown=tuple(self.shown),
+            actors=tuple(self.actors),
             winner=game.won_by,
             turns=game.turns,
             locked=tuple(sorted(game.locked)),

@@ -139,18 +139,55 @@ def register_entrant_kind(kind: str, factory) -> None:
 #: Presets registered with `listed=False`.
 _UNLISTED_PRESETS: set[str] = set()
 
+#: Preset -> the profile it was registered with (`register_preset`).
+_PRESET_PROFILES: dict[str, dict[str, str]] = {}
 
-def register_preset(name: str, entrant: "Entrant", *, listed: bool = True) -> None:
+#: What a preset's profile may say: a client's profile less its name, which is
+#: the preset's own (`hexset.server.constants.PROFILE_FIELDS`).
+BOT_PROFILE_FIELDS = ("version", "owner", "url", "description")
+
+
+def register_preset(
+    name: str, entrant: "Entrant", *, listed: bool = True, profile: dict[str, str] | None = None
+) -> None:
     """Register a named lineup shortcut (`PRESETS[name]`, resolved by
     `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
     ship itself. A shipped name is refused, as is a name already registered
     to an unequal entrant; an equal one again is a no-op. An unlisted preset
     resolves like any other but is left out of `registered_presets`, so the
-    served picker does not offer it: a bench control or a test opponent."""
+    served picker does not offer it: a bench control or a test opponent.
+
+    `profile` says what the bot is, as a client's profile does for a client
+    (`BOT_PROFILE_FIELDS`, each held to the same lengths): the server lists
+    it with the bot, journals its `version` with every seat the bot takes,
+    and shows it beside the bot in the rankings. A field it does not know, or
+    one a client's profile would refuse, is a `ValueError`."""
+    from hexset.server.constants import profile_value
+
+    held: dict[str, str] = {}
+    for field, value in (profile or {}).items():
+        if field not in BOT_PROFILE_FIELDS:
+            raise ValueError(f"preset {name!r}: a profile has no {field!r}; one of {BOT_PROFILE_FIELDS}")
+        try:
+            value = profile_value(field, value)
+        except ValueError as error:
+            raise ValueError(f"preset {name!r}: {error}") from None
+        if value:
+            held[field] = value
     _refuse_shipped(name, "preset")
     _register(PRESETS, name, entrant, "preset")
     if not listed:
         _UNLISTED_PRESETS.add(name)
+    if held:
+        _PRESET_PROFILES[name] = held
+    else:
+        _PRESET_PROFILES.pop(name, None)
+
+
+def preset_profile(name: str) -> dict[str, str]:
+    """The profile preset `name` was registered with (`register_preset`):
+    empty for none, or for no such preset."""
+    return dict(_PRESET_PROFILES.get(name, {}))
 
 
 def register_spec(prefix: str, parse: Callable[[str], "Entrant"]) -> None:
@@ -185,6 +222,7 @@ def unregister_preset(name: str) -> None:
     _refuse_shipped(name, "preset")
     PRESETS.pop(name, None)
     _UNLISTED_PRESETS.discard(name)
+    _PRESET_PROFILES.pop(name, None)
 
 
 def unregister_spec(prefix: str) -> None:
@@ -1723,7 +1761,7 @@ __all__ = [
     "CHECKPOINT_KINDS", "TRADER", "DEALS", "coalition", "HANDOFF", "HANDOFF_KIND", "handoff",
     "entrant_from_name", "lineup_from_names", "base_name",
     # runtimes
-    "register_entrant_kind", "register_preset", "register_spec",
+    "register_entrant_kind", "register_preset", "register_spec", "preset_profile", "BOT_PROFILE_FIELDS",
     "unregister_entrant_kind", "unregister_preset", "unregister_spec",
     "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT", "KIND_HINT",
     "spawn", "traded",

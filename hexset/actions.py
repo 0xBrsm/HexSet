@@ -233,6 +233,15 @@ def _building_actions(game: Game) -> list[Action]:
     return out
 
 
+#: The development card each play action spends.
+_CARD_OF = {
+    ActionType.PLAY_KNIGHT: DevCard.KNIGHT,
+    ActionType.PLAY_ROAD_BUILDING: DevCard.ROAD_BUILDING,
+    ActionType.PLAY_MONOPOLY: DevCard.MONOPOLY,
+    ActionType.PLAY_YEAR_OF_PLENTY: DevCard.YEAR_OF_PLENTY,
+}
+
+
 def _card_actions(game: Game) -> list[Action]:
     state = game._state
     player = game.current_player
@@ -243,9 +252,12 @@ def _card_actions(game: Game) -> list[Action]:
     held = state.dev_cards[player]
     if held[DevCard.KNIGHT]:
         out.append(Action(ActionType.PLAY_KNIGHT))
-    if held[DevCard.ROAD_BUILDING] and road_count(state, player) < MAX_ROADS:
-        # With no road pieces left the card is unplayable, not a free pass;
-        # with one, it places one road (the printed rule).
+    if (held[DevCard.ROAD_BUILDING] and road_count(state, player) < MAX_ROADS
+            and placeable_roads(state, player)):
+        # With no road pieces left, or no free edge joined to the seat's
+        # network, the card is unplayable, not a free pass: neither ever
+        # comes back, since roads and buildings never leave the board. With
+        # one piece, or room for one road, it places one (the printed rule).
         out.append(Action(ActionType.PLAY_ROAD_BUILDING))
     if held[DevCard.MONOPOLY]:
         out.extend(Action(ActionType.PLAY_MONOPOLY, r) for r in range(NUM_RESOURCES))
@@ -300,8 +312,12 @@ def legal_actions(game: Game, seat: int | None = None) -> list[Action]:
         if roads:
             return [Action(ActionType.BUILD_ROAD, edge) for edge in roads]
         # Rulebook: any development card may be played before rolling, not only
-        # the knight; building, buying and trading stay MAIN-only.
-        return [Action(ActionType.ROLL)] + _card_actions(game)
+        # the knight; building, buying and trading stay MAIN-only. A host may
+        # take fewer (`Game.before_roll`).
+        cards = _card_actions(game)
+        if game.before_roll is not None:
+            cards = [a for a in cards if _CARD_OF[a.type] in game.before_roll]
+        return [Action(ActionType.ROLL)] + cards
 
     if game.phase is Phase.DISCARD:
         owing = players_owing_discards(game)

@@ -9,10 +9,14 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | --- | --- |
 | `GET /api` | `{"api": 4, "docs": "<this page's URL>"}` |
 | `GET /api/version` | `{"api": 4}`, this API's contract version |
-| `GET /api/models` | `{"models": [...]}`, the names `bots` and `model` accept |
-| `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals a game |
+| `GET /api/models` | `{"models": [...], "game_types": {...}}`, the names `bots` and `model` accept, with each bot's profile ([below](#opponent-names)) |
+| `GET /api/rankings` | The rankings ([below](#rankings)); 404 where the server keeps none |
+| `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals an unranked game |
 | `POST /api/join` | `{"code": "abcdef", "name": "Alice", "client": {...}}`; claims a random open seat |
 | `POST /api/reclaim` | `{"code": "abcdef", "secret": "..."}`; a fresh token for the seat whose client id matches |
+| `POST /api/ranked` | `{"game_type": "standard", "client": {...}}`; a ticket for a ranked game ([below](#ranked-play)) |
+| `GET /api/ranked/<ticket>?wait=N` | `waiting`, or once matched the seat's token and state |
+| `POST /api/ranked/<ticket>/leave` | Leaves the queue |
 | `GET /api/state` | The seat's view, including `legal_actions` |
 | `GET /api/board` | Static board layout |
 | `GET /api/record` | The seat's ONNX input record, `options` and `space`; 409 unless the seat may act |
@@ -27,11 +31,11 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `GET /api/table/<code>/board` | Board layout |
 | `GET /api/table/<code>/replay?round=N` | The position at the end of round `N` |
 
-`/api`, `version`, `models`, `games`, `join`, `reclaim` and the three
+`/api`, `version`, `models`, `rankings`, `games`, `join`, `reclaim`, the `ranked` routes and the three
 `/api/table/<code>` reads take no token. Codes are six characters from
 `23456789abcdefghjkmnpqrstuvwxyz`, matched case-insensitively. Names are
 trimmed and cut to 40 characters; an unnamed seat is named `human`, `api` or
-`mcp` after its client kind.
+`mcp` after its client's kind ([below](#client-identity-and-seat-recovery)).
 
 ## Errors
 
@@ -47,8 +51,8 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 | 429 | `POST /api/games` from an address over its new-game limits (below) |
 | 500 | An unexpected server error |
 
-`POST /api/games` validates every bot before dealing: a name not in
-`/api/models`, more bots than the game type leaves seats for, or a bot that
+`POST /api/games` validates every bot before dealing: a name not offered at
+the game's type in `/api/models`, more bots than the game type leaves seats for, or a bot that
 will not load is a 400, and no game is created. `board_mode` names a
 `hexset.board.board.BOARD_MODES` entry, `spiral` (the server's `--board`)
 when omitted, and `game_type` a `hexset.rules.GAME_TYPES` entry, `standard`
@@ -189,13 +193,48 @@ routes with named resource counts and response indices ([mcp.md](mcp.md)).
 `/api/games` and `/api/join` accept an optional client object:
 
 ```json
-{"client": {"id": "<64 lowercase hex characters>", "kind": "api"}}
+{"client": {"id": "<64 lowercase hex characters>", "name": "deepvine", "version": "2.3",
+            "owner": "octocat", "url": "https://github.com/octocat/deepvine",
+            "description": "MCTS at 400 simulations a move over a 1.2M-parameter self-play net."}}
 ```
 
 `id` is the SHA-256 hex digest of a secret the client keeps, hashed as UTF-8.
-`kind` is `web`, `api` or `mcp`. Without the object the seat is `api` with no
-recoverable identity. `mcp` is only what the MCP endpoint's own seats are: a
-request to `/api/*` that claims it is journalled as `api`.
+It is the client's identity: without it the seat has none to recover, and
+the rankings have nothing to count it under. Keep one secret for a bot
+across its games, versions included.
+
+The rest is the client's profile, each field a string trimmed and cut to its
+length. A client of the HTTP API must send its `id`, `name`, `version`,
+`owner` and `description` to deal or join (a 400 names what is missing): the
+price of the service is that every game an API client plays counts, under an
+id that says what it is. Only `url` is optional. The page and the MCP
+endpoint are not asked (below, and [mcp.md](mcp.md)).
+
+| Field | Length | What to put there |
+| --- | --- | --- |
+| `name` | 40 | What the client is called; also the seat's name when the body gives none |
+| `version` | 40 | Its version, as its author numbers them |
+| `owner` | 40 | Who runs it: a Discord or GitHub username is best |
+| `url` | 200 | An http(s) page about it: its repository, a write-up, a model card. Refused (400), not cut, when longer or not http(s) |
+| `description` | 100 | What it is, in one sentence: its architecture and its main parameters ("A rules-based reflex agent for 4p and duels."). Refused (400), not cut, when longer |
+
+A profile is whatever the latest request carrying its `id` sent: each
+`/api/games` or `/api/join` replaces it whole, so a field left out is cleared.
+`POST /api/name` on a seat it holds changes its `name` alone, the rest kept.
+The page remembers the name its player last gave and sends it with every
+deal and join.
+It is shown beside the id's rows in the rankings. Nothing verifies it.
+Anything else in the object is ignored.
+
+The seat's kind is the server's, decided from the request, never from the
+body: `mcp` for a seat the MCP endpoint claims; `web` for a request the
+browser marks as sent by this server's own page (`Sec-Fetch-Site:
+same-origin`, or, from a browser that sends none, an `Origin` naming the host
+the request was addressed to); `api` for anything else. A `web` seat is held
+on its setup turn until it ends it, which gives the page's undo button its
+time; an `api` seat's setup turn passes on its own. The marks are what a
+browser sends, so a client that sets those headers itself is taken for the
+page.
 
 The journal also keeps, with each seat a request claims, where the request
 came from: the client's address, `via` (`http` or `mcp`, the route it arrived
@@ -243,16 +282,23 @@ alongside this page. It needs no model and imports nothing from the engine
 but the token header's name:
 
 ```sh
-python -m hexset.clients.botclient --url http://127.0.0.1:8770 --game abcdef
+python -m hexset.clients.botclient --url http://127.0.0.1:8770 --game abcdef --owner octocat
+python -m hexset.clients.botclient --url http://127.0.0.1:8770 --ranked duel-variant --owner octocat
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--url`, `--game` | required | Server base URL, game code |
-| `--name` | none | Display name |
+| `--url` | required | Server base URL |
+| `--game` | `--game` or `--ranked` | Join this game by its code: unranked |
+| `--name` | `botclient` | Its profile's `name`, and the seat's |
 | `--seed` | none | Seed for its random choices |
 | `--poll-interval` | `10.0` | Longest one long-poll waits, in seconds |
-| `--client-secret` | `--name`, else `botclient` | Secret behind the seat's client id |
+| `--ranked` | none | Instead of `--game`: queue for a ranked game of this type (`standard`, `duel-variant`) and play the seat dealt (`ranked_seat`) |
+| `--client-secret` | `--name` | Secret behind the seat's client id |
+| `--owner` | required | Its profile's `owner` |
+| `--version` | `1` | Its profile's `version` |
+| `--description` | this example's own | Its profile's `description` |
+| `--info-url` | none | Its profile's `url` |
 
 It joins, then meets whatever `your_move` names. On `act` and `discard` it
 plays a build when one is legal, else any legal action, and once a turn in
@@ -266,12 +312,105 @@ table to move and reads it again.
 A client playing its own network reads `GET /api/record`, the
 [record contract](onnx.md#record-inputs)'s input for this seat, beside `/api/state`.
 
+## Ranked play
+
+Only ranked games reach the [rankings](#rankings), and only the server
+deals them: a client queues for a game type and is seated where the queue
+puts it, with no say in the table, its opponents, the board or the seat
+order. A game dealt by `POST /api/games`, or joined by its code, is unranked
+and never counts. Ranked play is for clients of the HTTP API, which must say what they
+are ([above](#client-identity-and-seat-recovery)), and for models over MCP
+(`ranked_game`, [mcp.md](mcp.md)); the page does not queue.
+
+`POST /api/ranked {"game_type": ..., "client": {...}}` returns
+`{"ticket", "game_type", "status": "waiting"}`. It needs a `client.id`, the
+identity every ranked game counts under, and is admitted against the
+caller's limits as a deal is (New-game limits, above). `GET
+/api/ranked/<ticket>?wait=N` long-polls up to 25 seconds: `waiting`, or once
+matched `"status": "matched"` with the seat's `token` and its state, as
+`POST /api/join` answers; from there the seat plays as any other. A ticket
+not read for 60 seconds is dropped, and its deal given back; `POST
+/api/ranked/<ticket>/leave` drops it at once. A client may hold any number of
+tickets and play any number of ranked games at once.
+
+Every 10 seconds the server matches each game type's queue. The oldest
+ticket is seated with the waiting clients it has met least in ranked games,
+never two seats for one client id, until the table is full. One seat left
+goes to the server's own bot (`--ranked-bot`, [server.md](server.md)), never
+more: like any player it sits once at a table, so a table short by two or
+more waits for players. One
+version of a client, its `id` at one profile `version`, sits at no more than
+100 ranked tables with that bot; past that it waits for other clients, so a
+new version starts afresh.
+
+The server may also enter its own bots (`--ranked-entrant`,
+[server.md](server.md)). Each holds a ticket at every game type it plays, one
+ranked game of each at a time, is matched like any client, under the id
+`bot:<name>` and its profile's version, and is ranked as one. Its seats are
+not fill: a client seated with entrants alone has not met the fill bot.
+
+A ranked table's seats are fixed: `/api/bot`, `/api/open` and `/api/close`
+are a 409 there. It runs on a clock: when a move takes longer than 60
+seconds, the game is aborted and its journal names the seats it was waiting
+on, which the ranker is handed with every seat's points. A ranked game a
+server restart cut short is closed at start and counts for nothing: its
+seats get a 404 and queue again.
+
+## Rankings
+
+`GET /api/rankings` is the rankings the server's ranker made of its
+ranked games ([server.md](server.md#rankings)); without a ranker it is a
+404.
+
+```json
+{"updated": "YYYY-MM-DDTHH:MM:SSZ", "games": 12, "min_games": 10,
+ "boards": [{"key": "duel", "title": "Duel", "note": null,
+             "columns": [{"key": "rating", "label": "Rating"}],
+             "rows": [{"name": "claude-opus-5-5", "id": "<64 hex>", "games": 40,
+                       "rating": 1612}]}]}
+```
+
+`updated` is when it was last ranked (null until the first ranking finishes),
+`games` how many ranked games it was ranked over, and `min_games` the
+fewest games a row shown has played. Each board's `rows` are in the order
+shown, each a `name`, an `id` and its `games`, either of the last two
+null, and a value (text, a number, true/false or null)
+for each of `columns`; `pinned: true` marks a rating the ranker holds fixed.
+An `id` is a client id, the one a seat claims with
+(above), and a row with one also carries that id's latest profile:
+`version`, `owner`, `url` and `description`, null where it said none, and
+its profile's `name` in place of the row's when it gave one. An `id` of
+`bot:<entry>` is a server bot's row, carrying the profile the server lists
+it with ([below](#opponent-names)).
+
 ## Opponent names
 
 `GET /api/models` lists every preset a runtime registered, in registration
 order (with the `catanatron` extra installed, `catanatron` among them), then
-each `*.onnx` in the models directory by filename stem. `mybot` above stands
-for such a preset: it exists only on a server started with the runtime that
+each `*.onnx` in the models directory as `<name>-<version>`, from the `name`
+and `version` its metadata declares ([onnx.md](onnx.md#serving-a-model)); the
+filename plays no part. `models` is every entry once; `game_types` maps each
+`hexset.rules.GAME_TYPES` name to the entries a table of that type seats, each
+with the `name`, `version` and `commit` a model file declares, and the
+`owner`, `url` and `description` it declares too, or the profile a preset was
+registered with ([guide.md](guide.md)):
+
+```json
+{"models": ["rehex", "mynet-1.0", "mynet-1.0d"],
+ "game_types": {"standard": {"rehex": {"version": "2.11.1", "owner": "octocat",
+                                       "description": "A rules-based reflex agent for 4p and duels."},
+                             "mynet-1.0": {"name": "mynet", "version": "1.0", "commit": "0123abcd"}},
+                "duel-variant": {"rehex": {"version": "2.11.1", "owner": "octocat",
+                                           "description": "A rules-based reflex agent for 4p and duels."},
+                                 "mynet-1.0d": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
+```
+
+A preset is offered at every game type. A model file plays only the game types
+its `modes` declare, and the standard game alone when it declares none; files
+may share a name as long as their versions differ. `bots` and `/api/bot` take
+an entry, and one offered only at another game type is a 400.
+
+`mybot` in the routes above stands for a preset: it exists only on a server started with the runtime that
 registers it (`python -m hexset.server.web --runtime mybots`). Without a
 runtime the list is `catanatron` and the ONNX files; see the
 [guide](guide.md#bundled-opponents). A registered spec's other spellings

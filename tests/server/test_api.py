@@ -18,6 +18,7 @@ from hexset.server.api import (
     MAX_SEATS,
     ApiError,
     Config,
+    Origin,
     Seat,
     SeatKind,
     Tables,
@@ -362,38 +363,60 @@ def test_every_owing_seat_is_offered_its_own_cards_by_state_and_record():
 # --- client identity + default seat names (`parse_client`, `default_seat_name`) -
 
 
-def test_a_joined_seats_default_name_follows_its_clients_kind():
+def test_a_joined_seats_default_name_follows_where_it_came_from():
     registry = tables()
     code, _ = deal(registry, bots=[])
 
-    api_join = registry.handle("POST", "/api/join", {"code": code}, None)
+    # A kind the client names is ignored: it is decided from the request.
+    api_join = registry.handle("POST", "/api/join", {"code": code, "client": {"kind": "web"}}, None)
     table = registry.get(code)
     assert table.seats[api_join["seat"]].name == "api"
 
-    web_join = registry.handle(
-        "POST", "/api/join", {"code": code, "client": {"kind": "web"}}, None
-    )
+    web_join = registry.handle("POST", "/api/join", {"code": code}, None, Origin(page=True))
     assert table.seats[web_join["seat"]].name == "human"
 
-    mcp_join = registry.handle(
-        "POST", "/api/join", {"code": code, "client": {"kind": "mcp"}}, None
-    )
+    mcp_join = registry.handle("POST", "/api/join", {"code": code}, None, Origin(via="mcp"))
     assert table.seats[mcp_join["seat"]].name == "mcp"
 
 
-def test_join_refuses_an_unknown_client_kind_or_a_malformed_id():
+def test_a_client_says_what_it_is_and_names_its_seat_by_it():
+    registry = tables()
+    profile = {"id": "e" * 64, "name": "  deepvine ", "version": "2.3", "owner": "octocat",
+               "url": "https://github.com/octocat/deepvine", "description": "x" * 100, "colour": "red"}
+    dealt = registry.handle("POST", "/api/games", {"client": profile}, None)
+    seat = registry.get(dealt["code"]).seats[dealt["seat"]]
+    assert seat.name == "deepvine"
+    assert seat.client == {"id": "e" * 64, "kind": "api", "name": "deepvine", "version": "2.3",
+                           "owner": "octocat", "url": "https://github.com/octocat/deepvine",
+                           "description": "x" * 100}
+    named = registry.handle("POST", "/api/games", {"name": "Vine", "client": profile}, None)
+    assert registry.get(named["code"]).seats[named["seat"]].name == "Vine"
+
+
+@pytest.mark.parametrize("client", [
+    {"version": 2},
+    {"url": "javascript:alert(1)"},
+    {"url": "ftp://example.org"},
+    {"url": "https://example.org/" + "x" * 200},
+    {"description": ["one sentence"]},
+    {"description": "x" * 101},
+])
+def test_a_profile_field_that_is_not_text_or_a_web_address_is_refused(client):
+    with pytest.raises(ApiError) as refused:
+        tables().handle("POST", "/api/games", {"client": client}, None)
+    assert refused.value.status == 400
+
+
+def test_join_refuses_a_malformed_client_id():
     registry = tables()
     code, _ = deal(registry, bots=[])
 
-    with pytest.raises(ApiError) as bad_kind:
-        registry.handle("POST", "/api/join", {"code": code, "client": {"kind": "browser"}}, None)
-    assert bad_kind.value.status == 400
-
     with pytest.raises(ApiError) as bad_id:
-        registry.handle(
-            "POST", "/api/join", {"code": code, "client": {"id": "not-hex", "kind": "web"}}, None
-        )
+        registry.handle("POST", "/api/join", {"code": code, "client": {"id": "not-hex"}}, None)
     assert bad_id.value.status == 400
+    with pytest.raises(ApiError) as not_an_object:
+        registry.handle("POST", "/api/join", {"code": code, "client": "web"}, None)
+    assert not_an_object.value.status == 400
 
 
 def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
@@ -402,7 +425,7 @@ def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
     dealt = registry.handle(
         "POST",
         "/api/games",
-        {"bots": [], "client": {"id": creator_id, "kind": "web"}},
+        {"bots": [], "client": {"id": creator_id}},
         None,
     )
     creator_seat = registry.by_token(dealt["token"])[1]
@@ -411,7 +434,7 @@ def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
     joined = registry.handle(
         "POST",
         "/api/join",
-        {"code": dealt["code"], "client": {"id": joiner_id, "kind": "mcp"}},
+        {"code": dealt["code"], "client": {"id": joiner_id}},
         None,
     )
     joiner_seat = registry.by_token(joined["token"])[1]
@@ -421,11 +444,11 @@ def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
     events = [json.loads(line) for line in files[0].read_text().splitlines()]
 
     header = events[0]
-    assert header["clients"][str(creator_seat)] == {"id": creator_id, "kind": "web"}
+    assert header["clients"][str(creator_seat)] == {"id": creator_id, "kind": "api"}
 
     seated = next(e for e in events if e["kind"] == "seated")
     assert seated["seat"] == joiner_seat
-    assert seated["client"] == {"id": joiner_id, "kind": "mcp"}
+    assert seated["client"] == {"id": joiner_id, "kind": "api"}
 
 
 # --- POST /api/reclaim ---------------------------------------------------------

@@ -570,6 +570,8 @@
   .choice-row { display: flex; gap: 0.4rem; }
   /* One width for every option in every group, so the columns line up. */
   .choice-row button { width: 7rem; }
+  /* Under the choices, only on a server that keeps rankings. */
+  .modal-link { display: inline-block; margin-top: 0.8rem; font-size: 0.85rem; color: var(--muted); }
   /* The robber's victims are seats, not resources, so they get plain buttons
      with the same colour swatch the player list uses rather than card tiles —
      stacked, because a seat's name is far too wide to sit five to a row. */
@@ -1027,7 +1029,8 @@ let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let newGameBoard = "spiral";  // "new-game" mode: the BOARD_MODES name to deal
 let newGameDuel = false;      // "new-game" mode: duel-variant rules rather than standard
-let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
+let modelsByType = {};     // GET /api/models game_types: game type -> entry -> {name, version, commit}
+let hasRankings = false;  // GET /api/rankings answered: the new-game modal links /rankings
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1150,12 +1153,24 @@ function clientSecret() {
   }
 }
 
+// The name this browser last gave itself (renameSelf), sent with every deal and
+// join so its seats, and its row in the rankings, go by it.
+const NAME_KEY = "hexset.name";
+
+function savedName() {
+  try { return localStorage.getItem(NAME_KEY) || null; } catch { return null; }
+}
+
+// The server tells a browser seat from a script by what the browser itself
+// marks on the request (web.py's from_page), so all this sends is the id and
+// the name.
 async function clientInfo() {
   const secret = clientSecret();
-  if (!secret) return {kind: "web"};
+  const name = savedName();
+  if (!secret) return name ? {name} : {};
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
   const id = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-  return {id, kind: "web"};
+  return name ? {id, name} : {id};
 }
 
 function authHeaders(extra) {
@@ -1192,11 +1207,12 @@ async function loadBoard() {
   drawBoard();
 }
 
-// The opponents every seat picker offers. Which one is on a seat is the
-// seat's own business (state.seats), never a preference remembered here.
+// The opponents the seat pickers offer, per game type: a model plays only
+// the game types it declares. Which one is on a seat is the seat's own
+// business (state.seats), never a preference remembered here.
 async function loadModels() {
-  const {models} = await getJSON("/api/models");
-  modelNames = models;
+  const {game_types} = await getJSON("/api/models");
+  modelsByType = game_types || {};
 }
 
 // The one place that turns a seat number into what a human reads, so the
@@ -1295,7 +1311,7 @@ function seatFullLabel(seat) {
 
 // Your own name at this game, as everyone else's log and player list will
 // read it from here on (the server keeps one name per seat — see
-// api.Tables.rename). Trimmed and capped server-side, so a blank one simply
+// api.Tables.rename), and at every game this browser deals or joins after. Trimmed and capped server-side, so a blank one simply
 // puts the seat back to unnamed rather than being refused.
 async function renameSelf(name) {
   if (inFlight) return;
@@ -1304,6 +1320,10 @@ async function renameSelf(name) {
   try {
     const {ok, data} = await postJSON("/api/name", {name});
     if (ok) {
+      try {
+        const chosen = (name || "").trim();
+        if (chosen) localStorage.setItem(NAME_KEY, chosen); else localStorage.removeItem(NAME_KEY);
+      } catch { /* private mode: this game keeps the name, the next does not */ }
       state = data;
       render();
     } else {
@@ -2278,13 +2298,16 @@ function renderPlayers() {
         select.appendChild(html("option", {value: ""}, "(empty)"));
         select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
       }
-      // Models by name, not in the order /api/models happens to return them:
-      // the list is long enough that finding one by eye is the whole job.
-      // "(empty)" and "(closed)" stay pinned above it — they are what the seat
-      // *is*, not something that could be seated in it. Sorted on a copy so
-      // modelNames keeps the MODEL_OPTIONS order it documents.
-      const sorted = [...modelNames].sort((a, b) => a.localeCompare(b));
-      for (const name of sorted) select.appendChild(html("option", {value: name}, name));
+      // The entries this table's game type offers (a model file's is its
+      // name and version), by name, not in the order /api/models happens to
+      // return them: the list is long enough that finding one by eye is the
+      // whole job. "(empty)" and "(closed)" stay pinned above it — they are
+      // what the seat *is*, not something that could be seated in it. A bot
+      // no longer offered (a resumed table) still shows as itself.
+      const names = Object.keys(modelsByType[state.game_type] || {});
+      if (p.bot && !names.includes(p.bot)) names.push(p.bot);
+      names.sort((a, b) => a.localeCompare(b));
+      for (const name of names) select.appendChild(html("option", {value: name}, name));
       select.value = p.bot || (closed ? CLOSE_SEAT : "");
       select.classList.toggle("unset", !p.bot);
       select.addEventListener("change", () => {
@@ -3111,6 +3134,7 @@ function renderNewGameMode(title, body, actions) {
   deal.id = "deal-new-game";
   deal.addEventListener("click", dealNewGame);
   actions.appendChild(deal);
+  if (hasRankings) body.appendChild(html("a", {class: "modal-link", href: "/rankings"}, "Rankings"));
 }
 
 // A caption over one button per option, the chosen one pressed. `key` names
@@ -3607,6 +3631,12 @@ function drawLog(id, entries) {
 // --- Boot -----------------------------------------------------------------
 
 document.getElementById("new-game").addEventListener("click", newGame);
+// A server keeps rankings only when it is given a ranker; a 404 here is
+// the usual answer, and the new-game modal then links nothing.
+fetch("/api/rankings", {cache: "no-store"}).then((res) => {
+  hasRankings = res.ok;
+  if (hasRankings && modalMode === "new-game") renderModal();
+}).catch(() => {});
 // A corner button is only on screen when its action is on offer (see
 // renderBoardButtons), so re-reading it here always finds the same one that
 // put the button up.

@@ -56,6 +56,7 @@ from typing import Iterable, Sequence
 
 from .actions import Action, ActionType, apply, victim_of
 from .board.board import Board
+from .cards import DevCard
 from .bots.base import seat_at
 from .chance import UNSEEN, ChanceError, Hosted
 from .deals import (
@@ -231,6 +232,7 @@ class Seat:
         rebuilt game is still in the same turn."""
         if not isinstance(game.chance, Hosted):
             raise ValueError("a hosted seat's game takes its outcomes from the host")
+        game.before_roll = self.game.before_roll     # the host's rule, for the whole game
         self.game = game
         self._seat_bots()
         self._sync()
@@ -301,6 +303,12 @@ class Seat:
         take, or `None` for the rulebook's. The engine honours it for this
         move only (`Game.robber_allowed`)."""
         self.game.robber_allowed = None if hexes is None else frozenset(hexes)
+
+    def limit_before_roll(self, cards: Iterable[DevCard] | None) -> None:
+        """The host's rule for development cards before a roll: the cards it
+        takes there, or `None` for the rulebook's (any). It holds for the
+        rest of the game (`Game.before_roll`)."""
+        self.game.before_roll = None if cards is None else frozenset(cards)
 
     def set_embargoes(self, pairs: Iterable[tuple[int, int]]) -> None:
         """The table's trade embargoes as the host states them now: `(seat,

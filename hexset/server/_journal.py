@@ -20,7 +20,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from hexset.actions import Action, ActionType
 from hexset.board.board import Board
@@ -129,6 +129,10 @@ class Journal:
     _off: bool = field(default=False, repr=False)
     # Set once this object has made sure the file ends on a line break.
     _mended: bool = field(default=False, repr=False)
+    # Told the file once a game's ending is written to it, played out
+    # (`finish`) or timed out (`timed_out`): the server's rankings,
+    # `rankings.Rankings.ended`.
+    on_end: Callable[[Path], None] | None = field(default=None, repr=False)
 
     @property
     def path(self) -> Path:
@@ -169,6 +173,8 @@ class Journal:
         player_names: dict[int, str] | None = None,
         clients: dict[int, dict] | None = None,
         code: str | None = None,
+        ranked: bool = False,
+        entrants: tuple[int, ...] = (),
     ) -> None:
         """The header: everything true before the first action.
 
@@ -184,7 +190,9 @@ class Journal:
         `human_seats` are the seats occupied at deal time, of any kind,
         `player_names` whatever they registered as, and `clients`
         `api.parse_client`'s record for those that claimed with one. A seat
-        claimed later, or closed, is its own event kind instead.
+        claimed later, or closed, is its own event kind instead. `ranked` is a
+        table the queue dealt (`ranked.py`), the only kind the rankings
+        count.
         """
         # true state: the journal is the record of everything that
         # happened, including outcomes no view would expose.
@@ -203,12 +211,16 @@ class Journal:
                 "locked": sorted(game.locked),
                 "first": first,
                 "code": code,
+                "ranked": ranked,
+                # The bot seats the ranked queue dealt as entrants
+                # (`ranked.py`), not as its fill. Absent: none.
+                **({"entrants": sorted(entrants)} if entrants else {}),
                 "num_players": state.num_players,
                 "human_seats": list(human_seats),
                 "player_names": {str(s): n for s, n in sorted((player_names or {}).items())},
                 "clients": {str(s): c for s, c in sorted((clients or {}).items())},
                 "bots": {
-                    str(seat): {"name": name, "spec": bot_specs.get(seat, name)}
+                    str(seat): _bot(name, bot_specs.get(seat, name))
                     for seat, name in sorted(bot_names.items())
                 },
                 # Bottom of the deck first: `devcards.buy` pops off the end.
@@ -315,9 +327,8 @@ class Journal:
         or an open seat somebody joined. `spec` is empty for a person, which is
         how a resumed table tells the two apart and re-seats only bots.
         `client` is the header's `clients` record, `None` for a bot swap."""
-        self._emit(
-            {"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec, "client": client}
-        )
+        bot = _bot(name, spec) if spec else {"name": name, "spec": spec}
+        self._emit({"kind": "seated", "at": _now(), "seat": seat, **bot, "client": client})
 
     def unseated(self, *, seat: int) -> None:
         """The bot on `seat` was taken off it before the first move, leaving
@@ -349,16 +360,38 @@ class Journal:
         matters because the bots' random streams do not survive a resume."""
         self._emit({"kind": "reopened", "at": _now(), "at_step": at_step})
 
-    def abandoned(self) -> None:
+    def abandoned(self, reason: str | None = None) -> None:
         """The game stopped without being played out: New Game, or a table
-        evicted for going quiet (`api.Table.close`). Distinct from `finish`,
-        which says the game *ended*; only the replayed game itself
-        (`is_over`) says which happened."""
-        self._emit({"kind": "abandoned", "at": _now()})
+        evicted for going quiet (`api.Table.close`), or `reason`, say, a
+        ranked game a restart cut short. Distinct from `finish`, which says
+        the game *ended*; only the replayed game itself (`is_over`) says
+        which happened."""
+        self._emit({"kind": "abandoned", "at": _now(), **({"reason": reason} if reason else {})})
+
+    def timed_out(self, game: Game, seats: Sequence[int]) -> None:
+        """A ranked game aborted on its clock (`api.Tables.check_clocks`):
+        `seats` are the ones it was waiting on, and every seat's true points
+        stand as they were, then `on_end` told. An `abandoned` line, so it
+        closes the file as any abandoned game does."""
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
+        self._emit(
+            {
+                "kind": "abandoned",
+                "at": _now(),
+                "reason": "timeout",
+                "seats": sorted(seats),
+                "turns": game.turns,
+                "points": [victory_points(state, p) for p in range(state.num_players)],
+            }
+        )
+        if self.on_end is not None and not self._off:
+            self.on_end(self.path)
 
     def finish(self, game: Game) -> None:
-        """The closing line of a game played out to an end. A journal without
-        one was abandoned rather than finished."""
+        """The closing line of a game played out to an end, then `on_end`
+        told. A journal without one was abandoned rather than finished."""
         # true state: the journal is the record of everything that
         # happened, including outcomes no view would expose.
         state = game.state(0, hidden=False)
@@ -371,6 +404,8 @@ class Journal:
                 "points": [victory_points(state, p) for p in range(state.num_players)],
             }
         )
+        if self.on_end is not None and not self._off:
+            self.on_end(self.path)
 
 
 def game_type_of(name: str | None, rules: Rules, num_players: int) -> GameType:
@@ -699,6 +734,16 @@ def most_recent(directory: str | None, code: str) -> Path | None:
             continue
         return path
     return None
+
+
+def _bot(name: str, spec: str) -> dict:
+    """A bot seat's record: its entry `name` and `spec`, and the `version`
+    its profile declares (`api.bot_profile`: its preset's, or its model
+    file's), the one that played."""
+    from .api import bot_profile  # local: `api` imports this module
+
+    version = bot_profile(name).get("version")
+    return {"name": name, "spec": spec, **({"version": version} if version else {})}
 
 
 def _now() -> str:

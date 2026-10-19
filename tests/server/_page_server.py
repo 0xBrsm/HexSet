@@ -25,8 +25,8 @@ from hexset.server.web import HexSetServer
 
 
 @contextlib.contextmanager
-def serving(port: int, games_dir: str = ""):
-    tables = Tables(Config(games_dir=games_dir))
+def serving(port: int, games_dir: str = "", **config):
+    tables = Tables(Config(games_dir=games_dir, **config))
     server = HexSetServer(("127.0.0.1", port), tables)
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True

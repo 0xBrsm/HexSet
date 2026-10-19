@@ -495,3 +495,15 @@ def test_its_offer_goes_out_again_once_two_seats_took_it(takers, again):
     seat.pick([Response(s, RESPONSE_ACCEPT, wood_for_ore) for s in takers])
     seat.close_round(seat.traded(0, 1, wood_for_ore))
     assert seat.offer() == (Offer(0, wood_for_ore) if again else None)
+
+
+def test_the_hosts_before_roll_rule_survives_a_rebuilt_game():
+    from hexset.cards import DevCard
+
+    seat = _seat(_main(), object())
+    seat.limit_before_roll((DevCard.KNIGHT,))
+    assert seat.game.before_roll == frozenset({DevCard.KNIGHT})
+    seat.resync(observe(seat.game, 0))
+    assert seat.game.before_roll == frozenset({DevCard.KNIGHT})
+    seat.limit_before_roll(None)
+    assert seat.game.before_roll is None

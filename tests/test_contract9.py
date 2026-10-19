@@ -12,7 +12,7 @@ from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.board.board import random_base_board
 from hexset.cards import DevCard
 from hexset.contract9 import SEAT_COLUMNS as C, TABLE_COLUMNS as T, encode9, flatten, layout
-from hexset.game import Phase, is_over, start
+from hexset.game import Phase, is_over, start, observe
 from hexset.play import step_randomly
 from hexset.view import View
 
@@ -44,6 +44,28 @@ def test_shapes_and_the_flat_layout():
     assert flat.dtype == np.float32 and flat.shape == (lay.width,)
     for name, piece in lay.slices.items():
         np.testing.assert_array_equal(flat[piece].reshape(lay.shapes[name]), getattr(o, name))
+
+
+def test_concrete_and_observed_states_encode_the_same_public_deck_size():
+    for game in games():
+        for seat in range(game.num_players):
+            encoded = encode9(game, seat)
+            assert encoded.table[T["deck"]] == np.float32(len(game._state.deck) / contract9.CARD_SCALE)
+            np.testing.assert_array_equal(flatten(encoded), flatten(encode9(observe(game, seat), seat)))
+
+
+def test_hidden_deck_composition_cannot_change_the_observation():
+    game = a_game(0, 0)
+    state = game._state
+    held = state.deck.pop()
+    state.dev_cards[1][held] += 1
+    before = flatten(encode9(game, 0))
+    index = next(i for i, card in enumerate(state.deck) if card != held)
+    replacement = state.deck[index]
+    state.deck[index] = held
+    state.dev_cards[1][held] -= 1
+    state.dev_cards[1][replacement] += 1
+    np.testing.assert_array_equal(before, flatten(encode9(game, 0)))
 
 
 def test_rows_are_seat_relative_and_pointers_name_rows():

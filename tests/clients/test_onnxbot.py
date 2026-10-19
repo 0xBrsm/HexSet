@@ -267,3 +267,21 @@ def test_spawn_refuses_a_checkpoint_trained_for_another_player_count(checkpoint_
         spawn(path, board, rng=random.Random(0), players=3)
     assert path in str(caught.value) and "4 players" in str(caught.value)
     assert spawn(path, board, rng=random.Random(0), players=4) is not None
+
+
+def test_spawn_refuses_a_checkpoint_at_a_game_type_it_does_not_declare(checkpoint_v2, tmp_path):
+    """No `modes` is the standard game alone; a file plays a duel table only
+    when it says so, and `spawn` given the table's type refuses the rest."""
+    from hexset.clients.onnxbot import spawn
+    from hexset.clients.onnxmeta import stamp
+
+    path, board = checkpoint_v2
+    assert spawn(path, board, rng=random.Random(0), game_type="standard") is not None
+    with pytest.raises(ValueError, match="plays standard games, not this table's duel-variant"):
+        spawn(path, board, rng=random.Random(0), game_type="duel-variant")
+    duel = tmp_path / "duel.onnx"
+    stamp(Path(path), duel, name="stub", modes=["duel-variant"], version="1", commit="0")
+    assert spawn(str(duel), board, rng=random.Random(0), game_type="duel-variant") is not None
+    with pytest.raises(ValueError, match="plays duel-variant games"):
+        spawn(str(duel), board, rng=random.Random(0), game_type="standard")
+    assert spawn(str(duel), board, rng=random.Random(0)) is not None, "no game type asked, none checked"

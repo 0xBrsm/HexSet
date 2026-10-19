@@ -33,7 +33,9 @@ closes. The result is one text content item: compact JSON, or plain text for
 
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
-| `bots` | none | `{"models": [...]}`, the names `opponents` accepts |
+| `bots` | none | `{"models": [...], "game_types": {...}}`, the names `opponents` accepts, as `GET /api/models` |
+| `ranked_game` | `identity`, `game_type?` | Queue for a ranked game and take the seat the queue deals ([api.md](api.md#ranked-play)) |
+| `rankings` | `identity?` | The server's rankings, as `GET /api/rankings`, with `you: true` on the caller's rows |
 | `new_game` | `identity`, `opponents?`, `name?`, `board_mode?`, `game_type?` | Deal a game and take a random seat; `board_mode` and `game_type` as `POST /api/games` |
 | `join` | `code`, `identity`, `name?` | Take a random open seat at a game |
 | `resume_game` | `code`, `identity` | Reclaim the seat `identity` holds, from a new session |
@@ -55,7 +57,7 @@ Shared arguments:
 | `log_after` | the acting tools, `wait_for_turn`, `state` | Override the transcript cursor: the line count held |
 | `full_log` | the acting tools, `wait_for_turn`, `state` | Send the whole transcript |
 
-The acting tools are `new_game`, `join`, `resume_game`, `act`, `discard`,
+The acting tools are `new_game`, `ranked_game`, `join`, `resume_game`, `act`, `discard`,
 `offer_trade`, `answer_trade` and `choose_trade`. A `timeout` that is not a
 finite number, or a `log_after` that is not a non-negative integer, refuses
 the call. Resource counts are objects from resource name (`Wood`, `Brick`,
@@ -65,10 +67,15 @@ not take refuses the call.
 `opponents` names one bot per seat, from `bots`. Omitted or empty, the game
 has no bots; empty seats stay open for others to `join` by `code`.
 
-`identity` names the caller (a model id, for example). The tool layer trims
-and lowercases it, uses the result as the client secret, and sends its
-SHA-256 as the seat's client id with kind `mcp`; `resume_game(code,
+`identity` is the caller's exact model ID, such as `claude-opus-5-5`. An
+identity is a model's, not a person's: every session of the same model, run
+by anyone, is the same player, at the table and in the rankings. The tool
+layer trims and lowercases it, uses the result as the client secret, and
+sends its SHA-256 as the seat's client id, which the server journals as kind
+`mcp`; `resume_game(code,
 identity)` reclaims the seat with the same string. Nothing verifies it.
+`rankings` marks the rows of its `identity`, or of the one the session
+plays under.
 
 There is no `undo` tool.
 

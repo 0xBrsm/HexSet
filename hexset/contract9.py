@@ -362,7 +362,7 @@ def encode9(game: Game, perspective: int) -> Observation9:
     t = TABLE_COLUMNS
     table[t["bank"]] = np.asarray(state.bank, dtype=np.float32) / CARD_SCALE
     table[t["pool"]] = np.asarray(view.pool, dtype=np.float32) / CARD_SCALE
-    table[t["deck"]] = pile_size(state.deck) / CARD_SCALE
+    table[t["deck"]] = len(state.deck) / CARD_SCALE
     table[t["dev_pool"]] = np.asarray(unseen, dtype=np.float32) / CARD_SCALE
     table[t["turn"]] = game.turns / TURN_SCALE
     table[t["setup"]] = float(game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD))

@@ -34,7 +34,9 @@ rather than as a raw 404.
 
 Identity is the token `api.py` mints, sent back on `X-HexSet-Token` and kept
 in the browser's localStorage — not a cookie, because one browser may hold
-seats at more than one game.
+seats at more than one game. A seat the page claims is journalled as a `web`
+client because the browser says the request came from this server's own page
+(`Handler.from_page`), not because the page says so.
 
 ## Who is asking
 
@@ -48,10 +50,15 @@ holds no address. The header is believed from every request: keeping clients
 from reaching the server except through the proxy that sets it is the
 deployment's job. The request log prints the same address.
 
+`GET /rankings` is the rankings' own page, which reads
+`GET /api/rankings`; there is one only when `--ranker` names the function
+that makes it (`rankings.py`).
+
 Run it with `python -m hexset.server.web`. Opponents come from
-`api.model_options()`: every preset the `--runtime` modules register, plus one
-entry per `*.onnx` file in `HEXSET_UI_MODELS_DIR` (default:
-`api.default_models_dir()`), picked up without a restart.
+`api.model_catalogue()`: every preset the `--runtime` modules register, plus
+each `*.onnx` file in `HEXSET_UI_MODELS_DIR` (default:
+`api.default_models_dir()`) as the name, version and game types its metadata
+declares, picked up without a restart.
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ from hexset.arena import RUNTIME_HELP, load_runtime
 from hexset.board.board import BOARD_MODES
 
 from . import _journal as journal, mcptools
+from .rankings import load_ranker
 from .api import (
     CODE_ALPHABET,
     CODE_LENGTH,
@@ -80,6 +88,7 @@ from .api import (
     Origin,
     Tables,
     load_api_keys,
+    listed_models,
     model_options,
 )
 from .constants import KEY_HEADER, TOKEN_HEADER
@@ -96,6 +105,7 @@ __all__ = [
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
+RANKINGS_HTML = STATIC_DIR / "rankings.html"
 
 # MCP protocol versions understood, and what `initialize` answers with when a
 # client names something else.
@@ -176,8 +186,19 @@ class Handler(BaseHTTPRequestHandler):
     def origin(self, via: str) -> Origin:
         return Origin(
             ip=self.client_ip(), via=via, user_agent=self.headers.get("User-Agent"),
-            key=self.headers.get(KEY_HEADER),
+            key=self.headers.get(KEY_HEADER), page=self.from_page(),
         )
+
+    def from_page(self) -> bool:
+        """Whether the browser marked this request as sent by a page this
+        server served: `Sec-Fetch-Site: same-origin`, which a browser sets
+        and page code cannot, or, from a browser that sends no such header,
+        an `Origin` naming the host the request was addressed to."""
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None:
+            return site == "same-origin"
+        origin, host = self.headers.get("Origin"), self.headers.get("Host")
+        return bool(origin and host) and urllib.parse.urlparse(origin).netloc == host
 
     def address_string(self) -> str:
         # The request log's address: the real client, not the proxy.
@@ -230,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(405)
         elif self.path in ("/", "/index.html") or is_code(self.path):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
+        elif self.path.partition("?")[0] == "/rankings":
+            self._file(RANKINGS_HTML, "text/html; charset=utf-8")
         elif self.path.startswith("/api/") or self.path.partition("?")[0] == "/api":
             self._serve("GET", {})
         elif looks_like_a_code_attempt(self.path):
@@ -480,8 +503,36 @@ def main(argv: list[str] | None = None) -> None:
         help="Where to ask for a larger allowance, sent with a game-limit refusal "
              "and with an allowance running low. Default: none.",
     )
+    parser.add_argument(
+        "--ranker", default=None, metavar="MODULE:FUNCTION",
+        help="The function that makes the rankings from every ranked game that ended; "
+             "imported at start. Default: none, and no rankings.",
+    )
+    parser.add_argument(
+        "--ranked-bot", default=None, metavar="NAME",
+        help="The opponent the ranked queue seats in a table's one seat no player fills "
+             "(never two), as the opponent picker names it. Default: none, and ranked "
+             "tables wait for players to fill them.",
+    )
+    parser.add_argument(
+        "--ranked-entrant", action="append", default=[], metavar="NAME",
+        help="A server bot, as the opponent picker names it, that plays ranked games "
+             "itself: one at a time at each game type it is offered at, ranked as "
+             "bot:<NAME>. Repeat for more. Default: none.",
+    )
+    parser.add_argument(
+        "--rankings-min-games", type=int, default=Config.rankings_min_games, metavar="N",
+        help=f"Ranking rows that played fewer games are not shown "
+             f"(default: {Config.rankings_min_games}).",
+    )
     args = parser.parse_args(argv)
     load_runtime(*args.runtime)
+    entrants = tuple(dict.fromkeys(args.ranked_entrant))
+    unknown = [name for name in entrants if name not in listed_models()]
+    if unknown:
+        parser.error(f"--ranked-entrant: no bot named {', '.join(unknown)}; one of {listed_models()}")
+    if args.ranked_bot in entrants:
+        parser.error(f"--ranked-entrant: {args.ranked_bot} is the --ranked-bot, which fills seats")
 
     config = Config(
         device=args.device,
@@ -494,8 +545,15 @@ def main(argv: list[str] | None = None) -> None:
         limit_exempt=tuple(args.limit_exempt) if args.limit_exempt is not None else Config.limit_exempt,
         api_keys=load_api_keys(args.api_keys) if args.api_keys else {},
         contact=args.contact,
+        ranker=load_ranker(args.ranker) if args.ranker else None,
+        rankings_min_games=args.rankings_min_games,
+        ranked_bot=args.ranked_bot,
+        ranked_entrants=entrants,
     )
-    server = HexSetServer((args.host, args.port), Tables(config), args.forwarded_header)
+    tables = Tables(config)
+    if entrants:
+        tables.queue.start()
+    server = HexSetServer((args.host, args.port), tables, args.forwarded_header)
 
     url = f"http://{args.host}:{args.port}/"
     print(f"HexSet board: {url}  (models={list(model_options())})")
@@ -504,6 +562,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Every game will be journalled in full under {games_dir}/")
     else:
         print("Games will not be journalled.")
+    if args.ranker:
+        print(f"Rankings: {url}rankings, ranked by {args.ranker}")
     if not args.no_browser:
         try:
             webbrowser.open(url)

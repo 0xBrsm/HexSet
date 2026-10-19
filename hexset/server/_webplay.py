@@ -627,6 +627,11 @@ class GameSession:
     # The join code of the table this game was dealt for, journalled so a
     # restart can find it again.
     code: str | None = None
+    # Dealt by the ranked queue (`ranked.py`): its seats are the queue's, and
+    # it runs on a clock.
+    ranked: bool = False
+    # The bot seats the ranked queue dealt as entrants, not as its fill.
+    entrants: tuple[int, ...] = ()
     # Seat -> the dice total it rolled on its own most recent turn, which
     # `game.last_roll` (one global value) does not give.
     last_roll_by_seat: dict[int, int] = field(default_factory=dict)
@@ -1012,6 +1017,8 @@ class GameSession:
                 player_names=self.player_names,
                 clients=self.clients,
                 code=self.code,
+                ranked=self.ranked,
+                entrants=self.entrants,
             )
 
     @property

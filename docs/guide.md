@@ -211,8 +211,15 @@ guarded by `if __name__ == "__main__":`. A kind no process registered raises
 
 A module that registers its bots at import is a runtime:
 
-- `register_preset(name, entrant)` names an `Entrant` for `lineup_from_names`
-  and every command line.
+- `register_preset(name, entrant, profile=...)` names an `Entrant` for
+  `lineup_from_names` and every command line. The optional `profile` says
+  what the bot is, as an API client's does: `version`, `owner`, `url` and a
+  one-sentence `description`, held to the same rules (a `ValueError` for a
+  description over 100 characters)
+  ([api.md](api.md#client-identity-and-seat-recovery)). A served bot is
+  listed with it, its `version` is journalled with every seat it takes, and
+  it is shown beside the bot in the rankings (`preset_profile(name)` reads
+  it back).
 - `register_spec(prefix, parse)` resolves names starting with `prefix`
   (`mybot:depth=3`) through `parse(name) -> Entrant`. A preset of the exact
   name wins, then the longest matching prefix.

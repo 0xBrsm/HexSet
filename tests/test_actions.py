@@ -236,6 +236,42 @@ def test_road_building_on_the_last_road_piece_places_one_road():
         apply(game, card)
 
 
+def test_road_building_with_no_edge_for_a_road_is_not_offered():
+    """A seat with road pieces left but every edge at its network taken can
+    never place a road again: the card is not offered, and the engine
+    refuses it, as with no pieces left. Free an edge and it is offered."""
+    import random
+
+    import pytest
+
+    from hexset.actions import Action, ActionType, apply, legal_actions
+    from hexset.board.board import random_base_board
+    from hexset.cards import DevCard
+    from hexset.game import Phase, start
+    from hexset.state import NO_OWNER, place_settlement, placeable_roads
+
+    rng = random.Random(5)
+    game = start(random_base_board(rng), 2, rng)
+    state = game._state
+    seat = game.current_player
+    topology = state.board.topology
+    game.phase = Phase.MAIN
+    vertex = 0
+    place_settlement(state, seat, vertex, connected=False)
+    edges = topology.vertex_edges[vertex]
+    for e in edges:
+        state.edge_owner[e] = 1 - seat                         # an opponent's roads all round
+    state.dev_cards[seat][DevCard.ROAD_BUILDING] = 1
+    card = Action(ActionType.PLAY_ROAD_BUILDING)
+    assert placeable_roads(state, seat) == []
+    assert card not in legal_actions(game)
+    with pytest.raises(ValueError, match="free edge"):
+        apply(game, card)
+
+    state.edge_owner[edges[0]] = NO_OWNER
+    assert card in legal_actions(game)
+
+
 def test_a_record_with_a_retired_rules_setting_still_loads():
     """Records written while `road_building_min_roads` existed (0.71.0 to
     1.4.0) carry it in their rules; `rules_from` drops it."""
@@ -244,3 +280,27 @@ def test_a_record_with_a_retired_rules_setting_still_loads():
     assert "road_building_min_roads" in RETIRED_SETTINGS
     assert rules_from({"road_building_min_roads": 2}) == STANDARD
     assert rules_from({"winning_points": 15, "road_building_min_roads": 1}).winning_points == 15
+
+
+def test_a_host_may_take_only_some_cards_before_the_roll():
+    """`Game.before_roll` limits the cards offered before a roll and nowhere
+    else; `imagine` carries it, and `None` is the rulebook's: any card."""
+    from hexset.cards import DevCard
+    from hexset.game import imagine
+    from hexset.state import place_settlement
+
+    rng = random.Random(5)
+    game = start(random_base_board(rng), 2, rng)
+    state, seat = game._state, game.current_player
+    place_settlement(state, seat, 0, connected=False)          # room for a free road
+    game.phase = Phase.ROLL
+    for card in (DevCard.KNIGHT, DevCard.ROAD_BUILDING, DevCard.MONOPOLY):
+        state.dev_cards[seat][card] = 1
+    kinds = lambda g: {a.type for a in legal_actions(g)}
+    assert {ActionType.PLAY_KNIGHT, ActionType.PLAY_ROAD_BUILDING, ActionType.PLAY_MONOPOLY} <= kinds(game)
+
+    game.before_roll = frozenset({DevCard.KNIGHT})
+    assert kinds(game) == {ActionType.ROLL, ActionType.PLAY_KNIGHT}
+    assert kinds(imagine(game, random.Random(0))) == {ActionType.ROLL, ActionType.PLAY_KNIGHT}
+    game.phase = Phase.MAIN
+    assert {ActionType.PLAY_ROAD_BUILDING, ActionType.PLAY_MONOPOLY} <= kinds(game)

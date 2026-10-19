@@ -19,8 +19,11 @@ from hexset.clients.botclient import (
 )
 
 
-def test_client_of_hashes_the_secret_and_names_kind_api():
-    assert client_of("s") == {"id": hashlib.sha256(b"s").hexdigest(), "kind": "api"}
+def test_client_of_hashes_the_secret_and_sends_the_profile_given():
+    assert client_of("s") == {"id": hashlib.sha256(b"s").hexdigest()}
+    assert client_of("s", name="vine", version="2", owner=None) == {
+        "id": hashlib.sha256(b"s").hexdigest(), "name": "vine", "version": "2",
+    }
 
 
 @pytest.mark.parametrize(
@@ -41,10 +44,12 @@ def test_main_joins_with_the_secret_it_was_given_or_its_name(monkeypatch, argv, 
 
     monkeypatch.setattr(botclient, "HttpTransport", FakeTransport)
     with pytest.raises(SystemExit):
-        botclient._main(["--url", "http://x/", "--game", "abcdef", *argv])
+        botclient._main(["--url", "http://x/", "--game", "abcdef", "--owner", "octocat", *argv])
     assert captured["base_url"] == "http://x"
     assert captured["path"] == "/api/join"
-    assert captured["body"]["client"] == client_of(secret)
+    assert captured["body"]["client"] == client_of(
+        secret, name=captured["body"]["name"], version="1", owner="octocat", description=botclient.DESCRIPTION,
+    )
 
 
 def test_a_build_is_chosen_over_anything_else_and_the_best_build_first():
@@ -91,3 +96,29 @@ def test_the_pick_takes_the_first_answer_the_hand_covers_else_declines():
     assert pick_for(trade_round, [1, 0, 0, 0, 0]) == {"seat": 3, "bundle": [-1, 0, 0, 0, 1]}
     assert pick_for(trade_round, [2, 0, 0, 0, 0]) == {"seat": 2, "bundle": [-2, 0, 0, 0, 1]}
     assert pick_for(trade_round, [0, 0, 0, 0, 0]) == {"decline": True}
+
+
+def test_ranked_seat_queues_then_polls_until_the_table_is_dealt():
+    asked: list = []
+    replies = [{"status": "waiting"}, {"status": "matched", "token": "t", "code": "abcdef", "seat": 1}]
+
+    class FakeTransport:
+        def post(self, path, token, body):
+            asked.append(("POST", path, body))
+            return {"ticket": "T", "status": "waiting"}
+
+        def get(self, path, token):
+            asked.append(("GET", path))
+            return replies.pop(0)
+
+    seat = botclient.ranked_seat(FakeTransport(), "duel-variant", {"id": "a" * 64})
+    assert seat["token"] == "t" and seat["seat"] == 1
+    assert asked == [("POST", "/api/ranked", {"game_type": "duel-variant", "client": {"id": "a" * 64}}),
+                     ("GET", "/api/ranked/T?wait=25"), ("GET", "/api/ranked/T?wait=25")]
+
+
+def test_main_wants_a_game_or_a_ranked_queue_not_both():
+    with pytest.raises(SystemExit):
+        botclient._main(["--url", "http://x/", "--owner", "o"])
+    with pytest.raises(SystemExit):
+        botclient._main(["--url", "http://x/", "--owner", "o", "--game", "abcdef", "--ranked", "standard"])

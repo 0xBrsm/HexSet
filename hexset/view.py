@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import random
+from functools import lru_cache
 from typing import Protocol, Sequence
 
 from .board.terrain import NUM_RESOURCES
@@ -227,7 +228,10 @@ class View:
         one shuffle sliced seat by seat where no bound binds. Where one does,
         whole deals are drawn until one keeps every seat within its bounds
         (`DEAL_TRIES`), the exact conditional; failing that, seats are dealt
-        tightest first, card by card from what their bounds allow."""
+        tightest first. Each fallback draw must leave a feasible complete
+        deal for every remaining seat. The fallback is approximate; it is
+        not the exact conditional distribution. Inconsistent bounds with
+        no complete deal raise `ValueError`."""
         cards = self._pool_cards()
         seats = [s for s in range(self.num_players) if s != self.perspective]
         out: list[list[int]] = [[] for _ in range(self.num_players)]
@@ -252,10 +256,36 @@ class View:
                 out[seat] = dealt
             if fits:
                 return out
-        pool = list(self.pool)
         order = sorted(seats, key=lambda s: (sum(self.room[s]) - self.unknown[s], s))
+        pool = tuple(self.pool)
+        needs = tuple(self.unknown[s] for s in order)
+        rooms = tuple(tuple(self.room[s]) for s in order)
+        if not _feasible_deal(pool, needs, rooms):
+            raise ValueError("inconsistent resource bounds: no complete hidden deal")
         for seat in order:
-            out[seat] = _capped_draw(rng, None, self.unknown[seat], self.room[seat], pool)
+            out[seat] = []
+            while needs[0]:
+                next_needs = (needs[0] - 1,) + needs[1:]
+                choices = []
+                for r, count in enumerate(pool):
+                    room = rooms[0][r]
+                    if not count or not room:
+                        continue
+                    next_pool = pool[:r] + (count - 1,) + pool[r + 1:]
+                    next_room = rooms[0][:r] + (room - 1,) + rooms[0][r + 1:]
+                    next_rooms = (next_room,) + rooms[1:]
+                    if _feasible_deal(next_pool, next_needs, next_rooms):
+                        choices.append((r, next_pool, next_rooms))
+                # Feasibility guarantees at least one choice. Weight allowed
+                # resources by the cards left in the shared pool.
+                pick = rng.random() * sum(pool[r] for r, _, _ in choices)
+                for r, next_pool, next_rooms in choices:
+                    pick -= pool[r]
+                    if pick < 0:
+                        break
+                out[seat].append(r)
+                pool, needs, rooms = next_pool, next_needs, next_rooms
+            needs, rooms = needs[1:], rooms[1:]
         return out
 
     def expected_hand(self, seat: int) -> list[float]:
@@ -335,7 +365,8 @@ class View:
         unless the caller passes its own `hold` reading: then, where the ages
         are known (`GameState.dev_ages`), each held card is dealt by kind in
         proportion to the unseen cards of the kind times `hold.weight(kind,
-        age)`."""
+        age)`. Raises `ValueError` if the resource bounds admit no complete
+        hidden deal."""
         state = copy_state(self.state)
         for seat, hidden in enumerate(self._deal(rng)):
             if seat == self.perspective:
@@ -396,8 +427,36 @@ __all__ = ["View"]
 
 
 #: Whole deals `View.sample` draws for one that keeps every seat within its
-#: upper bounds, before dealing seat by seat.
+#: upper bounds, before dealing with joint feasibility checks.
 DEAL_TRIES = 16
+
+
+@lru_cache(maxsize=1 << 14)
+def _feasible_deal(
+    pool: tuple[int, ...], needs: tuple[int, ...], rooms: tuple[tuple[int, ...], ...],
+) -> bool:
+    """Can the shared pool fill every seat within its resource capacities?
+
+    In the resource-to-seat flow network, each subset of seats needs at
+    most `sum(min(pool[r], sum(room[s][r] for s in subset)))` cards. These
+    are all the minimum-cut constraints, so they are sufficient as well as
+    necessary. Enumerating subsets is small for a table's opponents and
+    avoids constructing a flow graph. Immutable residual states share the
+    bounded cache across draws and views.
+    """
+    if sum(needs) > sum(pool):
+        return False
+    cuts = [(0, (0,) * len(pool))]
+    for need, room in zip(needs, rooms):
+        if not need:
+            continue
+        for demand, caps in cuts[:]:
+            demand += need
+            caps = tuple(a + b for a, b in zip(caps, room))
+            if demand > sum(min(p, c) for p, c in zip(pool, caps)):
+                return False
+            cuts.append((demand, caps))
+    return True
 
 
 def _within(cards: Sequence[int], room: Sequence[int]) -> bool:
@@ -416,8 +475,8 @@ def _capped_draw(
     """`n` cards for one seat without replacement, no resource past its
     `room`: by rejection from `cards` while that is cheap, else card by card
     in proportion to what is left of `pool` (built from `cards` if not
-    given, and drawn down in place). A resource the pool has run out of
-    within the bounds is taken past them rather than not at all."""
+    given, and drawn down in place). Inconsistent bounds that cannot hold
+    `n` cards from the pool raise `ValueError`."""
     if cards is not None:
         for _ in range(DEAL_TRIES):
             drawn = rng.sample(cards, n)
@@ -427,24 +486,20 @@ def _capped_draw(
         pool = [0] * len(room)
         for r in cards or ():
             pool[r] += 1
+    if sum(min(p, cap) for p, cap in zip(pool, room)) < n:
+        raise ValueError("inconsistent resource bounds: no complete hidden hand")
     left = list(room)
     out: list[int] = []
     for _ in range(n):
         allowed = [r for r in range(len(pool)) if pool[r] > 0 and left[r] > 0]
-        if not allowed:
-            allowed = [r for r in range(len(pool)) if pool[r] > 0] or list(range(len(pool)))
         total = sum(pool[r] for r in allowed)
-        if total > 0:
-            pick = rng.random() * total
-            for r in allowed:
-                pick -= pool[r]
-                if pick < 0:
-                    break
-        else:
-            r = rng.choice(allowed)
+        pick = rng.random() * total
+        for r in allowed:
+            pick -= pool[r]
+            if pick < 0:
+                break
         out.append(r)
-        if pool[r] > 0:
-            pool[r] -= 1
+        pool[r] -= 1
         left[r] -= 1
     return out
 

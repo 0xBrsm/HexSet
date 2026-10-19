@@ -23,6 +23,12 @@ from hexset.server.api import (
 )
 
 from conftest import new_tables
+from hexset.clients.onnxmeta import with_metadata
+
+
+def named_stub(name: str) -> bytes:
+    """An empty graph field and a `name`: listed, but no model to load."""
+    return with_metadata(b"\x3a\x00", {"name": name})
 
 SOLO = ["test-trader", "test-trader", "test-trader"]
 
@@ -34,10 +40,11 @@ def _creator_at_seat_zero(monkeypatch):
 
 @pytest.fixture
 def broken_model(monkeypatch, tmp_path):
-    """A picker entry, `broken`, whose file is not a model at all."""
+    """A picker entry, `broken`: a file that names itself but holds no graph
+    a runtime will load."""
     models = tmp_path / "models"
     models.mkdir()
-    (models / "broken.onnx").write_bytes(b"not a model")
+    (models / "broken.onnx").write_bytes(named_stub("broken"))
     monkeypatch.setattr(api, "MODELS_DIR", models)
     return models / "broken.onnx"
 
@@ -88,11 +95,11 @@ def test_a_checkpoint_is_spawned_for_the_table_s_player_count(monkeypatch, tmp_p
 
     models = tmp_path / "models"
     models.mkdir()
-    (models / "net.onnx").write_bytes(b"")
+    (models / "net.onnx").write_bytes(named_stub("net"))
     monkeypatch.setattr(api, "MODELS_DIR", models)
     asked = []
 
-    def spawn(path, board, *, rng=None, device="cpu", players=None):
+    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None):
         asked.append(players)
         raise ValueError(f"{path} was trained for 2 players, not this table's {players}")
 

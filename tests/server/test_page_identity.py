@@ -1,6 +1,7 @@
 """A real browser's client identity, end to end: `index.html`'s
-`clientInfo()` sends `{"id": <sha256>, "kind": "web"}` on the deal and on a
-join, and the server names an unnamed one `"human"`. The rest of the suite
+`clientInfo()` sends `{"id": <sha256>}` alone on the deal and on a join, and
+the server, telling the page's own requests by what the browser marks on
+them, takes it for a web seat and names an unnamed one `"human"`. The rest of the suite
 drives the API/MCP surface directly; this is the one check that the browser
 sends what those layers assume. Skipped without Playwright, which is not
 one of this project's extras.
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.request
 
 import pytest
 
@@ -73,7 +75,7 @@ def test_the_page_sends_a_hashed_web_identity_on_deal_and_on_join(running_server
             request_body, response_body = _capture(creator_page, "/")
 
             client = request_body["client"]
-            assert client["kind"] == "web"
+            assert list(client) == ["id"]
             assert HEX64.match(client["id"]), client["id"]
             creator_seat = _own_seat(response_body)
             assert creator_seat["kind"] == "player"
@@ -87,7 +89,7 @@ def test_the_page_sends_a_hashed_web_identity_on_deal_and_on_join(running_server
             join_request, join_response = _capture(joiner_page, f"/{code}")
 
             join_client = join_request["client"]
-            assert join_client["kind"] == "web"
+            assert list(join_client) == ["id"]
             assert HEX64.match(join_client["id"]), join_client["id"]
             joiner_seat = _own_seat(join_response)
             assert joiner_seat["kind"] == "player"
@@ -95,5 +97,32 @@ def test_the_page_sends_a_hashed_web_identity_on_deal_and_on_join(running_server
 
             joiner_context.close()
             creator_context.close()
+        finally:
+            browser.close()
+
+
+def test_a_name_given_at_one_game_is_the_browsers_at_the_next(running_server):
+    with sync_playwright() as playwright:
+        browser = launch(playwright)
+        try:
+            page = browser.new_context().new_page()
+            front_door(page, BASE_URL)
+            page.wait_for_selector("#players .player-row input")
+            with page.expect_response(lambda r: r.url.endswith("/api/name")):
+                page.fill('#players input[title="Your name at this game"]', "Zed")
+                page.press('#players input[title="Your name at this game"]', "Enter")
+            assert page.evaluate("localStorage.getItem('hexset.name')") == "Zed"
+
+            page.click("#new-game")
+            page.wait_for_selector("#modal.show #deal-new-game")
+            with page.expect_response(lambda r: r.url.endswith("/api/games")) as dealt:
+                page.click("#deal-new-game")
+            sent = json.loads(dealt.value.request.post_data)["client"]
+            assert sent["name"] == "Zed" and HEX64.match(sent["id"])
+            # The page moves on to the new table before its body can be read.
+            page.wait_for_url(re.compile(r"/[a-z0-9]{6}$"))
+            code = page.url.rstrip("/").rsplit("/", 1)[-1]
+            with urllib.request.urlopen(f"{BASE_URL}/api/table/{code}", timeout=10) as response:
+                assert "Zed" in [seat["name"] for seat in json.load(response)["seats"]]
         finally:
             browser.close()

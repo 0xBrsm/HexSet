@@ -30,7 +30,7 @@ Start with [guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md);
 | [hosted.md](https://github.com/0xBrsm/HexSet/blob/main/docs/hosted.md) | A bot seat at a table hosted elsewhere: the observed game it plays forward |
 | [mcp.md](https://github.com/0xBrsm/HexSet/blob/main/docs/mcp.md) | MCP tools and their semantics |
 | [onnx.md](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md) | The ONNX model contract, and checking a file against it |
-| [server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md) | Running the server: configuration, Docker, saved games |
+| [server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md) | Running the server: configuration, Docker, saved games, the rankings |
 | [testing.md](https://github.com/0xBrsm/HexSet/blob/main/docs/testing.md) | Markers, optional extras, a complete check |
 | [trading.md](https://github.com/0xBrsm/HexSet/blob/main/docs/trading.md) | Trading's three parts: the table's rules, a gate's own `TradeParams`, the shared protocol |
 | [training.md](https://github.com/0xBrsm/HexSet/blob/main/docs/training.md) | Batched collection, model runtimes, PettingZoo and Gymnasium adapters |
@@ -115,10 +115,14 @@ seat is filled or closed. Until the first move a seat can be closed, reopened
 or given a bot, except at a duel table; after it the seats are fixed.
 
 The opponent picker lists every preset a `--runtime` registered, `catanatron`
-when its extra is installed, and every `*.onnx` file in `models/` (or
-`$HEXSET_UI_MODELS_DIR`) under its filename stem. The directory is rescanned
-on each listing, so a file dropped there appears without a restart; it must
-meet the [ONNX model contract](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md).
+when its extra is installed, and each `*.onnx` file in `models/` (or
+`$HEXSET_UI_MODELS_DIR`) as `<name>-<version>` from the `name` and `version`
+its metadata declares, at the game types its `modes` declare (standard only
+when it declares none); the filename plays no part, and a file declaring no
+name is not listed. Files may share a name as long as their versions differ.
+`python -m hexset.clients.onnxmeta stamp` names a file. The directory is
+rescanned on each listing, so a file dropped there appears without a restart;
+it must meet the [ONNX model contract](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md).
 
 The trade modal makes bank and port trades, offers to other players, and
 answers to their offers. A bot seat makes as many offers a turn as its own
@@ -131,6 +135,13 @@ hand, development card and victory point. Anyone with the game URL can read
 it, players at that table included, so a served game does not keep hands
 secret between participants. Reads with a seat token filter hidden
 information.
+
+A server started with `--ranker` also shows rankings at `/rankings`, linked
+from the New game dialog. Only ranked games count: tables the server deals
+from a queue that API clients and models join, never the page. The server
+only shows them: the function `--ranker` names makes them from every ranked
+game
+([docs/server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md#rankings)).
 
 Configuration, Docker, journals and recovery are in
 [docs/server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md).

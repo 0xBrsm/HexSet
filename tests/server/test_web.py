@@ -89,6 +89,9 @@ class Client:
 def seated(base: str, **kwargs) -> tuple[Client, dict]:
     client = Client(base)
     kwargs.setdefault("bots", SOLO)
+    # A script over HTTP says what it is, as the API asks.
+    kwargs.setdefault("client", {"id": "c" * 64, "name": "test", "version": "1", "owner": "octocat",
+                                 "description": "A test client over HTTP."})
     status, data = client.post("/api/games", kwargs)
     assert status == 200, data
     return client, data

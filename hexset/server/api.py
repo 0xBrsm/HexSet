@@ -58,21 +58,24 @@ import os
 import random
 import re
 import secrets
+import sys
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from hexset.actions import build_space, legal_actions
-from hexset.arena import PRESETS, registered_presets, spawn as spawn_entrant
+from hexset.arena import BOT_PROFILE_FIELDS, PRESETS, preset_profile, registered_presets, spawn as spawn_entrant
 from hexset.board.board import BOARD_MODES, Board, base_board
 from hexset.bots import Bot
 from hexset.chance import for_rules
+from hexset.clients.onnxmeta import PROFILE_KEYS, modes_of, read_metadata
 from hexset.game import Game, Phase, is_over, lock_seat, may_act, pending_free_roads, start
 from hexset.onnx_record import record_from_game
 from hexset.record import from_events, open_record
@@ -83,6 +86,9 @@ from . import _journal as journal
 from ._runner import BotRunner, LocalSearchBrain, LocalTransport
 from ._seating import SETUP_PHASES, unlock_seat
 from ._webplay import GameSession, ResumeError
+from .constants import PROFILE_FIELDS, profile_value
+from .rankings import MIN_GAMES as RANKINGS_MIN_GAMES, Rankings
+from .ranked import TURN_SECONDS, RankedQueue
 from .wire import action_to_wire, board_layout, round_offer_from_wire, signed_bundle_from_wire
 
 __all__ = [
@@ -92,12 +98,15 @@ __all__ = [
     "CODE_ALPHABET",
     "CODE_LENGTH",
     "MAX_NAME_LENGTH",
+    "PROFILE_FIELDS",
+    "REQUIRED_PROFILE",
     "TABLE_TTL_SECONDS",
     "MAX_WAIT_SECONDS",
     "CLIENT_KINDS",
     "MODELS_DIR",
     "ApiError",
     "Config",
+    "client_kind",
     "LIVE_IDLE_SECONDS",
     "Origin",
     "Seat",
@@ -106,6 +115,7 @@ __all__ = [
     "Tables",
     "default_models_dir",
     "listed_models",
+    "model_catalogue",
     "model_options",
     "spawn_bot",
     "your_move",
@@ -188,6 +198,10 @@ CODE_LENGTH = 6
 # The display-name cap, enforced here because a raw POST bypasses clients.
 MAX_NAME_LENGTH = 40
 
+# What a client of the HTTP API must say of itself to play (`require_profile`):
+# all of its profile but the `url`.
+REQUIRED_PROFILE = ("name", "version", "owner", "description")
+
 # How long a game survives with nobody touching it.
 TABLE_TTL_SECONDS = 24 * 60 * 60
 
@@ -267,7 +281,9 @@ def seat_field(payload: dict, key: str = "seat") -> int:
 
 # What a client is on the wire: a hash of a secret it alone holds, used to
 # correlate games in the journal and to reclaim a seat after a token is gone.
-# Not an account: seat theft via a leaked secret is accepted.
+# Not an account: seat theft via a leaked secret is accepted. Its kind is the
+# server's call, never the client's (`client_kind`): the page's own requests
+# are "web", the MCP endpoint's "mcp", anything else "api".
 CLIENT_KINDS = ("web", "api", "mcp")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -286,7 +302,8 @@ class Origin:
     """Where a request came from, as the transport saw it: `ip` the client's
     address (behind a proxy, the one its forwarding header carried), `via` the
     route it actually arrived on (`"http"` for `/api/*`, `"mcp"` for a tool
-    call), its `User-Agent`, and the API key it sent, if any. In-process
+    call), its `User-Agent`, the API key it sent, if any, and `page`, whether
+    the browser marked it as sent by this server's own page (`web.py`). In-process
     callers (the server's own bot seats, tests) pass none, and are neither
     stamped nor limited."""
 
@@ -294,21 +311,29 @@ class Origin:
     via: str = "http"
     user_agent: str | None = None
     key: str | None = None
+    page: bool = False
+
+
+def client_kind(origin: Origin | None) -> str:
+    """What claimed a seat, decided from where the request came from: the
+    MCP endpoint is `"mcp"`, a request the browser marked as this server's
+    own page is `"web"`, and anything else, an in-process caller included,
+    is `"api"`. The page's marks can be forged by a client set on it, as any
+    header can; nothing a client sends in its body is asked."""
+    if origin is None:
+        return "api"
+    if origin.via == "mcp":
+        return "mcp"
+    return "web" if origin.page else "api"
 
 
 def stamp_client(client: dict, origin: Origin | None, holder: str | None = None) -> dict:
-    """`client` (`parse_client`'s) as the journal keeps it: plus `via`, `ip`
-    and `ua` from `origin`, and `key`, the name of the `holder` of the API key
-    it dealt with (never the key). `kind` is the client's own claim, except
-    where the route contradicts it: a seat claimed through MCP is `"mcp"`
-    whatever it said, and one claimed over `/api/*` cannot be."""
+    """`client` (`parse_client`'s) as the journal keeps it: its `kind`
+    (`client_kind`), plus `via`, `ip` and `ua` from `origin`, and `key`, the
+    name of the `holder` of the API key it dealt with (never the key)."""
+    kind = client_kind(origin)
     if origin is None:
-        return client
-    kind = client["kind"]
-    if origin.via == "mcp":
-        kind = "mcp"
-    elif kind == "mcp":
-        kind = "api"
+        return {**client, "kind": kind}
     ua = (origin.user_agent or "")[:MAX_USER_AGENT_LENGTH] or None
     stamped = {**client, "kind": kind, "via": origin.via, "ip": origin.ip, "ua": ua}
     return {**stamped, "key": holder} if holder else stamped
@@ -345,21 +370,47 @@ def _allowance(ip: str, holder: str | None) -> str:
 
 def parse_client(payload: dict) -> dict:
     """The optional `client` on `POST /api/games`/`/api/join`: `{"id": <64-hex
-    sha256>, "kind": "web"|"api"|"mcp"}`. Absent -> `{"id": None, "kind":
-    "api"}`. An unknown `kind`, or an `id` that is not a 64-hex sha256 digest,
-    is a 400."""
+    sha256>}` plus, optionally, its profile: `name`, `version`, `owner`,
+    `url` and `description` (`PROFILE_FIELDS`), each as
+    `constants.profile_value` takes it and left out when empty. Absent ->
+    `{"id": None}`. Anything else it carries is ignored, a `kind` included
+    (`client_kind` decides that). An `id` that is not a 64-hex sha256 digest,
+    or a profile field `profile_value` refuses, is a 400."""
     raw = payload.get("client")
     if raw is None:
-        return {"id": None, "kind": "api"}
+        return {"id": None}
     if not isinstance(raw, dict):
         raise ApiError("client must be an object")
-    kind = raw.get("kind", "api")
-    if kind not in CLIENT_KINDS:
-        raise ApiError(f"unknown client kind: {kind!r}")
     client_id = raw.get("id")
     if client_id is not None and not (isinstance(client_id, str) and _HEX64.match(client_id)):
         raise ApiError("client.id must be a 64-character hex sha256 digest")
-    return {"id": client_id, "kind": kind}
+    client: dict = {"id": client_id}
+    for field in PROFILE_FIELDS:
+        value = raw.get(field)
+        if value is None:
+            continue
+        try:
+            value = profile_value(field, value)
+        except ValueError as error:
+            raise ApiError(f"client.{error}") from None
+        if value:
+            client[field] = value
+    return client
+
+
+def require_profile(client: dict, origin: Origin | None) -> None:
+    """The price of the HTTP API: a client that is neither this server's page
+    nor the MCP endpoint plays only with an `id` and a profile naming itself
+    (`REQUIRED_PROFILE`), so every one of its games counts under that id. A
+    400 naming what is missing otherwise. In-process callers are not asked."""
+    if origin is None or client["kind"] != "api":
+        return
+    missing = [f"client.{field}" for field in ("id", *REQUIRED_PROFILE) if not client.get(field)]
+    if missing:
+        raise ApiError(
+            f"a client of the HTTP API says what it is; missing {', '.join(missing)} "
+            f"({API_DOCS}#client-identity-and-seat-recovery)"
+        )
 
 
 def catanatron_seatable() -> bool:
@@ -374,23 +425,175 @@ def catanatron_seatable() -> bool:
     return True
 
 
-def model_options() -> dict[str, str]:
-    """Display name -> entrant spec, for the per-seat model picker: every
-    preset a runtime registered (`hexset.arena.registered_presets`, so the
-    server's `--runtime`), catanatron where its extra is installed, then every
-    `*.onnx` under `MODELS_DIR` by filename stem. Specs
-    never cross the wire, so a request cannot point a bot at an arbitrary
-    file. Scanned fresh on every call, so a new file needs no restart."""
+@dataclass(frozen=True)
+class Offered:
+    """One entry the picker offers: the entrant spec it seats, for a model
+    file the `name`, `version` and `commit` the file declares, and the
+    `profile` a preset was registered with (`hexset.arena.preset_profile`)
+    or a model file declares (`owner`, `url`, `description`,
+    `hexset.clients.onnxmeta.PROFILE_KEYS`)."""
+
+    spec: str
+    name: str | None = None
+    version: str | None = None
+    commit: str | None = None
+    profile: tuple[tuple[str, str], ...] = ()
+
+    def public(self) -> dict:
+        fields = (("name", self.name), ("version", self.version), ("commit", self.commit), *self.profile)
+        return {key: value for key, value in fields if value}
+
+
+def entry_name(name: str, version: str | None) -> str:
+    """What the picker offers a model file as: `<name>-<version>`, or the
+    name alone for a file that declares no version."""
+    return f"{name}-{version}" if version else name
+
+
+@lru_cache(maxsize=256)
+def _declared(path: str, mtime_ns: int, size: int) -> dict[str, str] | None:
+    """The metadata the file at `path` declares, or `None` for one that is
+    not a model. Keyed on the file's mtime and size, so a replaced file is
+    read again."""
+    try:
+        return read_metadata(Path(path).read_bytes())
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+
+
+_warned: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _warned:
+        _warned.add(message)
+        print(message, file=sys.stderr)
+
+
+def model_catalogue() -> dict[str, dict[str, Offered]]:
+    """Game type -> entry -> what that entry seats there, for every
+    `hexset.rules.GAME_TYPES` entry: every preset a runtime registered
+    (`hexset.arena.registered_presets`, so the server's `--runtime`, and
+    catanatron where its extra is installed) at every type, then each
+    `*.onnx` under `MODELS_DIR` as `<name>-<version>` (`entry_name`) from the
+    `name` and `version` it declares, at the game types its `modes` declare
+    (`hexset.clients.onnxmeta`; the standard game when it declares none).
+    The filename plays no part: files may share a name, each version its
+    own entry.
+
+    A file that is not a model, declares no `name`, or whose entry is a
+    preset's name is not offered; two files declaring one name and version
+    are neither offered. Each is logged once. Specs never cross the wire, so
+    a request cannot point a bot at an arbitrary file. Scanned on every
+    call, so a new file needs no restart."""
     catanatron_seatable()  # registers its preset where the extra is installed
-    options = {name: name for name in registered_presets()}
+    presets = {name: Offered(name, profile=tuple(preset_profile(name).items())) for name in registered_presets()}
+    catalogue = {kind: dict(presets) for kind in GAME_TYPES}
+    files: dict[str, list[tuple[Path, dict[str, str]]]] = {}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
-        options[path.stem] = str(path)
-    return options
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        meta = _declared(str(path), stat.st_mtime_ns, stat.st_size)
+        if meta is None:
+            _warn_once(f"models: {path} is not an ONNX model; not offered")
+            continue
+        name = meta.get("name", "").strip()
+        if not name:
+            _warn_once(f"models: {path} declares no name; not offered")
+            continue
+        entry = entry_name(name, meta.get("version", "").strip() or None)
+        if entry in presets:
+            _warn_once(f"models: {path} is offered as {entry!r}, a registered bot's name; not offered")
+            continue
+        files.setdefault(entry, []).append((path, meta))
+    for entry, declaring in files.items():
+        if len(declaring) > 1:
+            paths = ", ".join(str(path) for path, _ in declaring)
+            _warn_once(f"models: {paths} all declare {entry!r}; none is offered")
+            continue
+        path, meta = declaring[0]
+        offered = Offered(
+            str(path), meta["name"].strip(), meta.get("version", "").strip() or None,
+            meta.get("commit", "").strip() or None, _declared_profile(path, meta),
+        )
+        for kind in modes_of(meta):
+            if kind not in catalogue:
+                _warn_once(f"models: {path} declares mode {kind!r}, not a game type this server deals")
+                continue
+            catalogue[kind][entry] = offered
+    return catalogue
+
+
+def _declared_profile(path: Path, meta: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    """The profile fields a model file declares, each held to a client's
+    lengths (`constants.profile_value`); one it would refuse is logged once
+    and left out."""
+    profile = []
+    for key in PROFILE_KEYS:
+        if key not in meta:
+            continue
+        try:
+            value = profile_value(key, meta[key])
+        except ValueError as error:
+            _warn_once(f"models: {path} declares a {key} it may not: {error}; left out")
+            continue
+        if value:
+            profile.append((key, value))
+    return tuple(profile)
+
+
+def bot_profile(entry: str) -> dict[str, str]:
+    """The profile the server shows for its bot `entry` (`BOT_PROFILE_FIELDS`):
+    the one its preset was registered with, else the version and profile the
+    model file offered as `entry` declares; empty for neither."""
+    profile = preset_profile(entry)
+    if profile:
+        return profile
+    for offered in model_catalogue().values():
+        if entry in offered and offered[entry].name is not None:
+            found = offered[entry]
+            fields = {"version": found.version, **dict(found.profile)}
+            return {key: value for key, value in fields.items() if key in BOT_PROFILE_FIELDS and value}
+    return {}
+
+
+def model_options(game_type: str = STANDARD_GAME.name) -> dict[str, str]:
+    """Entry -> entrant spec, for the picker at a `game_type` table
+    (`model_catalogue`)."""
+    return {name: offered.spec for name, offered in model_catalogue().get(game_type, {}).items()}
 
 
 def listed_models() -> list[str]:
-    """Names available to browser and API clients."""
-    return list(model_options())
+    """Every entry available to browser and API clients at any game type,
+    each once."""
+    return list(dict.fromkeys(name for offered in model_catalogue().values() for name in offered))
+
+
+def _models_view() -> dict:
+    """`GET /api/models`: every entry, and by game type what each entry is
+    there."""
+    catalogue = model_catalogue()
+    return {
+        "models": list(dict.fromkeys(name for offered in catalogue.values() for name in offered)),
+        "game_types": {
+            kind: {name: entry.public() for name, entry in offered.items()}
+            for kind, offered in catalogue.items()
+        },
+    }
+
+
+def _seated_spec(model: str, game_type: str) -> str:
+    """The spec `model` seats at a `game_type` table, or a 400 saying why
+    there is none."""
+    catalogue = model_catalogue()
+    offered = catalogue.get(game_type, {})
+    if model in offered:
+        return offered[model].spec
+    if any(model in names for names in catalogue.values()):
+        raise ApiError(f"{model} does not play {game_type} games")
+    raise ApiError(f"unknown model: {model}")
 
 
 def wait_query(query: str) -> tuple[int | None, float]:
@@ -456,6 +659,19 @@ class Config:
     # Where to ask for a larger allowance; sent with a game-limit refusal and
     # with an allowance running low. None sends nothing.
     contact: str | None = None
+    # Makes the rankings from every ranked game that ended (`rankings`); None
+    # keeps no rankings. Rows that played fewer than `rankings_min_games`
+    # games are not shown.
+    ranker: Callable[[list[dict]], dict] | None = None
+    rankings_min_games: int = RANKINGS_MIN_GAMES
+    # The bot the ranked queue seats wherever no client fills a table
+    # (`ranked.py`): an entry `model_options` offers at the game type. None
+    # fills nothing, so a ranked table waits for clients to fill it.
+    ranked_bot: str | None = None
+    # Server bots the ranked queue seats as players of their own: each keeps a
+    # ticket waiting at every game type `model_catalogue` offers it at, one
+    # ranked game at a time, and is ranked as `bot:<entry>` (`ranked.py`).
+    ranked_entrants: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.board_mode not in BOARD_MODES:
@@ -524,8 +740,12 @@ class Table:
     stopping: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
     last_seen: float = field(default_factory=time.monotonic)
     # The address that dealt this table, for the per-address limits; `None`
-    # for one dealt in-process or reopened from a journal.
+    # for one dealt in-process or reopened from a journal. A ranked table has
+    # every seated client's address in `addresses` instead.
     creator_ip: str | None = None
+    addresses: frozenset = frozenset()
+    # When a view last changed (`bump`): a ranked table's clock.
+    changed_at: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # Every change a view can show bumps `version` and wakes `changed`, so a
@@ -538,6 +758,7 @@ class Table:
         """Marks this table changed and wakes everyone parked on it."""
         with self.changed:
             self.version += 1
+            self.changed_at = time.monotonic()
             self.changed.notify_all()
 
     def wait_for_change(self, after: int, timeout: float) -> None:
@@ -567,13 +788,25 @@ class Table:
         self.runners.clear()
         self.stopping.clear()
 
-    def close(self) -> None:
-        """Stop every embedded bot runner, then close the journal. Order
-        matters: a runner still mid-decision could otherwise submit one more
-        action into a game already filed as over."""
+    def close(self, timed_out: list[int] | None = None) -> None:
+        """Stop every embedded bot runner, then close the journal: abandoned,
+        or, with `timed_out`, aborted on a ranked clock that ran out on those
+        seats (`Journal.timed_out`). Order matters: a runner still
+        mid-decision could otherwise submit one more action into a game
+        already filed as over."""
         self.stop_runners()
         if self.session.journal is not None:
-            self.session.journal.abandoned()
+            if timed_out is None:
+                self.session.journal.abandoned()
+            else:
+                self.session.journal.timed_out(self.session.game, timed_out)
+
+    def owing(self) -> list[int]:
+        """The seats the game is waiting on: each one `your_move` asks
+        something of. Called with the table's lock held."""
+        game = self.session.game
+        return [s for s in range(game.num_players)
+                if s not in game.locked and your_move(self.view(s))[0] not in ("wait", "game_over")]
 
     def waiting_for(self) -> list[int]:
         """The still-empty, still-unlocked seats holding up setup; always empty
@@ -592,7 +825,7 @@ class Table:
         manual seat gets a `PendingGate` as it is claimed, and an unnamed one
         falls back to `default_seat_name(client.kind)`."""
         client = client or {"id": None, "kind": "api"}
-        clean = clean_name(name) or default_seat_name(client["kind"])
+        clean = clean_name(name) or client.get("name") or default_seat_name(client["kind"])
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -641,7 +874,8 @@ def spawn_bot(
     a registered opponent, anything else a path to a checkpoint. A preset is
     seated with the table's `game_type` as its `Entrant.game_type`. How a
     checkpoint wants to be played is read out of the file by `onnxbot.spawn`,
-    which refuses one trained for other than the table's `players`.
+    which refuses one trained for other than the table's `players`, or one
+    whose `modes` do not hold its `game_type`.
     """
     if spec not in PRESETS:
         catanatron_seatable()  # a resumed game names a spec no picker built
@@ -651,7 +885,7 @@ def spawn_bot(
 
     from hexset.clients.onnxbot import spawn  # onnxruntime-free import boundary
 
-    return spawn(spec, board, rng=rng, device=config.device, players=players)
+    return spawn(spec, board, rng=rng, device=config.device, players=players, game_type=game_type)
 
 
 def seat_spawn(
@@ -702,6 +936,8 @@ def build_session(
     board_mode: str | None = None,
     game_type: GameType = STANDARD_GAME,
     locked: tuple[int, ...] = (),
+    ranked: bool = False,
+    entrants: tuple[int, ...] = (),
 ) -> GameSession:
     """A fresh `MAX_SEATS`-seat game of `game_type`, `first` the seat the
     setup snake opens on and `locked` the seats retired at the deal,
@@ -732,6 +968,8 @@ def build_session(
         player_names=player_names,
         clients=clients,
         code=code,
+        ranked=ranked,
+        entrants=entrants,
     )
 
 
@@ -747,6 +985,12 @@ def _stop_runner(table: Table, seat: int) -> None:
             table.stopping = [(r, t) for r, t in table.stopping if t.is_alive()]
             table.stopping.append(table.runners.pop(i))
             return
+
+
+def _unranked(table: Table) -> None:
+    """A 409 at a ranked table, whose seats are the queue's to fill."""
+    if table.session.ranked:
+        raise ApiError("a ranked table's seats are fixed by the queue", status=409)
 
 
 def _fixed_seats(table: Table) -> str:
@@ -829,6 +1073,8 @@ def _opening_session(code: str, seats: list[Seat], events: list[dict]) -> GameSe
         player_names=player_names,
         clients=clients,
         code=code,
+        ranked=bool(header.get("ranked")),
+        entrants=tuple(header.get("entrants") or ()),
     )
 
 
@@ -910,6 +1156,12 @@ class Tables:
         # Address -> when (epoch seconds) each game it dealt in the current
         # period was dealt, oldest first, seeded from the journals.
         self._dealt: dict[str, deque[float]] = self._dealt_from_journals()
+        self._close_interrupted()
+        self.queue = RankedQueue(self)
+        self.rankings = (
+            Rankings(self.config.ranker, journal_dir(self.config), self.config.rankings_min_games)
+            if self.config.ranker is not None else None
+        )
 
     def _dealt_from_journals(self) -> dict[str, deque[float]]:
         """Every deal in the last `period_days` the journals record an address
@@ -1007,7 +1259,7 @@ class Tables:
         return sum(
             1
             for t in self._tables.values()
-            if t.creator_ip == (origin.ip or "?")
+            if (t.creator_ip == (origin.ip or "?") or origin.ip in t.addresses)
             and not is_over(t.session.game)
             and now - t.last_seen < LIVE_IDLE_SECONDS
         )
@@ -1045,7 +1297,7 @@ class Tables:
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated alongside them, everything else open. `bots` names
-        opponents from `model_options()`; none named is none seated. Turn
+        opponents offered at its game type (`model_catalogue`); none named is none seated. Turn
         order is seat order. Every bot
         is spawned before the game is dealt or journalled, so one that will
         not spawn is a 400 that leaves nothing behind.
@@ -1065,16 +1317,13 @@ class Tables:
             bots = []
         if not isinstance(bots, list) or not all(isinstance(entry, str) for entry in bots):
             raise ApiError("bots is a list of model names")
-        options = model_options()
-        for entry in bots:
-            if entry not in options:
-                raise ApiError(f"unknown model: {entry}")
+        specs = {entry: _seated_spec(entry, contract.name) for entry in bots}
         if 1 + len(bots) > playing:
             raise ApiError(f"a {contract.name} game seats at most {playing}; asked for {1 + len(bots)}")
 
         creator_seat = random.SystemRandom().randrange(playing)
         client = client or {"id": None, "kind": "api"}
-        clean = clean_name(name) or default_seat_name(client["kind"])
+        clean = clean_name(name) or client.get("name") or default_seat_name(client["kind"])
         seats: list[Seat] = [Seat() for _ in range(MAX_SEATS)]
         seats[creator_seat] = Seat(
             kind=SeatKind.PLAYER, name=clean, token=secrets.token_urlsafe(18), client=client
@@ -1082,9 +1331,21 @@ class Tables:
         remaining = [i for i in range(playing) if i != creator_seat]
         for entry, seat_index in zip(bots, remaining):
             seats[seat_index] = Seat(
-                kind=SeatKind.BOT, name=entry, spec=options[entry], token=secrets.token_urlsafe(18)
+                kind=SeatKind.BOT, name=entry, spec=specs[entry], token=secrets.token_urlsafe(18)
             )
-        board_mode = board_mode or self.config.board_mode
+        table = self._open(seats, contract, board_mode or self.config.board_mode)
+        token = seats[creator_seat].token
+        assert token is not None
+        return table, token
+
+    def _open(self, seats: list[Seat], contract: GameType, board_mode: str, *,
+              ranked: bool = False, entrants: tuple[int, ...] = (),
+              addresses: frozenset = frozenset()) -> Table:
+        """Deals `seats` a `contract` game on a `board_mode` board and puts the
+        table in play: every bot spawned first (a 400 for one that will not,
+        leaving nothing behind), every person's seat a `PendingGate`, the seats
+        past the contract's largest count retired, registered, then the bots'
+        runners started."""
         dealt = deal(self.config, board_mode)
         spawned = self._spawn_seats(seats, dealt[1], contract.name)
 
@@ -1094,11 +1355,16 @@ class Tables:
         for table in evicted:
             table.close()
 
+        playing = min(max(contract.seats), MAX_SEATS)
         session = build_session(
             code, seats, self.config, first=0, dealt=dealt, board_mode=board_mode,
-            game_type=contract, locked=tuple(range(playing, MAX_SEATS)),
+            game_type=contract, locked=tuple(range(playing, MAX_SEATS)), ranked=ranked,
+            entrants=entrants,
         )
-        session.confirm_mode(creator_seat)
+        self._watch(session)
+        for index, seat in enumerate(seats):
+            if seat.kind is SeatKind.PLAYER:
+                session.confirm_mode(index)
         for index, bot in spawned.items():
             # A bot seat brings its own trading gate (`hexset.trading`).
             session.set_trader(index, bot)
@@ -1109,6 +1375,7 @@ class Tables:
             session=session,
             # true state: the board is public.
             layout=board_layout(session.game.state(0, hidden=False).board),
+            addresses=addresses,
         )
 
         # Registered *before* any bot runner starts: a runner's first move is
@@ -1116,10 +1383,137 @@ class Tables:
         with self._registry_lock:
             self._tables[code] = table
         self._start_runners(table, spawned)
+        return table
 
-        token = seats[creator_seat].token
-        assert token is not None
-        return table, token
+    # --- ranked play (`ranked.py`) --------------------------------------------
+
+    def deal_ranked(self, game_type: str, players: list[dict | str], bot: str | None, fill: int,
+                    origins: list) -> dict:
+        """A ranked table of `game_type` for `players`, each a client or the
+        entry of a server bot entered as a player (`Config.ranked_entrants`),
+        with `fill` more seats for `bot`, every seat placed at random:
+        `{"code", "seats"}`, `seats` each player's `(seat, token)` in
+        `players`' order. Its journal is marked ranked, with the entrants'
+        seats, and its seats are fixed."""
+        contract = GAME_TYPES[game_type]
+        playing = min(max(contract.seats), MAX_SEATS)
+        if len(players) + fill != playing:
+            raise ValueError(f"a ranked {game_type} table seats {playing}")
+        spec = _seated_spec(bot, contract.name) if fill else None
+        order = random.SystemRandom().sample(range(playing), playing)
+        seats: list[Seat] = [Seat() for _ in range(MAX_SEATS)]
+        placed = []
+        entrants = []
+        for player, index in zip(players, order):
+            token = secrets.token_urlsafe(18)
+            if isinstance(player, str):
+                seats[index] = Seat(kind=SeatKind.BOT, name=player, spec=_seated_spec(player, contract.name),
+                                    token=token)
+                entrants.append(index)
+            else:
+                name = player.get("name") or default_seat_name(player["kind"])
+                seats[index] = Seat(kind=SeatKind.PLAYER, name=name, token=token, client=player)
+            placed.append((index, token))
+        for index in order[len(players):]:
+            seats[index] = Seat(kind=SeatKind.BOT, name=bot, spec=spec, token=secrets.token_urlsafe(18))
+        addresses = frozenset(o.ip for o in origins if o is not None and o.ip)
+        table = self._open(seats, contract, self.config.board_mode, ranked=True,
+                           entrants=tuple(sorted(entrants)), addresses=addresses)
+        return {"code": table.code, "seats": placed}
+
+    def in_ranked_play(self, entry: str, game_type: str) -> bool:
+        """Whether `entry` holds an entrant's seat at a ranked `game_type`
+        table still in play here."""
+        with self._registry_lock:
+            tables = list(self._tables.values())
+        for table in tables:
+            session = table.session
+            if (session.ranked and session.game_type.name == game_type and not is_over(session.game)
+                    and any(table.seats[i].name == entry for i in session.entrants)):
+                return True
+        return False
+
+    def check_clocks(self) -> list[str]:
+        """Aborts every ranked table that has waited on one move longer than
+        `ranked.TURN_SECONDS` (`Table.close`, naming the seats it waited on);
+        the codes aborted."""
+        now = time.monotonic()
+        with self._registry_lock:
+            late = [t for t in self._tables.values()
+                    if t.session.ranked and not is_over(t.session.game) and now - t.changed_at > TURN_SECONDS]
+            for table in late:
+                self._tables.pop(table.code, None)
+        for table in late:
+            with table.lock:
+                owing = table.owing()
+            table.close(timed_out=owing)
+        return [t.code for t in late]
+
+    def queue_join(self, payload: dict, origin: Origin | None) -> dict:
+        """`POST /api/ranked`: a ticket for a ranked game of `game_type`
+        (standard when unnamed), admitted against the caller's limits as a
+        deal is. For a client of the HTTP API (with its profile) or a model
+        over MCP, never the page, and always with a `client.id`."""
+        game_type = payload.get("game_type", STANDARD_GAME.name)
+        if not isinstance(game_type, str) or game_type not in GAME_TYPES:
+            raise ApiError(f"unknown game type: {game_type!r}; one of {sorted(GAME_TYPES)}")
+        holder = self.holder(origin)
+        client = stamp_client(parse_client(payload), origin, holder)
+        if client["kind"] == "web":
+            raise ApiError("ranked play is for clients of the API and MCP", status=403)
+        require_profile(client, origin)
+        if not client.get("id"):
+            raise ApiError("ranked play needs a client.id: its games count under it")
+        self.admit(origin, holder)
+        ticket = self.queue.join(game_type, client, origin, holder)
+        self._seen(client)
+        return {"ticket": ticket.id, "game_type": game_type, "status": "waiting"}
+
+    def queue_wait(self, ticket_id: str, query: str) -> dict:
+        """`GET /api/ranked/<ticket>?wait=N`: `{"status": "waiting"}`, or once
+        the queue has dealt its table, `"matched"` with the seat's `token` and
+        its view, as `POST /api/join` answers. Read at least every
+        `ranked.TICKET_SECONDS`, or the ticket is dropped (404)."""
+        try:
+            wait = max(0.0, min(float(parse_qs(query).get("wait", ["0"])[0]), MAX_WAIT_SECONDS))
+        except ValueError:
+            raise ApiError("`wait` is seconds") from None
+        ticket = self.queue.wait(ticket_id, wait)
+        if ticket is None:
+            raise ApiError("no such ticket: it was left, or not read for too long", status=404)
+        if ticket.match is None:
+            return {"ticket": ticket.id, "game_type": ticket.game_type, "status": "waiting"}
+        table = self.get(ticket.match["code"])
+        with table.lock:
+            return {"ticket": ticket.id, "status": "matched", "token": ticket.match["token"],
+                    **table.view(ticket.match["seat"])}
+
+    def journal_directory(self) -> str | None:
+        """Where this server's journals live (`journal_dir`)."""
+        return journal_dir(self.config)
+
+    def _close_interrupted(self) -> None:
+        """Files every ranked game a restart cut short as abandoned, so none
+        comes back without its clock; its seats are told so by a 404 and
+        queue again."""
+        directory = journal_dir(self.config)
+        if not directory or not os.path.isdir(directory):
+            return
+        for path in Path(directory).glob("*.jsonl"):
+            header = journal.header_of(path)
+            if header and header.get("ranked") and not journal.is_closed(journal.read(path)):
+                journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned(reason="restart")
+
+    def _seen(self, client: dict) -> None:
+        """A client just claimed a seat: its profile is now whatever this
+        request said (`rankings.Rankings.seen`)."""
+        if self.rankings is not None and client.get("id"):
+            self.rankings.seen(client)
+
+    def _watch(self, session: GameSession) -> None:
+        """Has `session`'s journal tell the rankings when the game ends."""
+        if self.rankings is not None and session.journal is not None:
+            session.journal.on_end = self.rankings.ended
 
     def _spawn_seats(self, seats: list[Seat], board: Board, game_type: str) -> dict[int, Bot]:
         """Seat -> a live bot for every bot seat in `seats`, spawned on
@@ -1233,6 +1627,7 @@ class Tables:
             session.set_trader(index, bot)
         if live:
             resume_journal(session, path)
+            self._watch(session)
         table = Table(
             code=code,
             seats=seats,
@@ -1305,7 +1700,8 @@ class Tables:
         return [self._tables.pop(code) for code in stale]
 
     def close(self) -> None:
-        """Stop every runner at every table and close every journal. Eviction
+        """Stop every runner at every table, close every journal and stop the
+        ranked queue's and the rankings' workers. Eviction
         does the same job one table at a time in a long-lived server; this is
         for a shutting-down process or a test, which would otherwise leak a
         runner thread per bot seat."""
@@ -1314,6 +1710,9 @@ class Tables:
             self._tables.clear()
         for table in tables:
             table.close()
+        self.queue.close()
+        if self.rankings is not None:
+            self.rankings.close()
 
     # --- play -------------------------------------------------------------
 
@@ -1343,13 +1742,15 @@ class Tables:
     def rename(self, table: Table, seat: int, name: object) -> dict:
         """`POST /api/name`: set `seat`'s display name. An empty one falls
         back to the seat's default (`default_seat_name`), as at claim time.
-        Journalled, so a reopened table keeps it."""
-        clean = clean_name(name)
-        if clean is None:
-            clean = default_seat_name((table.seats[seat].client or {}).get("kind", "api"))
+        Journalled, so a reopened table keeps it, and the name its client id
+        goes by from here on (`rankings.Rankings.renamed`)."""
+        client = table.seats[seat].client or {}
+        clean = clean_name(name) or default_seat_name(client.get("kind", "api"))
         table.seats[seat].name = clean
         table.session.rename(seat, clean)
         table.bump()
+        if self.rankings is not None and client.get("id"):
+            self.rankings.renamed(client["id"], clean)
         return table.view(seat)
 
     def seat_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
@@ -1371,6 +1772,7 @@ class Tables:
         """
         game = table.session.game
         require_live(game)
+        _unranked(table)
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         kind = table.seats[seat].kind
@@ -1383,10 +1785,7 @@ class Tables:
             raise ApiError(f"seat {seat} has been retired from this game")
         if reopening and seat in table.session.fixed_seats:
             raise ApiError(_fixed_seats(table))
-        try:
-            spec = model_options()[model]
-        except KeyError:
-            raise ApiError(f"unknown model: {model}") from None
+        spec = _seated_spec(model, table.session.game_type.name)
         # true state: the board is public.
         bot = seat_spawn(
             model, spec, game.state(0, hidden=False).board, self.config, game.num_players,
@@ -1439,6 +1838,7 @@ class Tables:
         seat was not retired at a fixed-seat deal (`GameSession.fixed_seats`,
         409). `open_seat` is
         the reverse, under the same rule."""
+        _unranked(table)
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         if table.seats[seat].kind is SeatKind.PLAYER:
@@ -1463,6 +1863,7 @@ class Tables:
         filled or closed once more. Refused once play has started, like
         `close_seat`, and for a person's seat; idempotent for a seat already
         open."""
+        _unranked(table)
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         if table.seats[seat].kind is SeatKind.PLAYER:
@@ -1725,7 +2126,11 @@ class Tables:
         if method == "GET" and path == "/api/version":
             return {"api": API_VERSION}
         if method == "GET" and path == "/api/models":
-            return {"models": listed_models()}
+            return _models_view()
+        if method == "GET" and path == "/api/rankings":
+            if self.rankings is None:
+                raise ApiError("this server keeps no rankings", status=404)
+            return self.rankings.view()
 
         # The reads that need no token: `GET /api/table/<code>` is the game as
         # a spectator sees it, `.../board` the layout, `.../replay` a past
@@ -1751,6 +2156,7 @@ class Tables:
         if method == "POST" and path == "/api/games":
             holder = self.holder(origin)
             client = stamp_client(parse_client(payload), origin, holder)
+            require_profile(client, origin)
             self.admit(origin, holder)
             try:
                 table, new_token = self.create(
@@ -1766,6 +2172,7 @@ class Tables:
                 raise
             if origin is not None:
                 table.creator_ip = origin.ip or "?"
+            self._seen(client)
             limits = self.allowance(origin, holder)
             with table.lock:
                 out = {"token": new_token, **table.view(table.seat_of(new_token))}
@@ -1780,9 +2187,23 @@ class Tables:
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))
+            client = stamp_client(parse_client(payload), origin)
+            require_profile(client, origin)
             with table.lock:
-                seat, new_token = table.join(payload.get("name"), stamp_client(parse_client(payload), origin))
-                return {"token": new_token, **table.view(seat)}
+                seat, new_token = table.join(payload.get("name"), client)
+                joined = {"token": new_token, **table.view(seat)}
+            self._seen(client)
+            return joined
+
+        if method == "POST" and path == "/api/ranked":
+            return self.queue_join(payload, origin)
+        if path.startswith("/api/ranked/"):
+            ticket_id, _, tail = path[len("/api/ranked/"):].partition("/")
+            if method == "GET" and not tail:
+                return self.queue_wait(ticket_id, query)
+            if method == "POST" and tail == "leave":
+                return {"left": self.queue.leave(ticket_id)}
+            raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/reclaim":
             table, seat, new_token = self.reclaim(

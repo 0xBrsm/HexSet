@@ -118,8 +118,6 @@ def _road_sets_edge_by_edge(game):
 
     state, player = game._state, game.current_player
     first = placeable_roads(state, player)
-    if not first:
-        return [()]
     if MAX_ROADS - road_count(state, player) < 2:
         return [(e,) for e in first]
     near = victory_points(state, player) + LONGEST_ROAD_VP >= state.rules.winning_points

@@ -24,20 +24,18 @@ def test_a_network_seat_plays_through_local_search_brain(monkeypatch, tmp_path):
     `BotRunner`; it is stopped below, because no assertion here should depend
     on a background thread's timing.
     """
-    import shutil
-
+    from hexset.clients.onnxmeta import stamp
     from hexset.server._runner import LocalSearchBrain, LocalTransport
     from hexset.server import api
 
     model_dir = tmp_path / "models"
-    model_dir.mkdir()
-    shutil.copy(VALUED_FIXTURE, model_dir / "valued.onnx")
+    stamp(VALUED_FIXTURE, model_dir / "stub.onnx", name="valued", modes=["standard"], version="1", commit="0")
     monkeypatch.setattr(api, "MODELS_DIR", model_dir)
 
     registry = new_tables()
-    data = registry.handle("POST", "/api/games", {"bots": ["valued"]}, None)
+    data = registry.handle("POST", "/api/games", {"bots": ["valued-1"]}, None)
     table = registry.get(data["code"])
-    seat = next(i for i, s in enumerate(table.seats) if s.name == "valued")
+    seat = next(i for i, s in enumerate(table.seats) if s.name == "valued-1")
 
     # The runner may be parked on the table's long poll: `stop_runners` wakes
     # it with a version bump and joins it, where a bare `stop.set()` does not.

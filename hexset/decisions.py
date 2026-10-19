@@ -158,14 +158,13 @@ def discard_parts(counts: Sequence[int]) -> tuple[Action, ...]:
 
 def _road_building(game: Game) -> list[tuple[int, ...]]:
     """The road sets a Road Building card played now can place, each in an
-    order it can be placed: pairs, singles where a road leaves no second (no
-    piece left, nowhere to go, or a win), and `()` where none fits."""
+    order it can be placed: pairs, and singles where a road leaves no second
+    (no piece left, nowhere to go, or a win). The card is offered only with a
+    road to place."""
     state = game._state
     player = game.current_player
     pieces = MAX_ROADS - road_count(state, player)
     first = placeable_roads(state, player)
-    if not first:
-        return [()]
     if pieces < 2:
         return [(e,) for e in first]
     # Only a road that takes Longest Road can win, and only from two short.

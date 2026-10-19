@@ -1,7 +1,8 @@
 """An example client of the HTTP API: one seat, played over `/api/*` alone.
 
-It joins a game and, read by read, does what `GET /api/state`'s `your_move`
-says the seat owes:
+It joins a game by its code, or queues for a ranked one (`POST /api/ranked`)
+and takes the seat the server deals it, then, read by read, does what
+`GET /api/state`'s `your_move` says the seat owes:
 
 - `act` and `discard`: an action from `legal_actions`, a build when one is
   legal, else any. Once a turn in `MAIN` it first offers one card of the
@@ -17,7 +18,8 @@ It decides nothing well; it shows every route a seat plays through. It
 imports nothing from the engine but the token header's name, so a client in
 any language makes the same requests:
 
-    python -m hexset.clients.botclient --url http://127.0.0.1:8770 --game abcdef
+    python -m hexset.clients.botclient --url http://127.0.0.1:8770 --game abcdef --owner octocat
+    python -m hexset.clients.botclient --url http://127.0.0.1:8770 --ranked duel-variant --owner octocat
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from hexset.server.constants import TOKEN_HEADER
 
 __all__ = [
     "client_of",
+    "ranked_seat",
     "Transport",
     "HttpTransport",
     "BUILDS",
@@ -50,10 +53,19 @@ __all__ = [
 ]
 
 
-def client_of(secret: str) -> dict:
-    """The `client` wire field `POST /api/join` reads: kind `"api"`, `id` the
-    sha256 of `secret`."""
-    return {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "api"}
+# What this example is, as its profile says when nothing else is given.
+DESCRIPTION = (
+    "HexSet's example client: plays a legal build when it has one, else any legal "
+    "action, and offers one card of its most-held kind for one it lacks once a turn."
+)
+
+
+def client_of(secret: str, **profile: str | None) -> dict:
+    """The `client` wire field `POST /api/join` reads: `id`, the sha256 of
+    `secret`, and whatever of its profile (`name`, `version`, `owner`, `url`,
+    `description`) is given."""
+    return {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+            **{field: value for field, value in profile.items() if value}}
 
 
 # --- Transport: the API's two verbs ------------------------------------------
@@ -236,13 +248,31 @@ def play(
     return view
 
 
+def ranked_seat(transport, game_type: str, client: dict, wait: float = 25.0) -> dict:
+    """Queue for a ranked `game_type` game as `client` and wait, a long poll
+    at a time, until the server deals the table: the seat's view, its
+    `token` with it. Raises `RuntimeError` on a refusal."""
+    queued = transport.post("/api/ranked", "", {"game_type": game_type, "client": client})
+    if "error" in queued:
+        raise RuntimeError(queued["error"])
+    while True:
+        polled = transport.get(f"/api/ranked/{queued['ticket']}?wait={wait:g}", "")
+        if "error" in polled:
+            raise RuntimeError(polled["error"])
+        if polled.get("status") == "matched":
+            return polled
+
+
 def _main(argv: list[str] | None = None) -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", required=True, help="Base URL of a running `python -m hexset.server.web`.")
-    parser.add_argument("--game", required=True, help="The game's six-character code.")
-    parser.add_argument("--name", default=None, help="Display name for this seat.")
+    where = parser.add_mutually_exclusive_group(required=True)
+    where.add_argument("--game", help="Join this game, by its six-character code: unranked.")
+    where.add_argument("--ranked", metavar="GAME_TYPE", choices=("standard", "duel-variant"),
+                       help="Queue for a ranked game of this type and play the seat dealt.")
+    parser.add_argument("--name", default="botclient", help="What this client is called (default: botclient).")
     parser.add_argument("--seed", type=int, default=None, help="Seed for the random choices.")
     parser.add_argument(
         "--poll-interval",
@@ -256,19 +286,35 @@ def _main(argv: list[str] | None = None) -> None:
         help=(
             "Identifies this client for POST /api/reclaim (see api.py's "
             "module docstring): the seat's client.id is sha256 of this. "
-            "Defaults to --name, or `botclient` without one."
+            "Defaults to --name."
         ),
+    )
+    parser.add_argument("--version", default="1", help="This client's version (default: 1).")
+    parser.add_argument("--owner", required=True, help="Who runs it: a Discord or GitHub username is best.")
+    parser.add_argument("--info-url", default=None, help="An http(s) page about it: a repository, a write-up.")
+    parser.add_argument(
+        "--description", default=DESCRIPTION,
+        help="What it is: its architecture and parameters, e.g. search depth, network size. "
+             "Default: this example's own.",
     )
     args = parser.parse_args(argv)
 
-    secret = args.client_secret or args.name or "botclient"
+    secret = args.client_secret or args.name
+    client = client_of(secret, name=args.name, version=args.version, owner=args.owner,
+                       url=args.info_url, description=args.description)
     transport = HttpTransport(args.url.rstrip("/"))
-    joined = transport.post(
-        "/api/join", "", {"code": args.game, "name": args.name, "client": client_of(secret)}
-    )
-    if "error" in joined:
-        raise SystemExit(f"could not join {args.game}: {joined['error']}")
-    print(f"joined {args.game} as seat {joined['seat']}", file=sys.stderr)
+    if args.ranked:
+        try:
+            joined = ranked_seat(transport, args.ranked, client)
+        except RuntimeError as error:
+            raise SystemExit(f"could not queue for a ranked {args.ranked} game: {error}") from None
+    else:
+        joined = transport.post(
+            "/api/join", "", {"code": args.game, "name": args.name, "client": client}
+        )
+        if "error" in joined:
+            raise SystemExit(f"could not join {args.game}: {joined['error']}")
+    print(f"joined {joined['code']} as seat {joined['seat']}", file=sys.stderr)
     try:
         final = play(transport, joined["token"], rng=random.Random(args.seed), poll_interval=args.poll_interval)
     except KeyboardInterrupt:

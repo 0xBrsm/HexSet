@@ -27,7 +27,9 @@ from hexset.clients.netbot import NetworkBot, bot_for, declared_trader, searcher
 from hexset.game import Game
 from hexset.lockstep import forward
 from hexset.mcts import Search
+from hexset.clients.onnxmeta import modes_of
 from hexset.onnx_record import record_from_game, record_rows
+from hexset.rules import STANDARD_GAME
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
     SearchConfig, gate_config, robber_tip_config, search_config, trader_config, trader_veto_config,
@@ -184,6 +186,8 @@ class Loaded:
     trader_veto_pick: bool = False
     #: How far its robber moves lean towards the leader (`robber_tip`).
     robber_tip: float = 0.0
+    #: The game types it plays (`modes`, `hexset.clients.onnxmeta.modes_of`).
+    modes: tuple[str, ...] = (STANDARD_GAME.name,)
 
     @property
     def trade_params(self) -> TradeParams:
@@ -271,6 +275,7 @@ def _load_cached(
         trader_veto=trader_veto_config(meta),
         trader_veto_pick=trader_veto_pick_config(meta),
         robber_tip=robber_tip_config(meta),
+        modes=modes_of(meta),
     )
 
 
@@ -352,6 +357,7 @@ def spawn(
     device: str = "cpu",
     threads: int | None = DEFAULT_THREADS,
     players: int | None = None,
+    game_type: str | None = None,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
     Single forward or search over its own priors, and a trader to answer its
@@ -361,13 +367,18 @@ def spawn(
     Everything that would fail later fails here, with the file named: a
     `trader` no loaded runtime registers (`netbot.declared_trader`) and,
     where the caller passes the table's `players`, a checkpoint trained for
-    another player count."""
+    another player count, and where it passes the table's `game_type` (a
+    `hexset.rules.GAME_TYPES` name), one whose `modes` do not include it."""
     from hexset.arena import traded
 
     loaded = load(path, board.topology, device, threads)
     if players is not None and players != loaded.players:
         raise ValueError(
             f"{path} was trained for {loaded.players} players, not this table's {players}"
+        )
+    if game_type is not None and game_type not in loaded.modes:
+        raise ValueError(
+            f"{path} plays {', '.join(loaded.modes)} games, not this table's {game_type}"
         )
     trader = declared_trader(loaded, path)
     own = _spawn_own(path, board, loaded, rng, device, threads)

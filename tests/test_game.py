@@ -346,10 +346,18 @@ def test_preroll_roads_resolve_before_dice_without_spending_or_trading():
 
 
 def test_unplaceable_preroll_roads_do_not_block_the_roll_or_carry_over():
+    """A card played before the roll with room for one road only: that road
+    goes down, the second is dropped, and the roll comes next."""
     game = run_setup(a_game(players=2))
-    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
-    game._state.edge_owner[:] = [1] * len(game._state.edge_owner)
+    state = game._state
+    state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+    state.edge_owner[:] = [1] * len(state.edge_owner)
+    home = next(v for v, owner in enumerate(state.vertex_owner) if owner == 0)
+    room = state.board.topology.vertex_edges[home][0]
+    state.edge_owner[room] = NO_OWNER
     apply(game, Action(ActionType.PLAY_ROAD_BUILDING))
+    assert legal_actions(game) == [Action(ActionType.BUILD_ROAD, room)]
+    apply(game, Action(ActionType.BUILD_ROAD, room))
     assert legal_actions(game) == [Action(ActionType.ROLL)]
     roll_dice(game, roll=6)
     assert game.phase is Phase.MAIN

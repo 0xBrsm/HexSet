@@ -44,6 +44,7 @@ from .state import (
     observed_by,
     place_road,
     place_settlement,
+    placeable_roads,
     road_count,
     road_placeable,
     upgrade_to_city,
@@ -258,6 +259,13 @@ class Game:
     # everything else alone; an exchange the host executed still stands. Set by the host
     # (`Seat.set_embargoes`); copied by `imagine`.
     embargoes: frozenset[tuple[int, int]] = field(default_factory=frozenset)
+    # The development cards the host takes before a roll, or `None` for the
+    # rulebook's (any). A host that refuses some there may still answer the
+    # play without acting on it, which leaves the game waiting on a move that
+    # never comes; `legal_actions` offers only these before the roll. Set by
+    # the host (`Seat.limit_before_roll`); copied by `imagine`, so a search
+    # plays every seat to the same table.
+    before_roll: frozenset[DevCard] | None = None
     # The seat `start()` opened the setup snake at; read-only afterwards.
     # Its own field rather than `setup_queue[0]` because a
     # `hexset.record.Record` carries it to rebuild the snake on replay, and
@@ -439,6 +447,7 @@ def imagine(
         trade_rule=game.trade_rule,
         locked=game.locked,
         embargoes=game.embargoes,
+        before_roll=game.before_roll,
         first=game.first,
         turn_cap=game.turn_cap,
     )
@@ -958,6 +967,8 @@ def play_road_building_card(game: Game) -> None:
     _check_turn_card(game, "road building")
     if road_count(game._state, game.current_player) >= MAX_ROADS:
         raise ValueError("road building needs a road piece left")
+    if not placeable_roads(game._state, game.current_player):
+        raise ValueError("road building needs a free edge for a road")
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.dev_card_played = True
     game._state.dev_cards_played[DevCard.ROAD_BUILDING] += 1

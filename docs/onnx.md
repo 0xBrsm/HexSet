@@ -28,6 +28,10 @@ ONNX `metadata_props` values are strings.
 | `num_vertices` | Board vertex count | Required integer |
 | `num_edges` | Board edge count | Required integer |
 | `iteration` | Training iteration, kept as model information | 0; must be an integer when present |
+| `name` | The model's name; the server's picker offers the file as `<name>-<version>` ([serving a model](#serving-a-model)) | Absent: the server does not list the file |
+| `modes` | Game types it plays, comma separated `hexset.rules.GAME_TYPES` names | `standard`; seating it at a table of another type raises, and so does `spawn` given the table's `game_type` |
+| `version` | The model's version, part of its picker entry | Free text |
+| `commit` | The code commit it was built and served from | Free text; kept as model information |
 | `search` | `mcts` plays the graph through search over its priors and values | Any other value: one forward per decision |
 | `simulations` | Search descents per decision | 128; at most 4096 |
 | `wave` | Leaves evaluated per search wave | 16; at most 256 |
@@ -76,6 +80,30 @@ The device is the host's `--device` option and the `device` argument of
 `load`/`spawn`; metadata never sets it. `load(..., threads=1)` caps both ONNX
 Runtime thread pools (`threads=None` is ONNX Runtime's own choice); it is
 not metadata either.
+
+## Serving a model
+
+The server names a model file by what it declares, never by its filename:
+its picker entry is `<name>-<version>` (the name alone without a version),
+`modes` are the game types a table of which may seat it, and `commit` the code
+it was built from. A model plays the standard game alone unless its `modes`
+say otherwise, so no file is offered at every game type by default. Files may
+share a name as long as their versions differ, each version its own entry. A
+file declaring no `name` is not listed, and two declaring one name and version
+are neither offered. A file may also declare an `owner`, a `url` and a
+one-sentence `description` (at most 100 characters), shown with it in the
+model list and on its rankings row; one a client's profile would refuse is
+left out.
+
+`hexset.clients.onnxmeta` reads and writes these keys without a model runtime,
+copying the graph unchanged:
+
+```sh
+python -m hexset.clients.onnxmeta stamp policy.onnx models/mynet-duel.onnx \
+    --name mynet --modes duel-variant --version 1.0 --commit 0123abcd \
+    --owner octocat --description "A small policy net with 128-visit search."
+python -m hexset.clients.onnxmeta show models/mynet-duel.onnx
+```
 
 ## Record inputs
 

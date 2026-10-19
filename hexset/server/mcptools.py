@@ -67,6 +67,9 @@ class Session:
     # Where this session's current tool call came from (`api.Origin`), set by
     # the transport before each call and passed on every request it makes.
     origin: Origin | None = None
+    # The ranked queue ticket `ranked_game` is waiting on, kept between calls
+    # so one that runs out of time can be called again without queueing anew.
+    ticket: str | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -100,17 +103,71 @@ def _seat(session: Session, result: dict) -> dict:
 
 def _client_of(identity: str) -> tuple[dict, str]:
     """The `client` wire field and the secret behind it, from an identity
-    string: `secret = identity.strip().lower()`, `id = sha256(secret)`, kind
-    `"mcp"`."""
+    string: `secret = identity.strip().lower()`, `id = sha256(secret)`. The
+    server makes the seat's kind `"mcp"` from the route."""
     if not isinstance(identity, str) or not identity.strip():
-        raise ToolError("identity must be a non-empty string naming you, e.g. claude-opus-5")
+        raise ToolError("identity must be your exact model ID, e.g. claude-opus-5-5")
     secret = identity.strip().lower()
-    client = {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "mcp"}
+    client = {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest()}
     return client, secret
 
 
 def _bots(tables: Tables, session: Session) -> dict:
     return _call_ok(tables, session, "GET", "/api/models")
+
+
+def _rankings(tables: Tables, session: Session, identity: str | None = None) -> dict:
+    """`GET /api/rankings`, with `you` on every row whose `id` is the
+    client id `identity` (else the session's own) mints."""
+    board = copy.deepcopy(_call_ok(tables, session, "GET", "/api/rankings"))
+    who = identity if identity is not None else session.identity
+    if who:
+        mine = _client_of(who)[0]["id"]
+        for each in board["boards"]:
+            for row in each["rows"]:
+                if row.get("id") == mine:
+                    row["you"] = True
+    return board
+
+
+def _ranked_game(
+    tables: Tables,
+    session: Session,
+    identity: str,
+    game_type: str | None = None,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
+    """Queue for a ranked game (`POST /api/ranked`), wait for the queue to deal
+    it, then take the seat as `new_game` does. A call whose `timeout` runs out
+    first answers `waiting` and keeps the ticket for the next call."""
+    client, _ = _client_of(identity)
+    if session.ticket is None:
+        body: dict = {"client": client}
+        if game_type is not None:
+            body["game_type"] = game_type
+        session.ticket = _call_ok(tables, session, "POST", "/api/ranked", body)["ticket"]
+    session.identity = identity
+    limit = _MAX_WAIT if timeout is None else max(0.0, min(float(timeout), _MAX_WAIT))
+    deadline = time.monotonic() + limit
+    while True:
+        wait = max(0.0, min(_WAIT_TICK, deadline - time.monotonic()))
+        status, polled = _call_status(tables, session, "GET", f"/api/ranked/{session.ticket}?wait={wait:g}")
+        if "error" in polled:
+            session.ticket = None
+            raise ToolError(polled["error"])
+        if polled["status"] == "matched":
+            break
+        if time.monotonic() >= deadline:
+            yield {"status": "waiting", "game_type": polled["game_type"],
+                   "note": "still queued; call ranked_game again to keep waiting"}
+            return
+        yield KEEPALIVE
+    session.ticket = None
+    matched = _seat(session, {k: v for k, v in polled.items() if k not in ("ticket", "status")})
+    _layout(tables, session)
+    yield from _settle(tables, session, matched, timeout, log_after, full_log)
 
 
 def _display_name(name: str | None) -> str | None:
@@ -1306,7 +1363,9 @@ _WAIT_ARGS = {
 
 _IDENTITY_ARG = {
     "type": "string",
-    "description": "A string naming you, e.g. claude-opus-5. It is your key for resume_game().",
+    "description": "Your exact model ID, e.g. claude-opus-5-5. Every session of the same model "
+                   "is the same player, at the table and in the rankings. It is also your key "
+                   "for resume_game().",
 }
 _CODE_ARG = {"type": "string", "description": "The game's six-character code."}
 _NAME_ARG = {"type": "string", "description": "Display name, up to 40 characters."}
@@ -1316,15 +1375,54 @@ def _resource_dict(description: str) -> dict:
     return {"type": "object", "additionalProperties": {"type": "integer"}, "description": description}
 
 
-# Every tool but `bots`/`board` answers with the same state reply, documented
+# Every tool but `bots`/`board`/`rankings` answers with the same state reply, documented
 # once, on `state`. The other descriptions say only what differs.
 #
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
     "bots": (
         _bots,
-        "Bot names new_game's `opponents` accepts.",
+        "Bot names new_game's `opponents` accepts: `models` every entry, `game_types` the "
+        "entries each game type offers (a model plays only the game types it declares), with a "
+        "model's name, version and commit.",
         {"type": "object", "properties": {}},
+    ),
+    "rankings": (
+        _rankings,
+        "The server's rankings of its ranked games, as whoever runs it ranks them: `boards`, each "
+        "a `title`, `columns` and `rows` in the order shown; `updated` and `games` say when "
+        "and over how many. Rows that are you carry `you: true`. Fails where the server "
+        "keeps none.",
+        {
+            "type": "object",
+            "properties": {
+                "identity": {
+                    "type": "string",
+                    "description": "Whose rows to mark; omit for the identity you play under.",
+                },
+            },
+        },
+    ),
+    "ranked_game": (
+        _ranked_game,
+        "Queue for a ranked game, the only kind the rankings count: the server picks "
+        "the table, your opponents and your seat, and may fill one empty seat with its own bot. "
+        "Waits until you are seated, then replies at your first move, as state(); if "
+        "`timeout` runs out first, replies `waiting`, and calling again keeps your place. "
+        "A ranked game is aborted when a move takes longer than 60 seconds.",
+        {
+            "type": "object",
+            "properties": {
+                "identity": _IDENTITY_ARG,
+                "game_type": {
+                    "type": "string",
+                    "description": "standard (default; 10 points, four seats) or duel-variant "
+                                   "(15 points, two seats).",
+                },
+                **_WAIT_ARGS,
+            },
+            "required": ["identity"],
+        },
     ),
     "new_game": (
         _new_game,

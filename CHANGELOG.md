@@ -5,6 +5,152 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.17.0
+
+### Breaking
+
+- **Road Building needs a free edge for a road.** The card is offered only
+  while its seat has a road piece left and an empty edge joined to its
+  network; `play_road_building_card` refuses it otherwise, as it already did
+  with no pieces left. Neither comes back once gone, since roads and
+  buildings never leave the board, so the card was a dead play there. A
+  record holding such a play no longer passes `record.replay`. With room for
+  one road only, the card still places that one.
+
+- **A client of the HTTP API must say what it is.** `POST /api/games` and
+  `/api/join` over HTTP, from anything but the server's own page, need a
+  `client` with an `id`, `name`, `version`, `owner` and `description`; a
+  request without them is a 400 naming what is missing, and no game is
+  dealt. `url` is optional. The page and the MCP endpoint are not asked.
+  `botclient` now needs `--owner` and fills in the rest from its defaults.
+
+- **A client's kind is the server's call.** `client` on `POST /api/games`
+  and `/api/join` is `{"id": ...}` alone; a `kind` sent with it is ignored
+  rather than read, and an unknown one is no longer a 400. A seat is `mcp`
+  when the MCP endpoint claims it, `web` when the browser marks the request
+  as sent by the server's own page (`Sec-Fetch-Site: same-origin`, or an
+  `Origin` naming the host it was addressed to), and `api` otherwise. A
+  script that claimed `web` is now an `api` seat: named `api` when unnamed,
+  shown as API in the rankings, and no longer held on its setup turn.
+
+- **A served model is named by its metadata, not its filename.** The server
+  lists each `*.onnx` in the models directory as `<name>-<version>` from the
+  `name` and `version` it declares, at the game types its `modes` declare
+  (comma separated `GAME_TYPES` names; the standard game alone when it
+  declares none). A file declaring no name is not listed. Files may share a
+  name as long as their versions differ; two declaring one name and version
+  are neither listed. An entry offered only at another game type is a 400
+  naming the type. `GET /api/models` (and MCP `bots`) adds `game_types`, each
+  game type's entries with their name, version and commit; `models` stays
+  every entry once. The page's seat picker offers the table's game type's
+  entries. `onnxbot.spawn(..., game_type=)` refuses a file whose `modes` do
+  not hold the table's type, and the server passes it, so a four-seat
+  standard net no longer sits at a duel table unless it declares the duel.
+  Name an existing file with `python -m hexset.clients.onnxmeta stamp`.
+
+### Added
+
+- **Ranked play.** A client of the HTTP API (`POST /api/ranked`, then a long
+  poll on its ticket) or a model over MCP (`ranked_game`) queues for a game
+  type and is seated where the server puts it: every 10 seconds each queue
+  is matched, the oldest ticket with the waiting clients it has met least,
+  one seat per client id, and the seats left go to `--ranked-bot`, which one
+  version of a client meets at no more than 100 tables. A ranked table's
+  seats are fixed, its journal is marked `ranked`, and a move that takes
+  longer than 60 seconds aborts it, naming the seats it was waiting on. A
+  ranked game a restart cut short is closed at start. A client may queue
+  for any number of games at once. A game dealt by `POST /api/games`, or
+  joined by its code, stays unranked. `botclient --ranked <game type>`
+  queues and plays the seat dealt (`botclient.ranked_seat`).
+
+- **Server bots can play ranked games themselves.** `--ranked-entrant NAME`
+  (repeatable) enters a bot the opponent picker offers: the queue keeps it a
+  ticket at each game type it is offered at, one ranked game of each type
+  at a time, matched as a client's is and ranked as `bot:<NAME>`. Its seats
+  are journalled as `entrants`, so only the other bot seats count as fill,
+  and it shares the fill bot's 100-table cap like a client version.
+
+- **A served model can carry a profile.** A model file may declare an
+  `owner`, `url` and `description` beside its name and version
+  (`onnxmeta stamp --owner/--url/--description`, `onnxmeta.PROFILE_KEYS`),
+  held to a client profile's rules: listed with it in `GET /api/models`, its
+  version journalled with each seat it takes, and shown on its rankings
+  row, as a preset's profile is (`api.bot_profile`).
+
+- **Rankings of ranked games, which the server shows but does not
+  compute.** `--ranker MODULE:FUNCTION` names a function the server calls
+  with every ranked game that ended in its journals, played out or timed
+  out, at start and again after each one ends, on a thread of its own; the
+  boards it returns are served as `GET /api/rankings`, the MCP
+  `rankings` tool (marking the caller's rows `you`) and a page at
+  `/rankings`, linked from the New game dialog, which shows the boards, the
+  visitor's own row in the board's ocean blue, a pin beside a rating the
+  ranker holds fixed (`pinned`), and the minimum games alone. Casual games never reach
+  it. Each row serves only its `name`, `id`, `games`, its client's profile
+  and the board's declared columns, and rows with fewer games than
+  `--rankings-min-games` (default 10) are not shown. A ranker that fails
+  leaves the last good board up. Without one there are no rankings and the
+  route is a 404. `hexset.server.rankings.finished_game` reads a journal
+  into the game a ranker is handed: who held each seat at the end, their
+  points, who won, who left, and for a timeout the seats it waited on.
+
+- **A client says what it is.** `client` on `POST /api/games` and
+  `/api/join` takes a `name`, `version`, `owner`, `url` and `description`
+  beside its `id`, all but `url` required of an HTTP API client (Breaking,
+  above). The id is the identity; the rest is
+  whatever the latest request with that id sent, journalled with the seat,
+  shown in the rankings beside the id's rows, and its `name` is the
+  seat's when the body gives none. A `description` is one sentence of at
+  most 100 characters; a longer one is a 400. A server bot says the same through
+  `register_preset(..., profile=...)` (`preset_profile`): listed with it in
+  `GET /api/models`, its `version` journalled with each seat it takes, and
+  shown on its rankings row, `bot:<entry>`. Renaming a seat (`POST /api/name`)
+  renames its id there too, and the page remembers the name its player last
+  gave and sends it with every deal and join. `botclient` sends them from `--version`,
+  `--owner`, `--info-url` and `--description`.
+
+- **`hexset.clients.onnxmeta`** reads and writes an ONNX file's
+  `metadata_props` without a model runtime, copying the graph unchanged:
+  `read_metadata`, `with_metadata`, `modes_of`, and `stamp`, also
+  `python -m hexset.clients.onnxmeta stamp|show`, which names a file for
+  serving (`name`, `modes`, `version`, `commit`).
+
+- **A host's rule for cards before the roll.** `Game.before_roll` names the
+  development cards a host takes before a roll (`None`, the default, is the
+  rulebook's: any). `legal_actions` offers only those there, `imagine`
+  copies the rule so a search plays every seat to it, and
+  `Seat.limit_before_roll` sets it for the rest of the game, across
+  `Seat.resync`. For a host that accepts another card before the roll and
+  then does nothing with it.
+
+### Changed
+
+- **The ranked fill bot sits once at a table.** `--ranked-bot` takes at
+  most one seat of a ranked table, as any player does; a table short by two
+  or more waits for players. At four seats it had filled two or three.
+
+- **The rankings page draws a rating's pin beside the rating.** A `pinned`
+  row's pin sits just before its value in the column keyed `rating` (the
+  board's first column when there is none), not after its name.
+
+- **An MCP `identity` is the caller's exact model ID**, such as
+  `claude-opus-5-5`: every session of the same model is the same player, at
+  the table and in the rankings. The tools' descriptions and `mcp.md` now
+  say so.
+
+### Fixed
+
+- **Contract 9 reads the development deck's card count.** Concrete and
+  observed states now encode the same public deck size, without depending
+  on the hidden card types.
+
+- **Hidden resource deals respect every seat's bounds together.** After
+  whole-deal rejection sampling is exhausted, each fallback draw now leaves
+  a feasible allocation for all remaining seats. It cannot strand a seat
+  and then give it a resource its ledger rules out. Impossible resource
+  bounds raise `ValueError` instead of widening the bounds or inventing a
+  card. The fallback remains an approximate distribution.
+
 ## 1.16.0
 
 ### Added

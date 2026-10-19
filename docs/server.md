@@ -28,6 +28,10 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--live-tables-per-ip` | `5` | Unfinished games one client address may have in play at once; `0` is no limit |
 | `--limit-exempt` | `127.0.0.0/8`, `::1/128` | A client network under no per-address limit; repeatable, and naming any replaces the default |
 | `--contact` | none | Where to ask for a larger allowance: sent with a period-limit 429 and with an `allowance` of ten or fewer games |
+| `--ranker` | none | `MODULE:FUNCTION`, the function that makes the [rankings](#rankings); imported at start, so a name that does not import stops the server. Without it there are no rankings |
+| `--rankings-min-games` | `10` | Ranking rows that played fewer games are not shown |
+| `--ranked-bot` | none | The opponent the [ranked queue](api.md#ranked-play) seats in a table's one seat no player fills, as the opponent picker names it; it never takes two seats at a table. Without one, a ranked table waits for players to fill it |
+| `--ranked-entrant` | none | A server bot, as the opponent picker names it, that plays [ranked games](api.md#ranked-play) itself: one at a time at each game type it is offered at, ranked as `bot:<name>`. Repeat for more; a name the server does not offer, or the `--ranked-bot`, stops it at start |
 | `--api-keys` | none | A JSON file of API keys, `{"<key>": {"name": "<holder>", "games_per_period": <n>}}`: a deal sent with one on `X-HexSet-Key` counts against that key's `games_per_period` (`0` is no limit) instead of its address's `--games-per-period`. Read at start |
 
 Behind a reverse proxy or tunnel, name its header with `--forwarded-header`,
@@ -40,7 +44,8 @@ Serve only through the proxy if that matters.
 Environment:
 
 - `HEXSET_UI_MODELS_DIR`: the directory scanned for `*.onnx` opponents, on
-  every request. Unset, it is `models/` beside `hexset/` in a source checkout
+  every request, each listed by the name its metadata declares
+  ([onnx.md](onnx.md#serving-a-model)). Unset, it is `models/` beside `hexset/` in a source checkout
   (the directory holding `pyproject.toml`), else `models/` under the working
   directory.
 - `HEXSET_UI_GAMES_DIR`: the journal directory when `--games-dir` is
@@ -100,6 +105,78 @@ server dealt, replay included. Such a journal has no seed: its board and
 chance outcomes are the recorded ones. `notes` are the record's trade
 rounds as `(step, traded, RoundNote)`, each placed after the action at
 `step` and the first `traded` exchanges filed on it.
+
+## Rankings
+
+The server ranks nothing itself. Given `--ranker MODULE:FUNCTION`, it calls
+that function with every ranked game in the journal directory that ended,
+and serves what it returns. Only a table the ranked queue dealt
+([api.md](api.md#ranked-play)) counts; a casual one never reaches the ranker.
+The rankings are served as `GET /api/rankings` ([api.md](api.md#rankings)),
+the MCP `rankings` tool, and a page at `/rankings` that the New game
+dialog links. The module only has to be importable, from the installed
+packages or `PYTHONPATH`.
+
+```python
+def rank(games: list[dict]) -> dict:
+    return {"boards": [{
+        "key": "duel", "title": "Duel", "note": "Two seats, 15 points.",
+        "columns": [{"key": "rank", "label": "#"}, {"key": "rating", "label": "Rating"}],
+        "rows": [{"name": "claude-opus-5-5", "id": "<client id>", "games": 40,
+                  "rank": 1, "rating": 1612}],
+    }]}
+```
+
+It is called on a thread of its own: once at start, and again after each
+ranked game that ends, so it never holds up play. It is handed every ranked
+game that ended each time, played out or timed out, oldest first by when it
+ended, and keeps nothing between calls; a
+changed ranker takes effect from a restart, over the whole history. A ranker
+that raises, or returns anything but boards of this shape, is logged and the
+last good rankings stay up. Journaling off, it is handed no games.
+
+A game, as `hexset.server.rankings.finished_game` reads it from its
+journal:
+
+| Key | Meaning |
+| --- | --- |
+| `id`, `code` | The journal's game id and the table's code |
+| `game_type`, `board_mode` | As dealt (`standard`, `duel-variant`; `spiral`, `random`) |
+| `ranked` | Dealt by the ranked queue; always true for a game the ranker is handed |
+| `imported` | Filed from a record (`journal_of`), not dealt by this server |
+| `dealt_at`, `ended_at` | UTC times, `YYYY-MM-DDTHH:MM:SSZ` |
+| `ended`, `timed_out` | `finished`, played out; or `timeout`, aborted when a move took longer than 60 seconds, `timed_out` then the seats it was waiting on. What a timeout is worth is the ranker's call |
+| `turns`, `winner` | The game's turns and the winning seat, `null` for a timeout |
+| `seats` | Every seat that took part; one closed before the first move did not |
+
+Each seat:
+
+| Key | Meaning |
+| --- | --- |
+| `seat`, `name` | The seat and its occupant's name at the end |
+| `points`, `won` | True victory points at the end (at the abort, for a timeout), and whether it won |
+| `left` | Left part-way through; its pieces and points stand |
+| `bot`, `swapped` | `{"name", "spec"}` for a bot seat, as it was seated, with the `version` its profile declared then; `swapped` when another bot held it after play began |
+| `client` | A person's or model's client record as journalled: `id` (null when it sent none), `kind`, the profile it claimed with (`name`, `version`, `owner`, `url`, `description`, those it sent), then `via`, `ip`, `ua` and an API key's holder `key` |
+
+A board's `key` is unique and its `title` is text; `note` is optional. Rows
+are shown in the order given. Each row is a `name`, an optional `id` and
+`games`, and a value for any of the board's `columns`: text, a number,
+true/false or null, and `pinned: true` for a rating the ranker holds
+fixed, a scale's reference, which the page marks with a pin. `games` is how
+many games it played: a row under
+`--rankings-min-games` is not served, one with no `games` is never cut,
+and it may also be a column.
+A row may also carry `version`, `owner`, `url` (http or https) and
+`description`; a row whose `id` has a profile, the latest one its client sent
+([api.md](api.md#client-identity-and-seat-recovery)), or the name a seat it
+held was last renamed to, is served with that profile's instead, and its `name` too when the profile has one. A row whose
+`id` is `bot:<entry>` stands for a server bot, and is served with the profile
+its preset declares ([guide.md](guide.md)), the version the server runs now.
+A profile changing re-serves the board without ranking again. Only these are served. Anything else a row carries, an address included, is
+dropped, so what the ranker is handed is not published unless it names it.
+The page marks the row whose `id` is the visitor's own client id, and the MCP
+tool the rows whose `id` is the caller's.
 
 ## Seats and visibility
 

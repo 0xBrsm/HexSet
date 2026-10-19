@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HexSet rankings</title>
+<style>
+  /* The game page's palette (index.html :root), so moving between the two
+     reads as one site. */
+  :root {
+    color-scheme: only dark;
+    --bg: #14161c;
+    --panel: #1c1f27;
+    --ink: #e8eaf0;
+    --muted: #8b93a5;
+    --border: #2c3140;
+    /* The board's ocean (index.html --water): this page's one highlight. */
+    --water: #225e8c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0.6rem 1rem;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { flex: 1; font-size: 1.05rem; margin: 0; }
+  a { color: var(--ink); }
+  main { max-width: 56rem; margin: 0 auto; padding: 1rem; }
+  #tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  #tabs button {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer;
+  }
+  #tabs button[aria-pressed="true"] { background: var(--water); border-color: var(--water); }
+  #status { color: var(--muted); font-size: 0.9rem; }
+  #status { margin-top: 1rem; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; text-align: left; }
+  td.number, th.number { text-align: right; }
+  /* The visitor's own row, matched by the client id the game page sends. */
+  tr.you td { background: var(--water); font-weight: 600; }
+  td.empty { color: var(--muted); }
+  /* A name with a profile opens it in a row of its own under it; the
+     chevron says which way it goes. */
+  button.who {
+    font: inherit; color: inherit; background: none; border: 0; padding: 0;
+    cursor: pointer; text-align: left;
+  }
+  button.who::after { content: "▸"; color: var(--muted); margin-left: 0.35rem; font-size: 0.8em; }
+  button.who[aria-expanded="true"]::after { content: "▾"; }
+  /* A rating the ranker holds fixed: a small pin before the rating, which
+     keeps a right-aligned column's digits in line. */
+  svg.pin { width: 0.8em; height: 0.8em; margin-right: 0.35rem; vertical-align: -0.05em; fill: var(--muted); }
+  tr.profile td { background: var(--panel); white-space: normal; font-size: 0.9rem; font-weight: 400; }
+  tr.profile dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.8rem; margin: 0; max-width: 40rem; }
+  tr.profile dt { color: var(--muted); }
+  tr.profile dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rankings</h1>
+</header>
+<main>
+  <div id="tabs" role="group" aria-label="Boards"></div>
+  <div id="board"></div>
+  <div id="status">Loading...</div>
+</main>
+<script>
+"use strict";
+
+// What the server last sent (GET /api/rankings), and this browser's client
+// id: the sha256 of the secret index.html keeps in localStorage, never made
+// here, so a visitor who has never played has none and no row is marked.
+let data = null;
+let myId = null;
+
+const REFRESH_MS = 60000;
+
+// What a client says of itself beside its name, as the open profile lists it.
+const PROFILE_LABELS = {version: "Version", owner: "Owner", url: "Link", description: "About"};
+// The one row whose profile is open, as `rowKey` names it; kept across the
+// refresh, which redraws the table.
+let openRow = null;
+
+async function clientId() {
+  let secret = null;
+  try { secret = localStorage.getItem("hexset.secret"); } catch { return null; }
+  if (!secret || !window.crypto?.subtle) return null;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function node(tag, attrs = {}, text) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+// A cell as the ranker sent it: text as is, a number to two places at most.
+function cellText(value) {
+  if (value === null || value === undefined) return "–";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  return String(value);
+}
+
+function rowKey(board, row) {
+  return `${board.key}:${row.id || row.name}`;
+}
+
+// A row's name: a button opening its profile when it has one, plain text
+// when it has none.
+function nameCell(board, row) {
+  const td = node("td");
+  if (!Object.keys(PROFILE_LABELS).some((field) => row[field])) {
+    td.appendChild(document.createTextNode(row.name));
+  } else {
+    const key = rowKey(board, row);
+    const button = td.appendChild(node("button", {class: "who", "aria-expanded": String(openRow === key)}, row.name));
+    button.addEventListener("click", () => { openRow = openRow === key ? null : key; render(); });
+  }
+  return td;
+}
+
+// Where a pinned row's pin goes: its rating, the column keyed "rating", or
+// the board's first column when it has none.
+function pinColumn(board) {
+  return (board.columns.find((c) => c.key === "rating") || board.columns[0] || {}).key;
+}
+
+// A push pin, scaled from Material Icons' "push_pin" glyph (Apache 2.0), as
+// index.html borrows its check and send glyphs.
+function pinIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "pin");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Rating pinned");
+  const title = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "title"));
+  title.textContent = "Rating pinned";
+  const path = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "path"));
+  path.setAttribute("d", "M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z");
+  return svg;
+}
+
+// The open profile, a row of its own spanning the table under its name. The
+// server only takes http(s) addresses; the link is checked again rather than
+// trusting one this page did not make.
+function profileRow(row, span) {
+  const tr = node("tr", {class: "profile"});
+  const list = tr.appendChild(node("td", {colspan: String(span)})).appendChild(node("dl"));
+  for (const [field, label] of Object.entries(PROFILE_LABELS)) {
+    if (!row[field]) continue;
+    list.appendChild(node("dt", {}, label));
+    const value = list.appendChild(node("dd"));
+    if (field === "url" && /^https?:\/\//i.test(row.url)) {
+      value.appendChild(node("a", {href: row.url, target: "_blank", rel: "noopener noreferrer nofollow"}, row.url));
+    } else {
+      value.textContent = row[field];
+    }
+  }
+  return tr;
+}
+
+function chosenKey() {
+  const wanted = decodeURIComponent(location.hash.slice(1));
+  const keys = data.boards.map((b) => b.key);
+  return keys.includes(wanted) ? wanted : keys[0];
+}
+
+function render() {
+  const tabs = document.getElementById("tabs");
+  const holder = document.getElementById("board");
+  const status = document.getElementById("status");
+  tabs.replaceChildren();
+  holder.replaceChildren();
+  if (!data.boards.length) {
+    status.textContent = data.updated ? "Nothing ranked yet." : "Ranking...";
+    return;
+  }
+  const key = chosenKey();
+  if (data.boards.length > 1) {
+    for (const b of data.boards) {
+      const button = node("button", {"aria-pressed": String(b.key === key), "data-board": b.key}, b.title);
+      button.addEventListener("click", () => { location.hash = encodeURIComponent(b.key); });
+      tabs.appendChild(button);
+    }
+  }
+  const board = data.boards.find((b) => b.key === key);
+  if (data.boards.length === 1) holder.appendChild(node("h2", {}, board.title));
+  const numeric = new Set(board.columns
+    .filter((c) => board.rows.some((r) => typeof r[c.key] === "number"))
+    .map((c) => c.key));
+  const table = node("table");
+  const head = node("tr");
+  head.appendChild(node("th", {}, "Name"));
+  for (const c of board.columns) head.appendChild(node("th", numeric.has(c.key) ? {class: "number"} : {}, c.label));
+  table.appendChild(node("thead")).appendChild(head);
+  const body = table.appendChild(node("tbody"));
+  if (!board.rows.length) {
+    const tr = node("tr");
+    tr.appendChild(node("td", {colspan: String(board.columns.length + 1), class: "empty"}, "No one to show."));
+    body.appendChild(tr);
+  }
+  for (const row of board.rows) {
+    const tr = node("tr", myId && row.id === myId ? {class: "you"} : {});
+    tr.appendChild(nameCell(board, row));
+    for (const c of board.columns) {
+      const td = tr.appendChild(node("td", numeric.has(c.key) ? {class: "number"} : {}, cellText(row[c.key])));
+      if (row.pinned && c.key === pinColumn(board)) td.prepend(pinIcon());
+    }
+    body.appendChild(tr);
+    if (openRow === rowKey(board, row)) body.appendChild(profileRow(row, board.columns.length + 1));
+  }
+  const scroll = node("div", {class: "scroll"});
+  scroll.appendChild(table);
+  holder.appendChild(scroll);
+  status.textContent = data.min_games > 1 ? `Only players with ${data.min_games} or more games are shown.` : "";
+}
+
+async function load() {
+  let response;
+  try {
+    response = await fetch("/api/rankings", {cache: "no-store"});
+  } catch {
+    document.getElementById("status").textContent = "Could not reach the server.";
+    return;
+  }
+  if (response.status === 404) {
+    data = null;
+    document.getElementById("status").textContent = "This server keeps no rankings.";
+    return;
+  }
+  if (!response.ok) {
+    document.getElementById("status").textContent = "Could not load the rankings.";
+    return;
+  }
+  data = await response.json();
+  render();
+}
+
+window.addEventListener("hashchange", () => { if (data) render(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+clientId().then((id) => { myId = id; return load(); });
+</script>
+</body>
+</html>

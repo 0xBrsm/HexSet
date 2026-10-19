@@ -550,6 +550,7 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
     """
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import PublicLedger, SeatLedger
+    from hexset.state import BANK_PER_RESOURCE
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(
@@ -561,6 +562,7 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
     state = game.state(0, hidden=False)
     state.hands[0] = [1, 1, 1, 0, 0]  # one wheat short of a settlement
     state.hands[1] = true_hand_1
+    state.bank[:] = [BANK_PER_RESOURCE - sum(h[r] for h in state.hands) for r in range(5)]
     state.deck = []
     ledger = PublicLedger.new(state.num_players)
     ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)

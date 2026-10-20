@@ -43,7 +43,7 @@ from .game import Game, Phase, imagine, is_over, to_move
 from .victory import public_victory_points
 from .view import HoldReading
 
-__all__ = ["MARKS", "STEP_LIMIT", "Decision", "PairedRollouts", "paired_copy"]
+__all__ = ["MARKS", "SETUP_PHASES", "STEP_LIMIT", "Decision", "PairedRollouts", "paired_copy"]
 
 #: The most lockstep decisions a playout makes before it is scored where it
 #: stands, by the value head: a bound on a game the policy never finishes.
@@ -53,6 +53,9 @@ STEP_LIMIT = 3000
 #: each playout's value is read for the decision log, at the mover's first
 #: turn start at least that far on.
 MARKS = (2, 4, 8, 16)
+
+#: The opening's phases, which `PairedRollouts(full_setup=True)` always searches.
+SETUP_PHASES = (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,9 @@ class PairedRollouts:
     `worlds` is the number of shared-chance worlds each candidate plays out
     in; `top`, how many of the policy's moves, by prior, are candidates. A
     root with one legal move, or, under `decisive`, whose prior on one move
-    is at least `decisive`, plays that move with no playout.
+    is at least `decisive`, plays that move with no playout. Under
+    `full_setup`, `decisive` skips no setup root (`SETUP_PHASES`): every
+    opening settlement and road with a choice is played out.
 
     A playout runs to the game's end, scored 1 where the mover won and 0
     otherwise, or under `horizon` stops at the first turn start of the mover
@@ -188,6 +193,7 @@ class PairedRollouts:
         worlds: int = 32,
         top: int = 3,
         decisive: float | None = None,
+        full_setup: bool = False,
         horizon: int | None = None,
         marks: Sequence[int] = MARKS,
         hold: HoldReading | None = None,
@@ -208,6 +214,7 @@ class PairedRollouts:
         self.worlds = worlds
         self.top = top
         self.decisive = None if decisive is None else float(decisive)
+        self.full_setup = bool(full_setup)
         self.horizon = horizon
         self.marks = marks
         self.hold = hold
@@ -249,6 +256,7 @@ class PairedRollouts:
         order = sorted(range(len(options)), key=lambda i: -prior[i])
         if len(options) == 1 or (
             self.decisive is not None and prior[order[0]] >= self.decisive
+            and not (self.full_setup and game.phase in SETUP_PHASES)
         ):
             decision = Decision(
                 options, prior, value, (order[0],), (), order[0], 0, **context,

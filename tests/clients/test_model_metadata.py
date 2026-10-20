@@ -95,6 +95,14 @@ def test_an_unreadable_horizon_fails_the_load(value):
         search_config({"search": "rollout", "horizon": value})
 
 
+def test_a_rollout_file_can_ask_for_its_opening_searched_in_full():
+    assert search_config({"search": "rollout", "setup": "full"}).rollout.full_setup
+    assert not search_config({"search": "rollout"}).rollout.full_setup
+    assert not search_config({"search": "rollout", "setup": ""}).rollout.full_setup
+    with pytest.raises(ValueError, match="setup"):
+        search_config({"search": "rollout", "setup": "half"})
+
+
 def test_a_rollout_file_reads_decisive_as_a_search_does_and_refuses_a_calibration():
     with pytest.raises(ValueError, match="decisive"):
         search_config({"search": "rollout", "decisive": "1.2"})

@@ -114,6 +114,29 @@ def test_a_decisive_root_plays_its_favourite_without_a_playout():
     assert stub.acted == 0
 
 
+def sure_of_the_first(options):
+    """0.99 on the first option, the rest shared."""
+    if len(options) == 1:
+        return np.ones(1)
+    return np.array([0.99] + [0.01 / (len(options) - 1)] * (len(options) - 1))
+
+
+def test_full_setup_searches_a_confident_opening_root_and_no_later_one():
+    """`decisive` skips a root the policy is sure of, unless `full_setup`
+    and the root is the opening's; after the opening it skips as before."""
+    opening = start(random_base_board(random.Random(4)), 4, random.Random(4))
+    assert opening.phase is Phase.SETUP_SETTLEMENT
+
+    def search(full_setup):
+        return PairedRollouts(Stub(sure_of_the_first), worlds=4, top=2, horizon=1, marks=(),
+                              decisive=0.97, full_setup=full_setup, rng=random.Random(5))
+
+    assert search(False).decide(opening).worlds == 0
+    searched = search(True).decide(opening)
+    assert searched.worlds == 4 and len(searched.scores) == 2
+    assert search(True).decide(a_road_or_not()).worlds == 0
+
+
 def test_the_move_that_plays_out_better_is_chosen_over_the_favourite():
     """Holding on to the road's cards keeps a bigger hand at the mover's next
     turn in every world, which is what the stub's values count."""

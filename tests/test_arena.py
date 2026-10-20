@@ -71,7 +71,11 @@ def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
     assert full.name == "rollout16t2d0.9h8"
     assert (full.simulations, full.option("top"), full.option("decisive"), full.option("horizon")) == (16, 2, 0.9, 8)
     assert pickle.loads(pickle.dumps(full)) == full
-    for bad in ("@0", "@:top=1", "@:decisive=2", "@:horizon=0", "@:top=2:top=3", "@:depth=3"):
+    assert full.option("full_setup") is None
+    opening = entrant_from_name("rollout:/tmp/x.onnx@32:top=6:decisive=0.97:horizon=8:setup=full")
+    assert opening.name == "rollout32t6d0.97h8s" and opening.option("full_setup") is True
+    for bad in ("@0", "@:top=1", "@:decisive=2", "@:horizon=0", "@:top=2:top=3", "@:depth=3",
+                "@:setup=half", "@:setup"):
         with pytest.raises(ValueError):
             entrant_from_name(f"rollout:/tmp/x.onnx{bad}")
 

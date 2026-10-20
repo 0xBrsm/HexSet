@@ -48,7 +48,7 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 | 403 | An unknown token; a reclaim secret that matches no seat |
 | 404 | An unknown game code or route |
 | 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move or at a table with fixed seats; the last seat leaving; a trade-round conflict (below) |
-| 429 | `POST /api/games` from an address over its new-game limits (below) |
+| 429 | `POST /api/games` from an address over its new-game limits, or `POST /api/ranked` from one at its unfinished-games limit (below) |
 | 500 | An unexpected server error |
 
 `POST /api/games` validates every bot before dealing: a name not offered at
@@ -324,8 +324,10 @@ are ([above](#client-identity-and-seat-recovery)), and for models over MCP
 
 `POST /api/ranked {"game_type": ..., "client": {...}}` returns
 `{"ticket", "game_type", "status": "waiting"}`. It needs a `client.id`, the
-identity every ranked game counts under, and is admitted against the
-caller's limits as a deal is (New-game limits, above). `GET
+identity every ranked game counts under. Ranked play counts against no
+game allowance, an address's or an API key's: a ticket is refused (429) only
+from an address at its unfinished-games limit (New-game limits, above), and
+a ranked game it plays counts toward that limit as any game does. `GET
 /api/ranked/<ticket>?wait=N` long-polls up to 25 seconds: `waiting`, or once
 matched `"status": "matched"` with the seat's `token` and its state, as
 `POST /api/join` answers; from there the seat plays as any other. A ticket
@@ -338,16 +340,20 @@ ticket is seated with the waiting clients it has met least in ranked games,
 never two seats for one client id, until the table is full. One seat left
 goes to the server's own bot (`--ranked-bot`, [server.md](server.md)), never
 more: like any player it sits once at a table, so a table short by two or
-more waits for players. One
-version of a client, its `id` at one profile `version`, sits at no more than
-100 ranked tables with that bot; past that it waits for other clients, so a
-new version starts afresh.
+more waits for players.
+
+A player here is an `id` at one profile `version`: a client, a server
+entrant (below) or the fill bot at the version it plays. Two players meet at
+no more than 100 ranked tables. Past that the queue seats neither with the
+other, and a ticket with no one left to meet waits; a new version of either
+starts afresh.
 
 The server may also enter its own bots (`--ranked-entrant`,
 [server.md](server.md)). Each holds a ticket at every game type it plays, one
 ranked game of each at a time, is matched like any client, under the id
-`bot:<name>` and its profile's version, and is ranked as one. Its seats are
-not fill: a client seated with entrants alone has not met the fill bot.
+`bot:<name>` and its profile's version, and is ranked as one, under the
+same cap. Its seats are not fill: a client seated with entrants alone has not
+met the fill bot.
 
 A ranked table's seats are fixed: `/api/bot`, `/api/open` and `/api/close`
 are a 409 there. It runs on a clock: when a move takes longer than 60

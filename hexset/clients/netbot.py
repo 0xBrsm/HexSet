@@ -757,6 +757,7 @@ def rollouts_for(
     horizon: int | None = None,
     rng: random.Random | None = None,
     trade: TradeParams | None = None,
+    full_setup: bool = False,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
@@ -769,6 +770,7 @@ def rollouts_for(
         worlds=worlds,
         top=top,
         decisive=decisive,
+        full_setup=full_setup,
         horizon=horizon,
         rng=rng,
     )
@@ -821,6 +823,7 @@ def register_entrants(loader) -> None:
             checkpoint,
             worlds=entrant.simulations, top=entrant.option("top"),
             decisive=entrant.option("decisive"), horizon=entrant.option("horizon"),
+            full_setup=bool(entrant.option("full_setup", False)),
             rng=rng, trade=entrant.trade,
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),

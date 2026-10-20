@@ -37,11 +37,15 @@ class RolloutConfig:
     (`hexset.rollout.PairedRollouts`), as metadata `search = rollout` asks
     for them: `worlds` shared-chance worlds, the policy's `top` moves by
     prior as candidates, each playout cut `horizon` turns on (metadata
-    `horizon`) or, at `None`, played to the game's end."""
+    `horizon`) or, at `None`, played to the game's end, and the opening
+    searched in full under `full_setup`."""
 
     worlds: int = DEFAULT_WORLDS
     top: int = DEFAULT_TOP
     horizon: int | None = None
+    #: Every opening root searched whatever `decisive` says (metadata
+    #: `setup = full`, `PairedRollouts.full_setup`).
+    full_setup: bool = False
 
 
 @dataclass(frozen=True)
@@ -168,11 +172,11 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
     searched, so a stale `simulations` cannot turn a policy into a search.
 
     `search = mcts` reads `simulations`, `wave`, `own_calibration` and
-    `decisive`; `search = rollout` reads `worlds`, `top`, `decisive` and
-    `horizon`. Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
-    and an unreadable one takes its default; a setting that changes what the
-    search is (`decisive`, `horizon`, `own_calibration`) fails the load
-    when it does not read. Any other `search` is no search."""
+    `decisive`; `search = rollout` reads `worlds`, `top`, `decisive`,
+    `horizon` and `setup`. Budgets (`simulations`, `wave`, `worlds`, `top`)
+    are bounded and an unreadable one takes its default; a setting that
+    changes what the search is (`decisive`, `horizon`, `setup`,
+    `own_calibration`) fails the load when it does not read. Any other `search` is no search."""
     method = meta.get("search", "none")
     if method == "rollout":
         if meta.get("own_calibration", "").strip():
@@ -184,6 +188,7 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
                 # One candidate is no comparison: two is the least a rollout plays out.
                 top=max(2, _clamp(meta.get("top"), DEFAULT_TOP, MAX_TOP) or DEFAULT_TOP),
                 horizon=_horizon(meta.get("horizon")),
+                full_setup=_full_setup(meta.get("setup")),
             ),
         )
     if method != "mcts":
@@ -195,6 +200,16 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
         own_calibration=_calibration(meta.get("own_calibration")),
         decisive=_decisive(meta.get("decisive")),
     )
+
+
+def _full_setup(value: str | None) -> bool:
+    """Metadata `setup`: `full` to search every opening root, absent for the
+    `decisive` skip everywhere."""
+    if value is None or not value.strip():
+        return False
+    if value.strip() != "full":
+        raise ValueError(f"setup {value!r} is not 'full'")
+    return True
 
 
 def _horizon(value: str | None) -> int | None:

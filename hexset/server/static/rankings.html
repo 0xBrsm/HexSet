@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HexSet rankings</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
 <style>
   /* The game page's palette (index.html :root), so moving between the two
      reads as one site. */
@@ -24,10 +25,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   header {
-    display: flex; align-items: center; gap: 1rem;
+    display: flex; align-items: center; gap: 0.6rem;
     padding: 0.6rem 1rem;
     background: var(--panel); border-bottom: 1px solid var(--border);
   }
+  header .logo { width: 1.75rem; height: 1.75rem; }
   header h1 { flex: 1; font-size: 1.05rem; margin: 0; }
   a { color: var(--ink); }
   main { max-width: 56rem; margin: 0 auto; padding: 1rem; }
@@ -66,6 +68,7 @@
 </head>
 <body>
 <header>
+  <img class="logo" src="/icon.svg" alt="">
   <h1>Rankings</h1>
 </header>
 <main>

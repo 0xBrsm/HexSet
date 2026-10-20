@@ -14,11 +14,15 @@ oldest first. Each is grouped with the waiting clients it has met least in
 ranked games so far, no client id twice at one table, until the table is
 full. One seat still empty goes to the server's fill bot
 (`Config.ranked_bot`), and no more: like any player it sits once at a
-table, so a table short by two or more waits for players. An entrant, a client id at one `version` of its
-profile, sits at no more than `FILL_CAP` ranked tables with the fill bot:
-past that it waits for other clients. A client may hold any number of
-tickets, and so play any number of ranked games at once, within the
-per-address limits a deal counts against (`api.Tables.admit`).
+table, so a table short by two or more waits for players.
+
+Two players, each an id at one `version` of its profile (`entrant`), meet
+at no more than `PAIR_CAP` ranked tables: the fill bot and the server's
+entrants count as players like any client, so a new version of either side
+meets the other afresh. A client may hold any number of tickets, and so
+play any number of ranked games at once, within its address's
+unfinished-games limit (`api.Tables.admit_ranked`); ranked play counts
+against no game allowance.
 
 ## Server bots as players
 
@@ -27,8 +31,8 @@ client does, under the id `bot:<entry>` and its profile's version
 (`api.bot_profile`): before each pass the queue gives it a ticket at every
 game type it is offered at (`api.model_catalogue`) where it has none waiting
 and no ranked game in play, so it plays one game of each type at a time. Its
-tickets are matched like any other and share the fill bot's cap; the
-journal names its seats (`entrants`), so only the other bot seats are fill.
+tickets are matched like any other, under the same pair cap; the journal
+names its seats (`entrants`), so only the other bot seats are fill.
 
 ## The clock
 
@@ -55,7 +59,7 @@ from hexset.rules import GAME_TYPES
 from . import _journal as journal
 
 __all__ = [
-    "FILL_CAP",
+    "PAIR_CAP",
     "FILL_SEATS",
     "MATCH_SECONDS",
     "TICKET_SECONDS",
@@ -76,16 +80,21 @@ TURN_SECONDS = 60.0
 TICKET_SECONDS = 60.0
 MATCHED_KEPT = 10
 
-# Ranked tables an entrant may share with the fill bot.
-FILL_CAP = 100
+# Ranked tables two players, each an id at one version, may share.
+PAIR_CAP = 100
 
 # Seats the fill bot takes at one table: one, as any player sits once.
 FILL_SEATS = 1
 
 
 def entrant(client: dict) -> tuple[str, str | None]:
-    """The fill cap's unit: a client id at one version of its profile."""
+    """The pair cap's unit: a client id at one version of its profile."""
     return client["id"], client.get("version")
+
+
+def _bot_entrant(bot: dict) -> tuple[str, str | None]:
+    """A bot seat's pair-cap unit, from its journal entry (`name`, `version`)."""
+    return f"bot:{bot['name']}", bot.get("version")
 
 
 def _player(seat_client: dict | None, bot: dict | None) -> str | None:
@@ -101,15 +110,14 @@ def _player(seat_client: dict | None, bot: dict | None) -> str | None:
 @dataclass
 class Ticket:
     """One client waiting for a ranked game of `game_type`, until `match`
-    holds the table it was seated at (`code`, `seat`, `token`). `origin` and
-    `holder` are what its deal was admitted against, given back if it is
-    never matched."""
+    holds the table it was seated at (`code`, `seat`, `token`). `origin` is
+    the address it queued from, which its table counts toward that
+    address's unfinished games."""
 
     id: str
     game_type: str
     client: dict
     origin: object = None
-    holder: str | None = None
     seen: float = field(default_factory=time.monotonic)
     match: dict | None = None
     # The server bot this ticket seats (`Config.ranked_entrants`), whose
@@ -130,13 +138,13 @@ class RankedQueue:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._meetings: Counter | None = None
-        self._fills: Counter | None = None
+        self._pairs: Counter | None = None
 
     # --- clients ------------------------------------------------------------
 
-    def join(self, game_type: str, client: dict, origin=None, holder: str | None = None) -> Ticket:
-        """A new ticket for `client`, already admitted (`api.Tables.admit`)."""
-        ticket = Ticket(secrets.token_urlsafe(18), game_type, dict(client), origin, holder)
+    def join(self, game_type: str, client: dict, origin=None) -> Ticket:
+        """A new ticket for `client`, already admitted (`api.Tables.admit_ranked`)."""
+        ticket = Ticket(secrets.token_urlsafe(18), game_type, dict(client), origin)
         with self._changed:
             self._tickets[ticket.id] = ticket
         self.start()
@@ -165,7 +173,6 @@ class RankedQueue:
             if ticket is None or ticket.match is not None:
                 return False
             del self._tickets[ticket_id]
-        self.tables.unadmit(ticket.origin, ticket.holder)
         return True
 
     def close(self) -> None:
@@ -234,16 +241,14 @@ class RankedQueue:
                         now - t.seen > TICKET_SECONDS * (MATCHED_KEPT if t.match else 1))]
             for ticket in gone:
                 del self._tickets[ticket.id]
-        for ticket in gone:
-            if ticket.match is None:
-                self.tables.unadmit(ticket.origin, ticket.holder)
 
     # --- matching -------------------------------------------------------------
 
     def _match(self, game_type: str) -> None:
         seats = max(GAME_TYPES[game_type].seats)
         bot = self.tables.config.ranked_bot
-        meetings, fills = self._history()
+        meetings, pairs = self._history()
+        filler = self._filler(bot)
         with self._changed:
             waiting = [t for t in self._tickets.values() if t.match is None and t.game_type == game_type]
         taken: set[str] = set()
@@ -254,7 +259,9 @@ class RankedQueue:
             pool = [t for t in waiting if t.id not in taken and t is not first]
             while len(group) < seats:
                 ids = {t.client["id"] for t in group}
-                pool = [t for t in pool if t.client["id"] not in ids]
+                pool = [t for t in pool if t.client["id"] not in ids
+                        and all(pairs[frozenset((entrant(t.client), entrant(g.client)))] < PAIR_CAP
+                                for g in group)]
                 if not pool:
                     break
                 pick = min(pool, key=lambda t: (
@@ -262,9 +269,9 @@ class RankedQueue:
                 group.append(pick)
                 pool.remove(pick)
             if len(group) < seats:
-                if bot is None:
+                if filler is None:
                     continue
-                group = [t for t in group if fills[entrant(t.client)] < FILL_CAP]
+                group = [t for t in group if pairs[frozenset((entrant(t.client), filler))] < PAIR_CAP]
                 if first not in group or seats - len(group) > FILL_SEATS:
                     continue
             fill = seats - len(group)
@@ -274,7 +281,7 @@ class RankedQueue:
             except Exception:
                 traceback.print_exc()
                 continue
-            self._count([t.client for t in group], [bot] * fill)
+            self._count([t.client for t in group], [filler] * fill)
             with self._changed:
                 for ticket, (seat, token) in zip(group, dealt["seats"]):
                     ticket.match = {"code": dealt["code"], "seat": seat, "token": token}
@@ -282,38 +289,44 @@ class RankedQueue:
                 self._changed.notify_all()
             taken.update(t.id for t in group)
 
+    def _filler(self, bot: str | None) -> tuple[str, str | None] | None:
+        """The fill bot's pair-cap unit at the version it plays now, or None
+        for no fill bot."""
+        if bot is None:
+            return None
+        from .api import bot_profile  # local: `api` imports this module
+
+        return _bot_entrant({"name": bot, "version": bot_profile(bot).get("version")})
+
     def _history(self) -> tuple[Counter, Counter]:
-        """The meeting and fill counts, read from the ranked journals the
-        first time they are asked for and kept up to date by `_count`."""
+        """The meeting counts by id and by versioned pair (`entrant`), read
+        from the ranked journals the first time they are asked for and kept
+        up to date by `_count`."""
         if self._meetings is None:
-            meetings, fills = Counter(), Counter()
+            meetings, pairs = Counter(), Counter()
             for header in _ranked_headers(self.tables.journal_directory()):
                 clients = {int(s): c for s, c in (header.get("clients") or {}).items() if c}
                 bots = {int(s): b for s, b in (header.get("bots") or {}).items()}
-                entrants = {int(s) for s in header.get("entrants") or ()}
                 locked = set(header.get("locked") or ())
-                for seat in entrants & set(bots):
-                    version = bots[seat].get("version")
-                    clients[seat] = {"id": f"bot:{bots[seat]['name']}", **({"version": version} if version else {})}
-                players = [_player(clients.get(s), bots.get(s)) for s in range(int(header.get("num_players", 0)))
-                           if s not in locked]
-                filled = any(s not in entrants and s not in locked for s in bots)
-                _add(meetings, fills, [c for s, c in sorted(clients.items()) if s not in locked], filled, players)
-            self._meetings, self._fills = meetings, fills
-        return self._meetings, self._fills
+                seats = [s for s in range(int(header.get("num_players", 0))) if s not in locked]
+                players = [_player(clients.get(s), bots.get(s)) for s in seats]
+                versioned = [_bot_entrant(bots[s]) if s in bots
+                             else entrant(clients[s]) if clients.get(s, {}).get("id") else None for s in seats]
+                _add(meetings, pairs, players, versioned)
+            self._meetings, self._pairs = meetings, pairs
+        return self._meetings, self._pairs
 
-    def _count(self, clients: list[dict], bots: list[str]) -> None:
-        players = [c["id"] for c in clients] + [f"bot:{name}" for name in bots]
-        _add(self._meetings, self._fills, clients, bool(bots), players)
+    def _count(self, clients: list[dict], fill: list[tuple[str, str | None]]) -> None:
+        players = [c["id"] for c in clients] + [unit[0] for unit in fill]
+        _add(self._meetings, self._pairs, players, [entrant(c) for c in clients] + fill)
 
 
-def _add(meetings: Counter, fills: Counter, clients: list[dict], filled: bool, players: list[str | None]) -> None:
+def _add(meetings: Counter, pairs: Counter, players: list[str | None],
+         versioned: list[tuple[str, str | None] | None]) -> None:
     for a, b in combinations([p for p in players if p], 2):
         meetings[frozenset((a, b))] += 1
-    if filled:
-        for client in clients:
-            if client.get("id"):
-                fills[entrant(client)] += 1
+    for a, b in combinations([v for v in versioned if v and v[0]], 2):
+        pairs[frozenset((a, b))] += 1
 
 
 def _ranked_headers(directory: str | None) -> list[dict]:

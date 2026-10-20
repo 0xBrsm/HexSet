@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Three pointy-top tiles sharing one corner at (100, 113.5), drawn a
+       little short of their true radius (54) so a thin gap separates them;
+       the rounded stroke rounds their corners. A network joins the tile
+       centres to each other and to the shared corner. -->
+  <g fill="#1a7fb5" stroke="#1a7fb5" stroke-width="10" stroke-linejoin="round">
+    <polygon points="100,14 139.4,36.7 139.4,82.3 100,105 60.6,82.3 60.6,36.7"/>
+    <polygon points="146.8,95 186.2,117.7 186.2,163.3 146.8,186 107.3,163.3 107.3,117.7"/>
+    <polygon points="53.2,95 92.7,117.7 92.7,163.3 53.2,186 13.8,163.3 13.8,117.7"/>
+  </g>
+  <g stroke="#fff" stroke-width="8" stroke-linecap="round">
+    <line x1="100"   y1="59.5"  x2="100"   y2="113.5"/>
+    <line x1="146.8" y1="140.5" x2="100"   y2="113.5"/>
+    <line x1="53.2"  y1="140.5" x2="100"   y2="113.5"/>
+    <line x1="100"   y1="59.5"  x2="146.8" y2="140.5"/>
+    <line x1="146.8" y1="140.5" x2="53.2"  y2="140.5"/>
+    <line x1="53.2"  y1="140.5" x2="100"   y2="59.5"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="100"   cy="59.5"  r="13"/>
+    <circle cx="146.8" cy="140.5" r="13"/>
+    <circle cx="53.2"  cy="140.5" r="13"/>
+    <circle cx="100"   cy="113.5" r="14"/>
+  </g>
+</svg>

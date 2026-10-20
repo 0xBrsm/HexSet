@@ -416,6 +416,23 @@ def test_a_rollout_seat_journals_every_decision_it_made(board, arena_registry):
     assert _outcome_from_entry(entry).searches == outcome.searches
 
 
+def test_search_logs_finds_the_searchers_own_log_through_the_seats_wrappers(board, arena_registry):
+    """`hexset.arena.search_logs` hands back the rollout searcher's own
+    `decision_log`, through the trader the seat is dealt with, so a decision
+    made after the call is in it."""
+    from hexset.arena import entrant_from_name, search_logs, spawn
+    from hexset.clients.netbot import GatedRollouts
+
+    register_entrants(lambda path, topology: stub_checkpoint(board))
+    seat = spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=2:horizon=1~random"), board, random.Random(3))
+    assert not isinstance(seat, GatedRollouts)   # dealt inside its trader
+    logs = search_logs(seat)
+    assert len(logs) == 1 and logs[0] == []
+    seated(seat, board)
+    assert logs[0] and logs[0] is search_logs(seat)[0]
+    assert search_logs(bot_for(stub_checkpoint(board))) == []
+
+
 @dataclass(frozen=True)
 class _Traded:
     """A stub checkpoint that also names a trader."""
@@ -993,6 +1010,14 @@ def test_a_rollout_file_spawns_as_the_arenas_rollout_entrant_of_its_settings(
     )
     assert isinstance(served, GatedRollouts) and isinstance(entrant, GatedRollouts)
     assert (served.worlds, served.top, served.decisive, served.horizon) == (2, 2, 0.97, 1)
+    assert not served.full_setup and not entrant.full_setup
+    opening_loaded = SimpleNamespace(**vars(checkpoint), search=SearchConfig(
+        decisive=0.97, rollout=RolloutConfig(worlds=2, top=2, horizon=1, full_setup=True)))
+    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: opening_loaded)
+    assert onnxbot.spawn("stub.onnx", board, rng=random.Random(5)).full_setup
+    assert spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=2:decisive=0.97:horizon=1:setup=full"),
+                 board, random.Random(5)).full_setup
+    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
 
     game = start(board, PLAYERS, random.Random(2))
     walk = random.Random(2)

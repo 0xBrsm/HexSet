@@ -5,6 +5,52 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.19.0
+
+### Breaking
+
+- **Ranked play counts against no game allowance, and any two players meet
+  at most 100 times.** A ranked ticket (`POST /api/ranked`, MCP
+  `ranked_game`) is refused only from an address at its unfinished-games
+  limit (`Tables.admit_ranked`); neither an address's nor an API key's
+  games per period applies, and ranked games no longer count toward either
+  after a restart. In place of the fill bot's cap per client version, the
+  queue seats two players, each an id at one profile version (a client, a
+  server entrant, or the fill bot at the version it plays), at no more than
+  `ranked.PAIR_CAP` (100) tables together, so a new version of either side
+  starts afresh. `ranked.FILL_CAP` is gone, and `RankedQueue.join` takes no
+  `holder`.
+
+### Added
+
+- **Paired rollouts can search the whole opening.**
+  `PairedRollouts(full_setup=True)` plays out every opening settlement and
+  road with a choice, whatever its prior, while `decisive` still skips
+  confident roots after the opening (`hexset.rollout.SETUP_PHASES`). The
+  arena spec takes it as `rollout:<path>@...:setup=full` (the entrant's name
+  gains an `s`), `rollouts_for` as `full_setup`, and a model file as
+  metadata `setup = full`; any other `setup` value fails the load.
+
+- **The game page is an installable web app.** It links a manifest
+  (`/manifest.webmanifest`: standalone, opening at `/`) and its icons:
+  `/icon.svg`, 192 and 512 pixel PNGs, a maskable icon on the page's
+  background, and `/apple-touch-icon.png`. Both pages take their icon
+  from `/icon.svg` instead of an inlined copy.
+- **`hexset.arena.search_logs(bot)`: a seat's decision logs.** The
+  `decision_log` lists of the searchers behind a seat, found through the
+  wrappers it is dealt in (`TradesBy`, `Vetoed`, `Dealing`, `Coalition`,
+  both halves of a `Handoff`). Each is the searcher's own list, so a client
+  holding it sees each later decision as it is made. The arena's journal
+  reads its `searches` through it.
+
+### Changed
+
+- **A new logo.** Three hex tiles meeting at one corner, joined by a
+  small network of their centres and that corner, in place of the hex
+  wheel (`docs/logo.svg`). It is the icon of the game page and of
+  `/rankings`, which had none, and stands beside the rankings title.
+
+
 ## 1.18.0
 
 ### Added

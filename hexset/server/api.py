@@ -1166,7 +1166,7 @@ class Tables:
     def _dealt_from_journals(self) -> dict[str, deque[float]]:
         """Every deal in the last `period_days` the journals record an address
         for (the creator's client, in each header), so a restart does not
-        reset the count."""
+        reset the count. Ranked games count against no allowance."""
         directory = journal_dir(self.config)
         if not directory or not os.path.isdir(directory):
             return {}
@@ -1174,7 +1174,7 @@ class Tables:
         dealt: dict[str, list[float]] = {}
         for path in Path(directory).glob("*.jsonl"):
             header = journal.header_of(path)
-            if header is None:
+            if header is None or header.get("ranked"):
                 continue
             try:
                 at = datetime.strptime(header["at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
@@ -1230,13 +1230,28 @@ class Tables:
                     f"next slot {at}{more}",
                     status=429, fields=fields, retry_after=max(1, int(slot - time.time())),
                 )
-            live_cap = self.config.live_tables_per_ip
-            if live_cap and self._live(origin) >= live_cap:
-                raise ApiError(
-                    f"live table limit: {live_cap} unfinished games at once for this address",
-                    status=429,
-                )
+            self._refuse_live(origin)
             dealt.append(time.time())
+
+    def admit_ranked(self, origin: Origin | None) -> None:
+        """Refuses a ranked ticket (`POST /api/ranked`) from an address at its
+        unfinished-games limit with a 429. Ranked play counts against no
+        period allowance, an API key's or an address's: the queue's pair cap
+        (`ranked.PAIR_CAP`) bounds it."""
+        if origin is None or self.config.is_exempt(origin.ip):
+            return
+        with self._registry_lock:
+            self._refuse_live(origin)
+
+    def _refuse_live(self, origin: Origin) -> None:
+        """A 429 for an address at `Config.live_tables_per_ip`. Call under
+        `_registry_lock`."""
+        live_cap = self.config.live_tables_per_ip
+        if live_cap and self._live(origin) >= live_cap:
+            raise ApiError(
+                f"live table limit: {live_cap} unfinished games at once for this address",
+                status=429,
+            )
 
     def _cap(self, origin: Origin, holder: str | None) -> tuple[int, str]:
         """The period allowance a deal counts against, and whose it is."""
@@ -1451,8 +1466,8 @@ class Tables:
 
     def queue_join(self, payload: dict, origin: Origin | None) -> dict:
         """`POST /api/ranked`: a ticket for a ranked game of `game_type`
-        (standard when unnamed), admitted against the caller's limits as a
-        deal is. For a client of the HTTP API (with its profile) or a model
+        (standard when unnamed), refused only at the caller's unfinished-games
+        limit (`admit_ranked`). For a client of the HTTP API (with its profile) or a model
         over MCP, never the page, and always with a `client.id`."""
         game_type = payload.get("game_type", STANDARD_GAME.name)
         if not isinstance(game_type, str) or game_type not in GAME_TYPES:
@@ -1464,8 +1479,8 @@ class Tables:
         require_profile(client, origin)
         if not client.get("id"):
             raise ApiError("ranked play needs a client.id: its games count under it")
-        self.admit(origin, holder)
-        ticket = self.queue.join(game_type, client, origin, holder)
+        self.admit_ranked(origin)
+        ticket = self.queue.join(game_type, client, origin)
         self._seen(client)
         return {"ticket": ticket.id, "game_type": game_type, "status": "waiting"}
 

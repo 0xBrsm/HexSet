@@ -1,5 +1,6 @@
 """Ranked play: the queue deals the table, pairing the clients that have met
-least and filling the rest with the server's bot up to its cap; a ranked
+least and filling the rest with the server's bot, no two versioned players
+meeting past the pair cap; ranked play counts against no game allowance; a ranked
 table's seats are fixed and it runs on a clock; a restart closes the ranked
 games it cut short; and only ranked games reach the rankings."""
 
@@ -16,7 +17,7 @@ from hexset.actions import Action, ActionType, legal_actions
 from hexset.game import is_over, to_move
 from hexset.server import mcptools
 from hexset.server.api import ApiError, Origin
-from hexset.server.ranked import FILL_CAP, entrant
+from hexset.server.ranked import PAIR_CAP, entrant
 from hexset.server.wire import action_to_wire
 
 FILL = "test-trader"
@@ -63,7 +64,10 @@ def test_a_lone_client_is_seated_with_the_fill_bot_at_a_ranked_table(tmp_path):
     table, got = seats_of(tables, ticket)
     assert table.session.ranked and got["token"] and got["game_type"] == "duel-variant"
     assert [s.kind.value for s in table.seats[:2]].count("bot") == 1
-    assert json.loads(next(tmp_path.glob("*.jsonl")).read_text().splitlines()[0])["ranked"] is True
+    header = json.loads(next(tmp_path.glob("*.jsonl")).read_text().splitlines()[0])
+    assert header["ranked"] is True
+    # The game log names the version each seat played as: the client's here, a bot's from its profile.
+    assert [(c["id"], c["version"]) for c in header["clients"].values() if c] == [("a" * 64, "1")]
     # The queue's seats are fixed.
     bot_seat = next(i for i, s in enumerate(table.seats[:2]) if s.kind.value == "bot")
     for path, body in (("/api/bot", {"seat": bot_seat, "model": FILL}), ("/api/close", {"seat": bot_seat})):
@@ -93,10 +97,14 @@ def test_one_client_never_sits_twice_at_a_table():
     assert seats_of(tables, first)[0] is not seats_of(tables, second)[0]
 
 
+def pair(a: tuple, b: tuple) -> frozenset:
+    return frozenset((a, b))
+
+
 def test_the_fill_bot_stops_at_the_cap_for_a_version_and_not_for_the_next():
     tables = new_tables(ranked_bot=FILL)
-    _, fills = tables.queue._history()
-    fills[entrant(client("a"))] = FILL_CAP
+    _, pairs = tables.queue._history()
+    pairs[pair(entrant(client("a")), tables.queue._filler(FILL))] = PAIR_CAP
     capped = queue(tables, client("a"))
     tables.queue.tick()
     assert polled(tables, capped)["status"] == "waiting"
@@ -107,6 +115,40 @@ def test_the_fill_bot_stops_at_the_cap_for_a_version_and_not_for_the_next():
     other = queue(tables, client("b"))
     tables.queue.tick()
     assert seats_of(tables, capped)[0] is seats_of(tables, other)[0]
+
+
+def test_two_versions_that_met_at_the_cap_are_not_seated_together_again():
+    tables = new_tables()
+    _, pairs = tables.queue._history()
+    pairs[pair(entrant(client("a")), entrant(client("b")))] = PAIR_CAP
+    a, b = queue(tables, client("a")), queue(tables, client("b"))
+    tables.queue.tick()
+    assert [polled(tables, t)["status"] for t in (a, b)] == ["waiting", "waiting"]
+    fresh = queue(tables, client("b", version="2"))
+    tables.queue.tick()
+    assert seats_of(tables, a)[0] is seats_of(tables, fresh)[0]
+    assert polled(tables, b)["status"] == "waiting"
+    assert pairs[pair(entrant(client("a")), entrant(client("b", version="2")))] == 1
+
+
+def test_ranked_play_counts_against_no_allowance_only_the_unfinished_games_limit(tmp_path):
+    def limited():
+        return new_tables(games_dir=str(tmp_path), games_per_period=1, live_tables_per_ip=2, limit_exempt=())
+
+    tables = limited()
+    queue(tables, client("a"), origin=API)
+    queue(tables, client("b"), origin=API)
+    tables.queue.tick()
+    # Two ranked games in play from one address: its unfinished-games limit is reached...
+    queue(tables, client("c"), origin=API)
+    queue(tables, client("d"), origin=API)
+    tables.queue.tick()
+    with pytest.raises(ApiError) as refused:
+        queue(tables, client("e"), origin=API)
+    assert refused.value.status == 429 and "live table limit" in refused.value.args[0]
+    # ...but none of its one game a period went, before or after a restart.
+    assert tables.allowance(API, None)["games_left"] == 1
+    assert limited().allowance(API, None)["games_left"] == 1
 
 
 def test_the_fill_bot_takes_one_seat_at_a_table_and_never_two(tmp_path):
@@ -287,7 +329,7 @@ def test_an_entrant_plays_one_ranked_game_at_a_time_at_each_type_it_is_offered_a
     assert len(headers(games)) == 2
 
 
-def test_an_entrant_meets_clients_and_shares_the_fill_cap_as_one(tmp_path, entrant_model):
+def test_an_entrant_meets_clients_and_the_fill_bot_under_the_pair_cap(tmp_path, entrant_model):
     entry = entrant_model("standard", "duel-variant")
     games = tmp_path / "games"
     games.mkdir()
@@ -299,13 +341,14 @@ def test_an_entrant_meets_clients_and_shares_the_fill_cap_as_one(tmp_path, entra
     assert sorted(s.name for s in table.seats if s.kind.value == "bot") == sorted([entry, FILL])
     # The duel went to the entrant and the fill bot alone.
     assert {h["game_type"] for h in headers(games)} == {"standard", "duel-variant"}
-    me, it = entrant(client("a")), (f"bot:{entry}", "2.0")
-    meetings, fills = tables.queue._history()
-    assert (fills[me], fills[it], meetings[frozenset(("a" * 64, f"bot:{entry}"))]) == (1, 2, 1)
+    me, it, fill = entrant(client("a")), (f"bot:{entry}", "2.0"), tables.queue._filler(FILL)
+    met = lambda pairs: (pairs[pair(me, fill)], pairs[pair(it, fill)], pairs[pair(me, it)])  # noqa: E731
+    meetings, pairs = tables.queue._history()
+    assert met(pairs) == (1, 2, 1) and meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
     # Read back from the journals the same.
-    read = new_tables(games_dir=str(games))
-    meetings, fills = read.queue._history()
-    assert (fills[me], fills[it], meetings[frozenset(("a" * 64, f"bot:{entry}"))]) == (1, 2, 1)
+    read = new_tables(games_dir=str(games), ranked_bot=FILL)
+    meetings, pairs = read.queue._history()
+    assert met(pairs) == (1, 2, 1) and meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
 
 
 def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, entrant_model):
@@ -317,9 +360,11 @@ def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, en
     tables.queue.tick()
     table, _ = seats_of(tables, ticket)
     assert [s.name for s in table.seats[:2] if s.kind.value == "bot"] == [entry]
+    fill = tables.queue._filler(FILL)
     for history in (tables.queue._history(), new_tables(games_dir=str(games)).queue._history()):
-        meetings, fills = history
-        assert fills[entrant(client("a"))] == 0 and fills[(f"bot:{entry}", "2.0")] == 0
+        meetings, pairs = history
+        assert pairs[pair(entrant(client("a")), fill)] == 0 and pairs[pair((f"bot:{entry}", "2.0"), fill)] == 0
+        assert pairs[pair(entrant(client("a")), (f"bot:{entry}", "2.0"))] == 1
         assert meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
 
 

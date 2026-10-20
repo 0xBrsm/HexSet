@@ -106,6 +106,16 @@ __all__ = [
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 RANKINGS_HTML = STATIC_DIR / "rankings.html"
+# What makes the game page an installable app (its manifest and icons), and
+# the icon both pages show: path -> (file in STATIC_DIR, content type).
+APP_FILES = {
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+    "/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/icon-192.png": ("icon-192.png", "image/png"),
+    "/icon-512.png": ("icon-512.png", "image/png"),
+    "/icon-maskable.png": ("icon-maskable.png", "image/png"),
+    "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+}
 
 # MCP protocol versions understood, and what `initialize` answers with when a
 # client names something else.
@@ -253,6 +263,9 @@ class Handler(BaseHTTPRequestHandler):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
         elif self.path.partition("?")[0] == "/rankings":
             self._file(RANKINGS_HTML, "text/html; charset=utf-8")
+        elif self.path.partition("?")[0] in APP_FILES:
+            name, content_type = APP_FILES[self.path.partition("?")[0]]
+            self._file(STATIC_DIR / name, content_type)
         elif self.path.startswith("/api/") or self.path.partition("?")[0] == "/api":
             self._serve("GET", {})
         elif looks_like_a_code_attempt(self.path):

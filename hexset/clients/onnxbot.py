@@ -585,6 +585,7 @@ def _spawn_own(path, board, loaded, rng, device, threads):
             top=rollout.top,
             decisive=loaded.search.decisive,
             horizon=rollout.horizon,
+            full_setup=rollout.full_setup,
             rng=rng,
         )
     return searcher(

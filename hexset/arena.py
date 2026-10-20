@@ -923,13 +923,15 @@ def _play_one(
 _MOVERS = ("mover", "proposer", "bot", "first", "second")
 
 
-def _search_log(bot: object) -> tuple[dict, ...]:
-    """The decisions the searcher behind a seat logged this game
-    (`decision_log`, as `hexset.rollout.PairedRollouts` keeps it), as JSON,
-    found through the wrappers the seat's bot is dealt in; empty for a seat
-    that keeps none. Read without attribute delegation, since a wrapper
-    passes unknown names to its trader, not to the bot that moves."""
-    found: list[dict] = []
+def search_logs(bot: object) -> list[list]:
+    """The decision logs of the searchers behind a seat (`decision_log`, as
+    `hexset.rollout.PairedRollouts` keeps one), found through the wrappers
+    the seat's bot is dealt in (`TradesBy`, `Vetoed`, `Dealing`, `Coalition`,
+    both halves of a `Handoff`), in that order. Each is the searcher's own
+    list, so a decision it makes later appears in it; a seat that keeps none
+    has no logs. Read without attribute delegation, since a wrapper passes
+    unknown names to its trader, not to the bot that moves."""
+    found: list[list] = []
     queue, seen = [bot], set()
     while queue:
         current = queue.pop(0)
@@ -941,14 +943,19 @@ def _search_log(bot: object) -> tuple[dict, ...]:
         except AttributeError:
             log = None
         if log is not None:
-            found.extend(decision.to_json() for decision in log)
+            found.append(log)
             continue
         for name in _MOVERS:
             try:
                 queue.append(object.__getattribute__(current, name))
             except AttributeError:
                 pass
-    return tuple(found)
+    return found
+
+
+def _search_log(bot: object) -> tuple[dict, ...]:
+    """Every decision the searchers behind a seat logged this game, as JSON."""
+    return tuple(decision.to_json() for log in search_logs(bot) for decision in log)
 
 
 def _journal_entry(outcome: Outcome, *, exhausted: bool = False) -> dict:
@@ -1676,13 +1683,14 @@ def _mcts(name: str) -> Entrant:
     )
 
 
-_ROLLOUT_FORM = "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>]]"
+_ROLLOUT_FORM = "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full]]"
 
 
 def _rollout(name: str) -> Entrant:
-    # `rollout:<path>@<worlds>:top=<n>:decisive=<prior>:horizon=<turns>`;
+    # `rollout:<path>@<worlds>:top=<n>:decisive=<prior>:horizon=<turns>:setup=full`;
     # every part after the path is optional (`hexset.rollout.PairedRollouts`:
-    # 32 worlds, the top 3 moves, no decisive root, played to the end).
+    # 32 worlds, the top 3 moves, no decisive root, played to the end;
+    # `setup=full` searches every opening root whatever `decisive` says).
     # `worlds` rides as `Entrant.simulations`, the rest as entrant options.
     path, at, spec = name[len(ROLLOUT) :].partition("@")
     if not at and any("=" in part for part in path.split(":")[1:]):
@@ -1691,7 +1699,7 @@ def _rollout(name: str) -> Entrant:
     if not (budget == "" or (budget.isdigit() and int(budget) >= 1)):
         raise ValueError(f"{name!r}: the worlds read {_ROLLOUT_FORM}")
     worlds = int(budget) if budget else 32
-    top, decisive, horizon = 3, None, None
+    top, decisive, horizon, full_setup = 3, None, None, False
     seen = set()
     for option in (part for part in options.split(":") if part):
         key, assigned, value = option.partition("=")
@@ -1704,16 +1712,20 @@ def _rollout(name: str) -> Entrant:
             decisive = _prior(value)
         elif key == "horizon" and assigned and value.isdigit() and int(value) >= 1:
             horizon = int(value)
+        elif key == "setup" and assigned and value == "full":
+            full_setup = True
         else:
             raise ValueError(
                 f"unknown rollout option: {option!r}; use top=<n of 2 or more>, "
-                "decisive=<prior in (0, 1]> or horizon=<turns, 1 or more>"
+                "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more> or setup=full"
             )
     label = f"rollout{worlds}t{top}"
     if decisive is not None:
         label = f"{label}d{_value_text(decisive)}"
     if horizon is not None:
         label = f"{label}h{horizon}"
+    if full_setup:
+        label = f"{label}s"
     return Entrant(
         name=label,
         kind="rollout",
@@ -1721,7 +1733,8 @@ def _rollout(name: str) -> Entrant:
         simulations=worlds,
         options=(("top", top),)
         + ((("decisive", decisive),) if decisive is not None else ())
-        + ((("horizon", horizon),) if horizon is not None else ()),
+        + ((("horizon", horizon),) if horizon is not None else ())
+        + ((("full_setup", True),) if full_setup else ()),
     )
 
 
@@ -1860,7 +1873,7 @@ __all__ = [
     "register_entrant_kind", "register_preset", "register_spec", "preset_profile", "BOT_PROFILE_FIELDS",
     "unregister_entrant_kind", "unregister_preset", "unregister_spec",
     "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT", "KIND_HINT",
-    "spawn", "traded",
+    "spawn", "traded", "search_logs",
     # the game law
     "MAX_ACTIONS", "board_key", "game_key", "deal_board", "deal_game", "deal_seats",
     "half_turn", "seat_of",

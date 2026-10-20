@@ -91,6 +91,9 @@ def test_the_frontend_ships_with_the_package(packaged_names):
     """A static asset: it lives or dies by `[tool.setuptools.package-data]`."""
     assert "hexset/server/static/index.html" in packaged_names
     assert "hexset/server/static/rankings.html" in packaged_names
+    for name in ("manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png",
+                 "icon-maskable.png", "apple-touch-icon.png"):
+        assert f"hexset/server/static/{name}" in packaged_names
 
 
 def test_every_module_in_the_source_tree_ships(packaged_names):

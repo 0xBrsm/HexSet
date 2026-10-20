@@ -30,6 +30,16 @@ from typing import Iterator
 
 from hexset.rules import GAME_TYPES, STANDARD_GAME
 
+__all__ = [
+    "SERVE_KEYS",
+    "PROFILE_KEYS",
+    "read_metadata",
+    "with_metadata",
+    "modes_of",
+    "stamp",
+    "main",
+]
+
 # `ModelProto` field numbers: `graph` (7) is what makes a file a model,
 # `metadata_props` (14) a repeated `StringStringEntryProto` of `key` (1) and
 # `value` (2).
@@ -192,6 +202,8 @@ def stamp(source: Path, target: Path, *, name: str, modes: list[str], version: s
 
 
 def main(argv: list[str] | None = None) -> int:
+    """`python -m hexset.clients.onnxmeta`: `show` a file's metadata or `stamp`
+    a copy named for serving. Returns the exit status."""
     parser = argparse.ArgumentParser(prog="python -m hexset.clients.onnxmeta", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     show = commands.add_parser("show", help="print a file's metadata")

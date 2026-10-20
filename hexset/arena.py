@@ -83,7 +83,7 @@ class Exhausted(RuntimeError):
 # entrants.
 _ENTRANT_KIND_FACTORIES: dict[str, Callable[[Entrant, Board, random.Random], Bot]] = {}
 _SPEC_PARSERS: dict[str, Callable[[str], "Entrant"]] = {}
-_NETWORK_KINDS = frozenset({"network", "mcts"})
+_NETWORK_KINDS = frozenset({"network", "mcts", "rollout"})
 _RUNTIME_HINT = "requires a runtime loader registered with hexset.clients.netbot.register_entrants"
 
 #: The kinds and presets hexset resolves itself, and the spec prefixes it
@@ -91,7 +91,7 @@ _RUNTIME_HINT = "requires a runtime loader registered with hexset.clients.netbot
 #: means the same bot in every process. `catanatron`'s own module registers
 #: the `catanatron` names when its extra is loaded.
 SHIPPED_NAMES = frozenset({"random", "retired", "catanatron"})
-SHIPPED_PREFIXES = ("network:", "mcts:", "catanatron:", "coalition:", "handoff:")
+SHIPPED_PREFIXES = ("network:", "mcts:", "rollout:", "catanatron:", "coalition:", "handoff:")
 #: The kinds hexset builds itself: those names, `coalition`, the kind of a
 #: `coalition:<entrant>` seat, and `handoff`, the kind of a
 #: `handoff:<round>:<first>|<second>` seat. No preset is named `coalition`
@@ -125,7 +125,7 @@ def register_entrant_kind(kind: str, factory) -> None:
 
     A kind hexset ships (`SHIPPED_KINDS`) is refused, and so is a second,
     different factory for a kind already registered; the same factory again
-    is a no-op. The checkpoint kinds `network` and `mcts` are the exception:
+    is a no-op. The checkpoint kinds `network`, `mcts` and `rollout` are the exception:
     they build from whatever checkpoint loader the process installed
     (`hexset.clients.netbot.register_entrants`), and installing another
     replaces it."""
@@ -782,6 +782,9 @@ class Outcome:
     board_index: int | None = None
     # Every robber deal asked in the game (`Game.deal_log`).
     deals: tuple[Deal, ...] = ()
+    # Per entrant, the decisions its searcher logged this game, as JSON
+    # (`hexset.rollout.Decision.to_json`); empty where no seat keeps a log.
+    searches: tuple[tuple[dict, ...], ...] = ()
 
 
 def half_turn(seats: int) -> tuple[int, ...]:
@@ -888,6 +891,7 @@ def _play_one(
             action_cap=action_cap,
             trade_mode=trade_mode,
         )
+    searches = tuple(_search_log(lineup[seats_taken[e]]) for e in range(seats))
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score and the build census are
     # both read off the truth rather than off one seat's view of it.
@@ -909,7 +913,42 @@ def _play_one(
         index=index,
         board_index=board_index,
         deals=tuple(game.deal_log),
+        searches=searches if any(searches) else (),
     )
+
+
+#: The names a lineup's wrappers keep the bot that makes their moves under:
+#: `TradesBy.mover`, `Vetoed.proposer`, `Dealing.bot` and `Coalition.bot`,
+#: and both halves of a `Handoff`.
+_MOVERS = ("mover", "proposer", "bot", "first", "second")
+
+
+def _search_log(bot: object) -> tuple[dict, ...]:
+    """The decisions the searcher behind a seat logged this game
+    (`decision_log`, as `hexset.rollout.PairedRollouts` keeps it), as JSON,
+    found through the wrappers the seat's bot is dealt in; empty for a seat
+    that keeps none. Read without attribute delegation, since a wrapper
+    passes unknown names to its trader, not to the bot that moves."""
+    found: list[dict] = []
+    queue, seen = [bot], set()
+    while queue:
+        current = queue.pop(0)
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        try:
+            log = object.__getattribute__(current, "decision_log")
+        except AttributeError:
+            log = None
+        if log is not None:
+            found.extend(decision.to_json() for decision in log)
+            continue
+        for name in _MOVERS:
+            try:
+                queue.append(object.__getattribute__(current, name))
+            except AttributeError:
+                pass
+    return tuple(found)
 
 
 def _journal_entry(outcome: Outcome, *, exhausted: bool = False) -> dict:
@@ -927,6 +966,7 @@ def _journal_entry(outcome: Outcome, *, exhausted: bool = False) -> dict:
         "cleared": [asdict(c) for c in outcome.cleared],
         "deals": [d.to_json() for d in outcome.deals],
         "record": None if outcome.record is None else json.loads(to_json(outcome.record)),
+        **({"searches": [list(log) for log in outcome.searches]} if outcome.searches else {}),
     }
 
 
@@ -943,6 +983,7 @@ def _outcome_from_entry(entry: dict) -> Outcome:
         record=None if entry["record"] is None else from_json(json.dumps(entry["record"])),
         index=entry["index"], board_index=entry["board_index"],
         deals=tuple(Deal.from_json(d) for d in entry.get("deals", ())),
+        searches=tuple(tuple(log) for log in entry.get("searches", ())),
     )
 
 
@@ -1479,6 +1520,10 @@ NETWORK = "network:"
 
 MCTS = "mcts:"
 
+#: `rollout:<path>@<worlds>`: the checkpoint deciding by paired rollouts of
+#: its own policy (`hexset.rollout`).
+ROLLOUT = "rollout:"
+
 #: `catanatron:<key>=<value>[:...]`, parsed by `hexset.catanatron.bot`.
 CATANATRON = "catanatron:"
 
@@ -1631,6 +1676,55 @@ def _mcts(name: str) -> Entrant:
     )
 
 
+_ROLLOUT_FORM = "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>]]"
+
+
+def _rollout(name: str) -> Entrant:
+    # `rollout:<path>@<worlds>:top=<n>:decisive=<prior>:horizon=<turns>`;
+    # every part after the path is optional (`hexset.rollout.PairedRollouts`:
+    # 32 worlds, the top 3 moves, no decisive root, played to the end).
+    # `worlds` rides as `Entrant.simulations`, the rest as entrant options.
+    path, at, spec = name[len(ROLLOUT) :].partition("@")
+    if not at and any("=" in part for part in path.split(":")[1:]):
+        raise ValueError(f"{name!r}: options follow the `@`, as in {_ROLLOUT_FORM}")
+    budget, _, options = spec.partition(":")
+    if not (budget == "" or (budget.isdigit() and int(budget) >= 1)):
+        raise ValueError(f"{name!r}: the worlds read {_ROLLOUT_FORM}")
+    worlds = int(budget) if budget else 32
+    top, decisive, horizon = 3, None, None
+    seen = set()
+    for option in (part for part in options.split(":") if part):
+        key, assigned, value = option.partition("=")
+        if key in seen:
+            raise ValueError(f"repeated rollout option: {option!r}")
+        seen.add(key)
+        if key == "top" and assigned and value.isdigit() and int(value) >= 2:
+            top = int(value)
+        elif key == "decisive" and assigned and _prior(value) is not None:
+            decisive = _prior(value)
+        elif key == "horizon" and assigned and value.isdigit() and int(value) >= 1:
+            horizon = int(value)
+        else:
+            raise ValueError(
+                f"unknown rollout option: {option!r}; use top=<n of 2 or more>, "
+                "decisive=<prior in (0, 1]> or horizon=<turns, 1 or more>"
+            )
+    label = f"rollout{worlds}t{top}"
+    if decisive is not None:
+        label = f"{label}d{_value_text(decisive)}"
+    if horizon is not None:
+        label = f"{label}h{horizon}"
+    return Entrant(
+        name=label,
+        kind="rollout",
+        weights=path,
+        simulations=worlds,
+        options=(("top", top),)
+        + ((("decisive", decisive),) if decisive is not None else ())
+        + ((("horizon", horizon),) if horizon is not None else ()),
+    )
+
+
 def _prior(text: str) -> float | None:
     """`text` as a prior in (0, 1], or `None` where it is not one."""
     try:
@@ -1647,7 +1741,7 @@ def _value_text(value: float) -> str:
 
 def entrant_from_name(name: str) -> Entrant:
     """Resolve a name, any of them as `<entrant>~<trader>` to trade through
-    another's gate: a checkpoint spec (`network:`, `mcts:`), a coalition
+    another's gate: a checkpoint spec (`network:`, `mcts:`, `rollout:`), a coalition
     member (`coalition:<entrant>`), a handoff (`handoff:<round>:<a>|<b>`), a
     preset, or a spec a runtime registered, the longest matching prefix
     parsing it. A coalition member trades through its own bot, so it takes no
@@ -1672,6 +1766,8 @@ def entrant_from_name(name: str) -> Entrant:
         return _network(name)
     if name.startswith(MCTS):
         return _mcts(name)
+    if name.startswith(ROLLOUT):
+        return _rollout(name)
     if name.startswith(COALITION):
         return _coalition(name)
     if name.startswith(HANDOFF):
@@ -1699,7 +1795,7 @@ KIND_HINT = (
     "Python versions) does not inherit this process's registrations"
 )
 
-CHECKPOINT_KINDS = (NETWORK, MCTS)
+CHECKPOINT_KINDS = (NETWORK, MCTS, ROLLOUT)
 
 #: Separates an entrant from the preset or spec that answers its trades.
 TRADER = "~"
@@ -1757,7 +1853,7 @@ def pooled(standings: Sequence[Standing], games: int) -> list[Standing]:
 __all__ = [
     # what to seat, and the names that resolve to it
     "Entrant", "RETIRED", "RetiredSeat", "PRESETS", "SHIPPED_NAMES", "SHIPPED_PREFIXES",
-    "SHIPPED_KINDS", "NETWORK", "MCTS", "CATANATRON", "COALITION", "COALITION_KIND",
+    "SHIPPED_KINDS", "NETWORK", "MCTS", "ROLLOUT", "CATANATRON", "COALITION", "COALITION_KIND",
     "CHECKPOINT_KINDS", "TRADER", "DEALS", "coalition", "HANDOFF", "HANDOFF_KIND", "handoff",
     "entrant_from_name", "lineup_from_names", "base_name",
     # runtimes

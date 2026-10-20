@@ -390,6 +390,32 @@ def test_an_entrant_whose_checkpoint_names_an_unbuildable_trader_fails_at_spawn(
     assert spawn(entrant_from_name("network:/tmp/x.onnx~random"), board, random.Random(1))
 
 
+def test_a_rollout_seat_journals_every_decision_it_made(board, arena_registry):
+    """The game's journal line carries the decisions the rollout seat logged,
+    found under the trader it is dealt with, and reads back unchanged."""
+    import json
+
+    from hexset.arena import (
+        MAX_ACTIONS, _journal_entry, _outcome_from_entry, _play_one, entrant_from_name,
+    )
+    from hexset.rules import STANDARD_GAME
+
+    register_entrants(lambda path, topology: _Traded(stub_checkpoint(board), "random"))
+    lineup = tuple(entrant_from_name(name) for name in (
+        "rollout:/tmp/x.onnx@2:top=2:horizon=1", "random", "random", "random",
+    ))
+    outcome = _play_one((lineup, 0, 7, MAX_ACTIONS, False, False, "round", STANDARD_GAME, 3))
+    log, *others = outcome.searches
+    assert log and not any(others)
+    searched = [d for d in log if d["worlds"]]
+    assert searched and all(
+        len(d["outcomes"]) == 2 and all(len(row) == len(d["candidates"]) for row in d["outcomes"])
+        for d in searched
+    )
+    entry = json.loads(json.dumps(_journal_entry(outcome)))
+    assert _outcome_from_entry(entry).searches == outcome.searches
+
+
 @dataclass(frozen=True)
 class _Traded:
     """A stub checkpoint that also names a trader."""
@@ -409,6 +435,7 @@ def arena_registry():
     yield
     arena.unregister_entrant_kind("network")
     arena.unregister_entrant_kind("mcts")
+    arena.unregister_entrant_kind("rollout")
 
 
 # --- the gate: one forward over every coverable hand ---
@@ -935,6 +962,51 @@ def test_plain_onnx_web_spawn_matches_arena_seeded_trade_worlds(board, monkeypat
     assert [web._world_rng(view, seat).random() for _ in range(5)] == expected
     assert [other_seed._world_rng(view, seat).random() for _ in range(5)] != expected
 
+
+
+def test_a_rollout_file_spawns_as_the_arenas_rollout_entrant_of_its_settings(
+    board, monkeypatch, arena_registry
+):
+    """A file whose metadata asks for rollouts (`search = rollout`) is seated
+    as the arena's `rollout:` entrant of the same settings: the same bot,
+    choosing the same moves on the same seed."""
+    pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
+    from types import SimpleNamespace
+
+    from hexset.arena import entrant_from_name, spawn
+    from hexset.clients import onnxbot
+    from hexset.clients._modelmeta import RolloutConfig, SearchConfig
+    from hexset.clients.netbot import GatedRollouts
+
+    checkpoint = stub_checkpoint(board)
+    loaded = SimpleNamespace(
+        **vars(checkpoint),
+        search=SearchConfig(decisive=0.97, rollout=RolloutConfig(worlds=2, top=2, horizon=1)),
+    )
+    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
+    register_entrants(lambda path, topology: checkpoint)
+
+    served = onnxbot.spawn("stub.onnx", board, rng=random.Random(5))
+    entrant = spawn(
+        entrant_from_name("rollout:/tmp/x.onnx@2:top=2:decisive=0.97:horizon=1"),
+        board, random.Random(5),
+    )
+    assert isinstance(served, GatedRollouts) and isinstance(entrant, GatedRollouts)
+    assert (served.worlds, served.top, served.decisive, served.horizon) == (2, 2, 0.97, 1)
+
+    game = start(board, PLAYERS, random.Random(2))
+    walk = random.Random(2)
+    chosen = searched = 0
+    while chosen < 30:
+        if to_move(game) == 0:
+            move = served.choose(game)
+            assert entrant.choose(game) == move
+            searched += bool(served.decision_log[-1].worlds)
+            chosen += 1
+            apply(game, move)
+        else:
+            step_randomly(game, walk)
+    assert searched, "no decision was played out"
 
 
 # --- own_calibration in the gate: gains on the calibrated scale -------------------------------------------

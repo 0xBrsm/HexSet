@@ -236,10 +236,46 @@ def mcts_tree(board):
     return Search(HandReader(), **SHARP, rng=random.Random(0))
 
 
+def rollout_bot(board):
+    """The arena's `kind="rollout"` entrant: `GatedRollouts` over a
+    checkpoint, as `netbot.spawn_rollout` builds it; a one-turn horizon keeps
+    the playouts short."""
+    from hexset.clients.netbot import rollouts_for
+
+    return rollouts_for(
+        stub_checkpoint(board), worlds=4, top=2, horizon=1, rng=random.Random(0)
+    )
+
+
+@dataclass
+class HandReadingPolicy(PublicPolicy):
+    """`PublicPolicy` whose `value_rows`, the read of a playout stopped short,
+    values each seat by the composition of its hand, as `HandReader` does:
+    honest on a sampled world, a direct read of the truth on any other. The
+    root's own prior and value stay public."""
+
+    def value_rows(self, rows):
+        return [HandReader._value(game) for game, _ in rows]
+
+
+def rollout_worlds(board):
+    """Paired rollouts over `HandReadingPolicy`. Every playout is scored by
+    that read where it stops, so nothing but the sampled worlds keeps this
+    arm honest: the sharp probe for the rollouts themselves."""
+    from hexset.rollout import PairedRollouts
+
+    return PairedRollouts(
+        HandReadingPolicy(space=stub_checkpoint(board).space),
+        worlds=4, top=2, horizon=1, rng=random.Random(0),
+    )
+
+
 BOTS = {
     "mcts": mcts_bot,
     "mcts-tree": mcts_tree,
     "network": network_bot,
+    "rollout": rollout_bot,
+    "rollout-worlds": rollout_worlds,
     "catanatron": catanatron_bot,
 }
 
@@ -348,6 +384,42 @@ def test_the_probe_can_fail():
         "detect the defect it was written for"
     )
     assert not determinized, f"the determinized tree moved at {determinized}"
+
+
+def test_a_playout_is_scored_in_a_sampled_world():
+    """The rollouts' leak check, with its control. Every read of a playout
+    stopped short values every seat's hand composition, so it is a function
+    of the hands in the world played out. On sampled worlds the reads are the
+    same whatever the other seats truly hold; played out on the true hands,
+    they move with them."""
+    from hexset.rollout import PairedRollouts
+
+    class OnTheTruth(PairedRollouts):
+        def world(self, game, seat):
+            return imagine(game, self.rng, randomize_deck=False)
+
+    def reads(kind, game, board):
+        seen = []
+
+        class Recording(HandReadingPolicy):
+            def value_rows(self, rows):
+                values = super().value_rows(rows)
+                seen.extend(values)
+                return values
+
+        kind(Recording(space=stub_checkpoint(board).space), worlds=4, top=2, horizon=1,
+             rng=random.Random(0)).decide(game)
+        return seen
+
+    for truth, seat in positions(wanted=2):
+        board = truth.state(0, hidden=False).board
+        twin = permuted(truth, seat, random.Random(11))
+        sampled = reads(PairedRollouts, truth, board)
+        assert sampled and sampled == reads(PairedRollouts, twin, board)
+        assert reads(OnTheTruth, truth, board) != reads(OnTheTruth, twin, board), (
+            "rollouts on the true hands read the same either way: this check "
+            "cannot detect the defect it was written for"
+        )
 
 
 def test_a_searched_leaf_is_valued_in_a_sampled_world():

@@ -66,6 +66,7 @@ other name is registered by a runtime ([Implement a bot](#implement-a-bot)).
 | `catanatron`, `catanatron:<key>=<value>[:...]` | Catanatron's alpha-beta player (`CatanatronBot`), depth 2; keys `depth`, `worlds`, `temperature`, `select`. Needs the `catanatron` extra |
 | `network:<path>` | A checkpoint, one forward per decision; `network:<path>@0` is the same checkpoint with trading off |
 | `mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>]]` | A checkpoint under PUCT search; defaults 128 simulations, wave 16, `k=1` |
+| `rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>]]` | A checkpoint deciding by paired rollouts of its own policy (`hexset.rollout.PairedRollouts`): its top moves played out on shared chance in sampled worlds; defaults 32 worlds, top 3, to the game's end |
 | `coalition:<entrant>` | Any entrant as a coalition member (`hexset.bots.Coalition`): every `coalition:` seat at the table plays with the others against the rest. A test opponent ([Coalitions](#coalitions)) |
 | `handoff:<round>:<first>\|<second>` | `<first>`'s moves through round `<round>`, `<second>`'s after it (`hexset.bots.Handoff`), trading as `<first>` throughout ([Handoffs](#handoffs)) |
 

@@ -20,8 +20,11 @@ it) and `pool_lanes` gives each threaded worker a CPU of its own.
 
 The forwards are the ones `hexset.clients.onnxbot.V2Policy` makes -- a served
 file's moves, its value-head trade gate and veto, robber deals, a search's
-leaves -- since every one of them goes through `forward`. Outside a lane
-`forward` is `session.run`, so nothing else changes.
+leaves -- since every one of them goes through `forward`, and the `value`
+forwards of `hexset.clients.onnxbot.DecisionPolicy` (its trade gate and veto,
+robber deals); a forward that asks a decision runs on its own, since its
+candidate rows index its own batch. Outside a lane `forward` is
+`session.run`, so nothing else changes.
 
 A lane plays exactly the code it would play alone: `play` is called as it is,
 its random streams are its own, and because one lane runs at a time no two

@@ -19,6 +19,7 @@ from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Evaluation, Search, calibrate_own
+from hexset.rollout import PairedRollouts
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
     gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
@@ -569,18 +570,18 @@ class LeafEvaluator:
         return tuple(1.0 if seat == winner else 0.0 for seat in range(players))
 
 
-class GatedSearch(trading.DeclaredTrade, Search):
-    """Policy/value-guided MCTS with the checkpoint's own trade gate. `choose`
-    binds the gate to the live game before searching; trade acceptance and
-    counterparty estimates delegate to `NetworkBot`.
+class _Gated:
+    """The checkpoint's own trade gate behind a seat that decides its moves
+    some other way than one forward: `choose` binds the gate to the live game
+    first; trade acceptance and counterparty estimates delegate to the gate's
+    `NetworkBot`.
 
     This, not the `NetworkBot` behind it, is what a table seats, so it carries
     the checkpoint's bargaining parameters and installs the same protocol over
     its own delegated valuation. A searching entrant and a one-forward entrant
     from the same checkpoint therefore bargain identically."""
 
-    def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
-        super().__init__(evaluator, **kwargs)
+    def _seat_gate(self, gate: NetworkBot) -> None:
         self.gate = gate
         self.trade = gate.trade
         self._protocol = trading.install(
@@ -588,22 +589,8 @@ class GatedSearch(trading.DeclaredTrade, Search):
         )
 
     def seat_at(self, game: Game) -> None:
-        """`NetworkBot.seat_at` on the gate behind this search."""
+        """`NetworkBot.seat_at` on the gate behind this seat."""
         self.gate.seat_at(game)
-
-    def choose(self, game: Game) -> Action:
-        self.gate.seat_at(game)
-        tip = self.gate.robber_tip
-        if not tip:
-            return super().choose(game)
-        root, options, visits = self.run(game)
-        if not options:
-            raise ValueError("no legal action to choose from")
-        picked = int(visits.argmax())
-        if options[0].type is ActionType.MOVE_ROBBER:
-            # The root's own prior and value: no forward beyond the search's.
-            picked = tip_robber(options, root.prior, root.value, root.mover, picked, tip)
-        return options[picked]
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
         return self.gate.accepts(view, received, counterparty)
@@ -625,6 +612,50 @@ class GatedSearch(trading.DeclaredTrade, Search):
 
     def estimate_many(self, view: View, candidates: Sequence[tuple[int, Bundle]]) -> list[float]:
         return self.gate.estimate_many(view, candidates)
+
+
+class GatedSearch(_Gated, trading.DeclaredTrade, Search):
+    """Policy/value-guided MCTS with the checkpoint's own trade gate
+    (`_Gated`)."""
+
+    def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
+        super().__init__(evaluator, **kwargs)
+        self._seat_gate(gate)
+
+    def choose(self, game: Game) -> Action:
+        self.gate.seat_at(game)
+        tip = self.gate.robber_tip
+        if not tip:
+            return super().choose(game)
+        root, options, visits = self.run(game)
+        if not options:
+            raise ValueError("no legal action to choose from")
+        picked = int(visits.argmax())
+        if options[0].type is ActionType.MOVE_ROBBER:
+            # The root's own prior and value: no forward beyond the search's.
+            picked = tip_robber(options, root.prior, root.value, root.mover, picked, tip)
+        return options[picked]
+
+
+class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
+    """Paired rollouts of the checkpoint's own policy (`hexset.rollout`) with
+    its own trade gate (`_Gated`)."""
+
+    def __init__(self, policy: Policy, gate: NetworkBot, **kwargs) -> None:
+        super().__init__(policy, **kwargs)
+        self._seat_gate(gate)
+
+    def choose(self, game: Game) -> Action:
+        self.gate.seat_at(game)
+        decision = self.decide(game)
+        picked = decision.chosen
+        tip = self.gate.robber_tip
+        if tip and decision.options[0].type is ActionType.MOVE_ROBBER:
+            # The root's own prior and value: no forward beyond the decision's.
+            picked = tip_robber(
+                decision.options, decision.prior, decision.value, to_move(game), picked, tip
+            )
+        return decision.options[picked]
 
 
 def tip_robber(
@@ -696,7 +727,11 @@ def searcher_for(
     `k` is how many determinizations of the seat's own belief each decision is
     searched in (`hexset.mcts.Search.worlds`); the tree is never rooted on the
     true state from here. `decisive` plays a root whose prior on one move
-    reaches it without searching (`hexset.mcts.Search`)."""
+    reaches it without searching (`hexset.mcts.Search`). A policy that
+    declares no prior to score its leaves with (`has_prior` false) is refused
+    here rather than at the first leaf."""
+    if not getattr(checkpoint.policy, "has_prior", True):
+        raise ValueError(f"{type(checkpoint.policy).__name__} declares no `prior`: it cannot be searched")
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedSearch(
         LeafEvaluator(
@@ -713,6 +748,32 @@ def searcher_for(
     )
 
 
+def rollouts_for(
+    checkpoint: Checkpoint,
+    *,
+    worlds: int = 32,
+    top: int = 3,
+    decisive: float | None = None,
+    horizon: int | None = None,
+    rng: random.Random | None = None,
+    trade: TradeParams | None = None,
+) -> GatedRollouts:
+    """`checkpoint` deciding by paired rollouts of its own policy
+    (`hexset.rollout.PairedRollouts`), trading through its own value-head
+    gate. `rng` seeds both the rollouts and, derived from it, the gate's
+    sampling stream, so one seed reproduces the entrant."""
+    gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
+    return GatedRollouts(
+        checkpoint.policy,
+        bot_for(checkpoint, rng=gate_rng, trade=trade),
+        worlds=worlds,
+        top=top,
+        decisive=decisive,
+        horizon=horizon,
+        rng=rng,
+    )
+
+
 def _checkpoint_path(weights: object, what: str) -> str:
     """An `Entrant.weights` read as a checkpoint path; a lineup that passes
     anything else is refused here rather than inside a loader."""
@@ -722,7 +783,7 @@ def _checkpoint_path(weights: object, what: str) -> str:
 
 
 def register_entrants(loader) -> None:
-    """Register network and MCTS arena factories for a `loader(path, topology)
+    """Register network, MCTS and paired-rollout arena factories for a `loader(path, topology)
     -> Checkpoint`. Call explicitly in each process that spawns entrants;
     imports do not choose a runtime."""
     from hexset.arena import register_entrant_kind, traded
@@ -752,8 +813,22 @@ def register_entrants(loader) -> None:
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
                       veto_picks=trader_veto_pick_of(checkpoint))
 
+    def spawn_rollout(entrant, board: Board, rng):
+        path = _checkpoint_path(entrant.weights, "rollout")
+        checkpoint = loader(path, board.topology)
+        trader = own_trader(entrant, checkpoint, path)
+        bot = rollouts_for(
+            checkpoint,
+            worlds=entrant.simulations, top=entrant.option("top"),
+            decisive=entrant.option("decisive"), horizon=entrant.option("horizon"),
+            rng=rng, trade=entrant.trade,
+        )
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
+                      veto_picks=trader_veto_pick_of(checkpoint))
+
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)
+    register_entrant_kind("rollout", spawn_rollout)
 
 
 def declared_trader(checkpoint: object, source: str) -> str | None:

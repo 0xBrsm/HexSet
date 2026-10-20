@@ -9,7 +9,10 @@ import pytest
 
 from hexset.clients._modelmeta import (
     MAX_SIMULATIONS,
+    MAX_TOP,
     MAX_WAVE,
+    MAX_WORLDS,
+    RolloutConfig,
     gate_config,
     search_config,
     trader_config,
@@ -46,6 +49,57 @@ def test_an_unreadable_budget_falls_back_instead_of_failing_the_load(value):
     config = search_config({"search": "mcts", "simulations": value})
     assert config.searches
     assert config.simulations == 128
+
+
+def test_a_rollout_file_gets_its_worlds_candidates_horizon_and_decisive_prior():
+    config = search_config(
+        {"search": "rollout", "worlds": "32", "top": "6", "decisive": "0.97", "horizon": "8"}
+    )
+    assert config.searches
+    assert config.simulations == 0
+    assert config.rollout == RolloutConfig(worlds=32, top=6, horizon=8)
+    assert config.decisive == 0.97
+
+
+def test_a_rollout_file_that_says_nothing_more_gets_the_rollouts_own_defaults():
+    """`hexset.rollout.PairedRollouts`: 32 worlds, the top 3 moves, every
+    root searched, played to the end."""
+    config = search_config({"search": "rollout"})
+    assert config.rollout == RolloutConfig(worlds=32, top=3, horizon=None)
+    assert config.decisive is None
+    assert search_config({"search": "rollout", "horizon": ""}).rollout.horizon is None
+
+
+def test_rollout_settings_are_ignored_unless_the_file_asks_for_rollouts():
+    keys = {"worlds": "32", "top": "6", "horizon": "8"}
+    assert not search_config(keys).searches
+    assert search_config(keys).rollout is None
+    mcts = search_config({**keys, "search": "mcts", "simulations": "64"})
+    assert mcts.rollout is None and mcts.simulations == 64
+
+
+def test_an_absurd_rollout_budget_is_clamped_and_an_unreadable_one_falls_back():
+    config = search_config({"search": "rollout", "worlds": "10000000", "top": "10000000"})
+    assert config.rollout.worlds == MAX_WORLDS
+    assert config.rollout.top == MAX_TOP
+    unreadable = search_config({"search": "rollout", "worlds": "many", "top": "-5"})
+    assert unreadable.rollout == RolloutConfig(worlds=32, top=3)
+    assert search_config({"search": "rollout", "top": "1"}).rollout.top == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "eight", "8.5"])
+def test_an_unreadable_horizon_fails_the_load(value):
+    """A horizon changes what the search is: read wrong, it would play every
+    rollout to the end, at several times the cost."""
+    with pytest.raises(ValueError, match="horizon"):
+        search_config({"search": "rollout", "horizon": value})
+
+
+def test_a_rollout_file_reads_decisive_as_a_search_does_and_refuses_a_calibration():
+    with pytest.raises(ValueError, match="decisive"):
+        search_config({"search": "rollout", "decisive": "1.2"})
+    with pytest.raises(ValueError, match="own_calibration"):
+        search_config({"search": "rollout", "own_calibration": "0.32,0.81"})
 
 
 def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():

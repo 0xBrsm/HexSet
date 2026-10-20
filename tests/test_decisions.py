@@ -363,3 +363,133 @@ def test_a_trade_event_the_seat_may_offer_in_closes_its_run():
             apply(game, trade)
             assert D.closes(game, trade, 0, before) == answer
         assert game.trade_event_turn == game.turns
+
+
+# --- choosing a whole decision, playing it a move at a time -----------------------
+
+
+def test_option_of_names_the_option_locate_found():
+    rng = random.Random(11)
+    kinds = set()
+    for seed in range(6):
+        game = start(random_base_board(random.Random(seed)), 4, random.Random(seed))
+        space = space_for(game)
+        pairs = incidences(game._state.board.topology)
+        for _ in range(500):
+            if is_over(game):
+                break
+            seat = _decider(game)
+            options = D.options(game, seat)
+            decision = D.tensors(game, seat, space)
+            for option in options if len(options) < 300 else rng.sample(options, 200):
+                kind, index = D.locate(decision, option, game, seat, space)
+                assert D.key(D.option_of(decision, kind, index, pairs, seat, space, 4)) == D.key(option)
+                kinds.add(kind)
+            D.apply_option(game, rng.choice(options), seat if game.phase is Phase.DISCARD else None)
+    assert kinds >= {D.DecisionKind.FLAT, D.DecisionKind.SETUP, D.DecisionKind.DOUBLE, D.DecisionKind.DISCARD}
+
+
+def test_arrays_state_each_decision_beside_its_row():
+    space = None
+    decisions = []
+    wanted = (lambda g: g.phase is Phase.DISCARD,
+              lambda g: g.phase is Phase.MAIN and g.free_roads == 0 and len(
+                  D.tensors(g, to_move(g), space_for(g)).road_building))
+    for until in wanted:
+        found = 0
+        for seed in range(80):
+            game = _play(seed, until)
+            if game is None or is_over(game) or not until(game):
+                continue
+            space = space_for(game)
+            decisions.append(D.tensors(game, _decider(game), space))
+            found += 1
+            if found == 3:
+                break
+    double = _play(2, lambda g: D.is_double_turn(g))
+    decisions.append(D.tensors(double, to_move(double), space))
+    topology = double._state.board.topology
+    arrays = D.arrays([None] + decisions, space, topology)
+    assert tuple(arrays) == D.ARRAYS
+    assert arrays["flat"].shape == (len(decisions) + 1, space.size) and not arrays["flat"][0].any()
+    assert arrays["setup"].shape == (len(decisions) + 1, len(incidences(topology)))
+    assert arrays["double_rows"].tolist() == [len(decisions)]
+    for row, decision in enumerate(decisions, start=1):
+        assert (arrays["flat"][row] == decision.flat).all() and (arrays["setup"][row] == decision.setup).all()
+        assert arrays["road_building"][arrays["road_building_row"] == row].tolist() == decision.road_building.tolist()
+        assert arrays["discard"][arrays["discard_row"] == row].tolist() == decision.discard.tolist()
+    assert all(arrays[k].dtype == np.int64 for k in D.ARRAYS if k not in ("flat", "setup"))
+    assert any(len(d.discard) for d in decisions) and any(len(d.road_building) for d in decisions)
+    empty = D.arrays([None, None], space, topology)
+    assert {k: v.shape for k, v in empty.items() if k not in ("flat", "setup")} == {
+        "road_building": (0, 2), "road_building_row": (0,), "discard": (0, 10), "discard_row": (0,),
+        "double_rows": (0,)}
+
+
+def test_a_position_inside_a_decision_is_asked_as_its_legal_moves_alone():
+    game = start(random_base_board(random.Random(5)), 4, random.Random(5))
+    apply(game, legal_actions(game)[0])          # a settlement placed a move at a time, its road owed
+    space = space_for(game)
+    decision = D.atomic(game, to_move(game), space)
+    assert not decision.setup.any() and not len(decision.road_building) and not len(decision.discard)
+    want = {space.index(a) for a in legal_actions(game)}
+    assert set(np.flatnonzero(decision.flat).tolist()) == want
+    robber = _play(3, lambda g: g.phase is Phase.ROBBER)
+    seat, space = to_move(robber), space_for(robber)
+    assert (D.atomic(robber, seat, space).flat == D.tensors(robber, seat, space).flat).all()
+
+
+class _Decider:
+    """A bot over `Plans`: the first option `D.options` lists, counted."""
+
+    def __init__(self):
+        self.plans = D.Plans()
+        self.decided = []
+        self.finished = 0
+
+    def decide(self, game, seat):
+        self.decided.append(game.phase)
+        return D.options(game, seat)[0]
+
+    def finish(self, game, seat, options):
+        self.finished += 1
+        return options[0]
+
+    def act(self, game):
+        seat = to_move(game)
+        return self.plans.act(game, seat, legal_actions(game), self.decide, self.finish)
+
+
+def test_plans_play_a_whole_decision_a_move_at_a_time():
+    game = start(random_base_board(random.Random(3)), 4, random.Random(3))
+    bot = _Decider()
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        seat = to_move(game)
+        want = D.options(game, seat)[0] if game.phase is Phase.SETUP_SETTLEMENT else None
+        action = bot.act(game)
+        apply(game, action)
+        if want is not None:
+            assert action == want.parts[0]
+    # Eight setup turns, the snake seat's two in one decision: seven decided, every road from a plan.
+    assert len(bot.decided) == 7 and bot.finished == 0
+
+
+def test_a_position_inside_a_decision_with_no_plan_is_finished_from_where_it_stands():
+    game = start(random_base_board(random.Random(5)), 4, random.Random(5))
+    apply(game, legal_actions(game)[0])          # a settlement placed a move at a time, its road owed
+    assert game.phase is Phase.SETUP_ROAD
+    bot = _Decider()
+    action = bot.act(game)
+    assert action.type is ActionType.SETUP_ROAD and bot.finished == 1 and not bot.decided
+
+
+def test_a_plan_whose_next_move_is_no_longer_legal_is_dropped_and_the_position_decided_again():
+    game = start(random_base_board(random.Random(3)), 4, random.Random(3))
+    bot = _Decider()
+    seat = to_move(game)
+    apply(game, bot.act(game))                    # the settlement; its road is the plan
+    planned = bot.plans._plans[id(game)][2][0]
+    rest = [a for a in legal_actions(game) if a != planned]
+    assert bot.plans.act(game, seat, rest, bot.decide, bot.finish) in rest
+    # Finished from the position as it stands (a lone option is played as it is).
+    assert bot.finished == (len(rest) > 1) and id(game) not in bot.plans._plans

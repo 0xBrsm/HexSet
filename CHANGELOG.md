@@ -5,6 +5,85 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.18.0
+
+### Added
+
+- **A model file can ask to be played by paired rollouts.** Metadata
+  `search = rollout` seats the file as the arena's `rollout:` entrant of the
+  same settings (`hexset.rollout.PairedRollouts`, trading through its own
+  gate): `worlds` (32 by default, at most 256), `top` (3 by default, 2 to
+  16), `decisive` (the prior at which a root is played unsearched, as for
+  MCTS) and `horizon` (whole turns; absent plays every rollout to the end).
+  `SearchConfig.rollout` carries them, a `RolloutConfig`, and
+  `SearchConfig.searches` is true for either search. An unreadable
+  `horizon` fails the load, as an unreadable `decisive` does, and so does an
+  `own_calibration`, which only MCTS reads.
+
+- **A contract-9 `.onnx` file serves, run by a generic decision runner.**
+  `hexset.clients.onnxbot.load` reads a file declaring `contract` 9 as
+  `DecisionPolicy`: the graph declares the inputs it reads and HexSet
+  supplies each from its own menu (`DECISION_INPUTS`: `observation`, the
+  position as `hexset.contract9` encodes it, and the decision at hand as
+  `hexset.decisions.arrays` states it); an input HexSet does not supply is
+  refused at load by name. The graph answers in HexSet's action contract:
+  `decision`, each row's `(kind, index)` over its `Decision`
+  (`hexset.decisions.option_of` names the option, its robber victim back in
+  board seats), `value` in the row's own frame, and optionally `prior` over
+  the flat actions, which a search, a robber tip and robber deals read. A
+  graph that declares `double_rows` is asked the snake seat's double turn as
+  one decision; one that does not, as two setup turns. A whole decision is
+  played a move at a time, and a position inside one with no plan is asked
+  as a decision of its legal moves alone, so the graph's own `decision`
+  finishes it. Every move, trade gate and veto, declared trader, robber tip
+  and robber deal reads the file through the same `Policy` protocol as a
+  record-contract file. `RECORD_CONTRACTS` admits `"9"`. A file without
+  `prior` plays but is not searched: `netbot.searcher_for` refuses a policy
+  whose `has_prior` is false, and a file asking for a search without one is
+  refused at load.
+
+- **Whole decisions played a move at a time, in `hexset.decisions`**:
+  `option_of`, the option a `(kind, index)` names (`locate` the other way);
+  `arrays`, a batch of decisions as the named arrays a network reads
+  (`ARRAYS`); `atomic`, a position inside a decision begun a move at a time
+  as a decision of its legal moves alone; and `Plans`, which plays a whole
+  decision chosen at its first move a move at a time, for any bot that
+  decides whole.
+
+- **Paired rollouts: a decision searched by playing its top moves out on
+  shared chance.** `hexset.rollout.PairedRollouts`, the
+  `rollout:<path>@<worlds>[:top=<n>][:decisive=<prior>][:horizon=<turns>]`
+  entrant and `netbot.rollouts_for`: at a root the policy is unsure of, its
+  `top` moves (3 by default) are each played out by the policy for every seat
+  in `worlds` worlds (32 by default) sampled from the mover's belief. A world
+  fixes the hidden cards, the deck order and split dice and steal streams, so
+  every candidate meets the same chance and they compare world by world; the
+  highest mean outcome is played. A playout runs to the game's end, or stops
+  at `horizon` turns, at `STEP_LIMIT` decisions or where the seat to move has
+  no legal move, and is then scored by the value head read from the mover's
+  own frame. `truncated_rollouts` counts those. Under `decisive`, a root
+  whose prior on one move reaches it plays that move without a playout. The
+  seat trades through the checkpoint's own gate, as `mcts:` does.
+
+  Every decision is kept in `PairedRollouts.decision_log` (`Decision`) with
+  what it was made from: the turn, phase and every seat's public points,
+  each candidate's outcome in each world, and the value head's read of each
+  playout at the mover's turn starts `marks` turns on (`MARKS`, 2, 4, 8 and
+  16; `marks=()` reads none), and right after each candidate is applied,
+  before any playout (`after_values`), with the playout moves it took to
+  reach each mark (`mark_row_steps`, beside `row_steps` for the whole). The reads draw nothing from the rollouts'
+  random stream, so the moves played are the same with them or without.
+  Fewer worlds, fewer candidates or a shorter horizon can then be scored on
+  the same playouts afterwards. A `compete` journal line carries each
+  seat's log as `searches`, per entrant (`Outcome.searches`), found under
+  whatever wrappers the seat is dealt in.
+
+### Fixed
+
+- **`hexset.clients.onnxmeta` lists its public surface** (`__all__`):
+  `SERVE_KEYS`, `PROFILE_KEYS`, `read_metadata`, `with_metadata`,
+  `modes_of`, `stamp` and `main`.
+
 ## 1.17.0
 
 ### Breaking

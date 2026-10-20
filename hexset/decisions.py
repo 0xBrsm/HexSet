@@ -36,6 +36,15 @@ by nobody else and tells the seat nothing new, so a learner can take the run
 as one unit of credit (one decision) whose options are its parts: a turn's
 builds after the roll, a knight with its robber, the double turn's two setup
 turns.
+
+**A whole decision, played a move at a time.** `option_of` names the
+option a `(kind, index)` over a `Decision` points at (`locate` the other way);
+`arrays` states a batch of decisions as the named arrays a network reads. A
+table asks a seat for one atomic move at a time, so `Plans` keeps the rest of
+a decision a seat chose whole: at the position before the decision's first
+move the seat chooses all of it and plays its first part, and each later ask
+inside the decision gets the next part. `atomic` states a position inside a
+decision begun a move at a time as a decision of its legal moves alone.
 """
 
 from __future__ import annotations
@@ -75,6 +84,11 @@ __all__ = [
     "setup_parts",
     "road_building_parts",
     "discard_parts",
+    "option_of",
+    "ARRAYS",
+    "arrays",
+    "atomic",
+    "Plans",
 ]
 
 
@@ -428,3 +442,135 @@ def double_pairs(topology) -> np.ndarray:
             if v2 == v1 or v2 in topology.vertex_neighbors[v1]:
                 out[i, j] = False
     return out
+
+
+# --- choosing a whole decision ---------------------------------------------------
+
+
+def option_of(decision: Decision, kind: int, index: int, pairs, seat: int, space: ActionSpace,
+              players: int) -> Option:
+    """The option `(kind, index)` names in `decision` (`locate` the other way):
+    an action, its robber victim back in board seats, or a `Compound`. `pairs`
+    is the board's `contract9.incidences`."""
+    if kind == DecisionKind.FLAT:
+        action = space.decode(index)
+        if action.type is ActionType.MOVE_ROBBER and action.b < players:
+            action = Action(action.type, action.a, (action.b + seat) % players)
+        return action
+    if kind == DecisionKind.SETUP:
+        return Compound(CompoundKind.SETUP, setup_parts(*pairs[index]))
+    if kind == DecisionKind.DOUBLE:
+        first, second = divmod(index, len(pairs))
+        return Compound(CompoundKind.SETUP_DOUBLE, setup_parts(*pairs[first]) + setup_parts(*pairs[second]))
+    if kind == DecisionKind.ROAD_BUILDING:
+        roads = tuple(int(e) for e in decision.road_building[index] if e >= 0)
+        return Compound(CompoundKind.ROAD_BUILDING, road_building_parts(roads))
+    return Compound(CompoundKind.DISCARD, discard_parts(decision.discard[index][NUM_RESOURCES:]))
+
+
+#: The arrays `arrays` states a batch of decisions as, by name: each
+#: decision's `flat` and `setup` masks stacked, its Road Building and discard
+#: candidates end to end beside the row each belongs to, and the rows whose
+#: decision is a double turn.
+ARRAYS = ("flat", "setup", "road_building", "road_building_row", "discard", "discard_row", "double_rows")
+
+
+def arrays(decisions: Sequence["Decision | None"], space: ActionSpace, topology) -> dict[str, np.ndarray]:
+    """`decisions`, one per row, as the named arrays `ARRAYS` lists: `flat`
+    `(B, space.size)` and `setup` `(B, incidences)` bool, every row's masks;
+    `road_building` `(Kr, 2)` and `discard` `(Kd, 10)`, every row's candidates
+    end to end as `Decision` lists them, with `road_building_row` and
+    `discard_row`, the row each belongs to; and `double_rows`, the rows whose
+    decision is `double`. All int64 but the masks. A row whose decision is
+    `None` is one with nothing to decide: its masks are empty and it has no
+    candidates. `topology` is the board's (its incidences size `setup`)."""
+    rows = len(decisions)
+    flat = np.zeros((rows, space.size), dtype=np.bool_)
+    setup = np.zeros((rows, len(incidences(topology))), dtype=np.bool_)
+    rb, rb_row, disc, disc_row, double = [], [], [], [], []
+    for row, decision in enumerate(decisions):
+        if decision is None:
+            continue
+        flat[row] = decision.flat
+        setup[row] = decision.setup
+        if len(decision.road_building):
+            rb.append(decision.road_building.astype(np.int64))
+            rb_row.append(np.full(len(decision.road_building), row, dtype=np.int64))
+        if len(decision.discard):
+            disc.append(decision.discard.astype(np.int64))
+            disc_row.append(np.full(len(decision.discard), row, dtype=np.int64))
+        if decision.double:
+            double.append(row)
+
+    def joined(parts, width):
+        return np.concatenate(parts) if parts else np.zeros((0, width) if width else 0, dtype=np.int64)
+
+    return {
+        "flat": flat, "setup": setup,
+        "road_building": joined(rb, 2), "road_building_row": joined(rb_row, 0),
+        "discard": joined(disc, 2 * NUM_RESOURCES), "discard_row": joined(disc_row, 0),
+        "double_rows": np.asarray(double, dtype=np.int64),
+    }
+
+
+def atomic(game: Game, seat: int, space: ActionSpace) -> Decision:
+    """`seat`'s legal atomic moves at `game` as a decision of flat actions
+    alone (robber victims seat-relative, as `tensors` states them): how a
+    position inside a decision begun a move at a time -- a setup road or a
+    free road owed, which `tensors` refuses -- is asked."""
+    players = game._state.num_players
+    flat = np.zeros(space.size, dtype=np.bool_)
+    for action in legal_actions(game, seat):
+        flat[flat_index(space, action, seat, players)] = True
+    return Decision(flat, np.zeros(len(incidences(game._state.board.topology)), dtype=np.bool_), False,
+                    np.zeros((0, 2), dtype=np.int16), np.zeros((0, 2 * NUM_RESOURCES), dtype=np.int8))
+
+
+class Plans:
+    """Whole decisions, played a move at a time.
+
+    `act` answers a seat's ask for one atomic move. Where the move opens a
+    decision, it asks `decide(game, seat)` for the whole of it at the position
+    before its first move, returns that first move and keeps the rest as the
+    seat's plan; each later ask inside the decision gets the plan's next move.
+    Nobody else acts inside a decision and nothing is revealed, so a plan
+    cannot go stale; it is checked against the options all the same, and a
+    position inside a decision with no plan of its own (a copy a gate
+    imagined, a game resumed part-way) is finished by `finish(game, seat,
+    options)` from the position as it stands: a setup road or a free road
+    owed (`atomic` states it as a decision of its legal moves). A discard
+    begun a card at a time is a decision of its own, the rest of the quota
+    (`tensors`).
+
+    Plans are kept per game, by identity, so one `Plans` serves every game a
+    process plays; a game that ended inside a decision leaves its plan behind,
+    and once `LIMIT` games hold one they are all dropped."""
+
+    LIMIT = 256
+
+    def __init__(self) -> None:
+        self._plans: dict[int, tuple[Game, int, list[Action]]] = {}
+
+    def act(self, game: Game, seat: int, options: Sequence[Action], decide, finish) -> Action:
+        """`seat`'s move at `game` from `options`, its legal atomic moves."""
+        plan = self._plans.pop(id(game), None)
+        if plan is not None and plan[0] is game and plan[1] == seat and plan[2] and plan[2][0] in options:
+            rest = plan[2][1:]
+            if rest:
+                self._plans[id(game)] = (game, seat, rest)
+            return plan[2][0]
+        if len(options) == 1:
+            return options[0]
+        if game.phase is Phase.SETUP_ROAD or pending_free_roads(game):
+            return finish(game, seat, tuple(options))
+        choice = decide(game, seat)
+        if len(self._plans) > self.LIMIT:
+            self._plans.clear()
+        if isinstance(choice, Compound):
+            first, rest = choice.parts[0], list(choice.parts[1:])
+            if rest:
+                self._plans[id(game)] = (game, seat, rest)
+            choice = first
+        if choice not in options:
+            raise RuntimeError(f"the decision chosen opens with {choice}, not among {tuple(options)}")
+        return choice

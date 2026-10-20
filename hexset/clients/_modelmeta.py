@@ -21,28 +21,49 @@ from hexset.trading import UNLIMITED, TradeParams
 # unbounded ask would hang the seat.
 MAX_SIMULATIONS = 4096
 MAX_WAVE = 256
+MAX_WORLDS = 256
+MAX_TOP = 16
 
 DEFAULT_SIMULATIONS = 128
 DEFAULT_WAVE = 16
+# `hexset.rollout.PairedRollouts`'s own defaults.
+DEFAULT_WORLDS = 32
+DEFAULT_TOP = 3
+
+
+@dataclass(frozen=True)
+class RolloutConfig:
+    """Paired rollouts of the checkpoint's own policy
+    (`hexset.rollout.PairedRollouts`), as metadata `search = rollout` asks
+    for them: `worlds` shared-chance worlds, the policy's `top` moves by
+    prior as candidates, each playout cut `horizon` turns on (metadata
+    `horizon`) or, at `None`, played to the game's end."""
+
+    worlds: int = DEFAULT_WORLDS
+    top: int = DEFAULT_TOP
+    horizon: int | None = None
 
 
 @dataclass(frozen=True)
 class SearchConfig:
-    """How a checkpoint asks to be played. `simulations = 0` means no search."""
+    """How a checkpoint asks to be played: one forward (the default), MCTS
+    (`simulations > 0`) or paired rollouts (`rollout`)."""
 
     simulations: int = 0
     wave: int = DEFAULT_WAVE
     #: `(a, b)` for `hexset.mcts.calibrate_own`, or `None`: metadata
-    #: `own_calibration = "a,b"`, read only for a searched file.
+    #: `own_calibration = "a,b"`, read only for an MCTS file.
     own_calibration: tuple[float, float] | None = None
     #: The prior at which a root is played without searching
-    #: (`hexset.mcts.Search`), or `None`: metadata `decisive`, read only for
-    #: a searched file.
+    #: (`hexset.mcts.Search`, `hexset.rollout.PairedRollouts`), or `None`:
+    #: metadata `decisive`, read only for a searched file.
     decisive: float | None = None
+    #: The rollouts a `search = rollout` file asks for, `None` otherwise.
+    rollout: RolloutConfig | None = None
 
     @property
     def searches(self) -> bool:
-        return self.simulations > 0
+        return self.simulations > 0 or self.rollout is not None
 
 
 def _clamp(value: str | None, default: int, ceiling: int) -> int:
@@ -144,8 +165,28 @@ def robber_tip_of(checkpoint: object) -> float:
 
 def search_config(meta: dict[str, str]) -> SearchConfig:
     """The search `meta` asks for, read only when the file actually asks to be
-    searched, so a stale `simulations` cannot turn a policy into a search."""
-    if meta.get("search", "none") != "mcts":
+    searched, so a stale `simulations` cannot turn a policy into a search.
+
+    `search = mcts` reads `simulations`, `wave`, `own_calibration` and
+    `decisive`; `search = rollout` reads `worlds`, `top`, `decisive` and
+    `horizon`. Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
+    and an unreadable one takes its default; a setting that changes what the
+    search is (`decisive`, `horizon`, `own_calibration`) fails the load
+    when it does not read. Any other `search` is no search."""
+    method = meta.get("search", "none")
+    if method == "rollout":
+        if meta.get("own_calibration", "").strip():
+            raise ValueError("own_calibration recalibrates an MCTS search; a rollout file cannot ask for it")
+        return SearchConfig(
+            decisive=_decisive(meta.get("decisive")),
+            rollout=RolloutConfig(
+                worlds=_clamp(meta.get("worlds"), DEFAULT_WORLDS, MAX_WORLDS) or DEFAULT_WORLDS,
+                # One candidate is no comparison: two is the least a rollout plays out.
+                top=max(2, _clamp(meta.get("top"), DEFAULT_TOP, MAX_TOP) or DEFAULT_TOP),
+                horizon=_horizon(meta.get("horizon")),
+            ),
+        )
+    if method != "mcts":
         return SearchConfig()
     return SearchConfig(
         simulations=_clamp(meta.get("simulations"), DEFAULT_SIMULATIONS, MAX_SIMULATIONS)
@@ -154,6 +195,20 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
         own_calibration=_calibration(meta.get("own_calibration")),
         decisive=_decisive(meta.get("decisive")),
     )
+
+
+def _horizon(value: str | None) -> int | None:
+    """Metadata `horizon`: whole turns, 1 or more, or absent for playouts
+    to the game's end."""
+    if value is None or not value.strip():
+        return None
+    try:
+        horizon = int(value)
+    except ValueError:
+        raise ValueError(f"horizon {value!r} is not a whole number of turns") from None
+    if horizon < 1:
+        raise ValueError(f"horizon {value!r} is not 1 turn or more")
+    return horizon
 
 
 def _decisive(value: str | None) -> float | None:

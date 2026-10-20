@@ -63,6 +63,19 @@ def test_an_mcts_entrant_can_play_its_confident_roots_without_search():
             entrant_from_name(f"mcts:/tmp/x.pt@128:decisive={bad}")
 
 
+def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
+    plain = entrant_from_name("rollout:/tmp/x.onnx")
+    assert (plain.name, plain.kind, plain.simulations, plain.option("top")) == ("rollout32t3", "rollout", 32, 3)
+    assert plain.option("decisive") is None and plain.option("horizon") is None
+    full = entrant_from_name("rollout:/tmp/x.onnx@16:top=2:decisive=0.9:horizon=8")
+    assert full.name == "rollout16t2d0.9h8"
+    assert (full.simulations, full.option("top"), full.option("decisive"), full.option("horizon")) == (16, 2, 0.9, 8)
+    assert pickle.loads(pickle.dumps(full)) == full
+    for bad in ("@0", "@:top=1", "@:decisive=2", "@:horizon=0", "@:top=2:top=3", "@:depth=3"):
+        with pytest.raises(ValueError):
+            entrant_from_name(f"rollout:/tmp/x.onnx{bad}")
+
+
 def test_a_network_spec_can_switch_its_own_trading_off():
     """`@0` is the only meaningful value: an off switch, not a budget. A
     budget is a thing a checkpoint declares in its own metadata."""

@@ -5,6 +5,15 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.19.1
+
+### Fixed
+
+- **`/rankings` aligns a column of percentages as it does numbers.** A
+  cell the ranker sends as text such as `78%` is right-aligned with the
+  numbers instead of read as text.
+
+
 ## 1.19.0
 
 ### Breaking

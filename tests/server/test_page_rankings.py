@@ -40,14 +40,15 @@ MINE = hashlib.sha256(SECRET.encode("utf-8")).hexdigest()
 
 
 def rank(games: list[dict]) -> dict:
-    columns = [{"key": "rating", "label": "Rating"}, {"key": "games", "label": "Games"}]
+    columns = [{"key": "rating", "label": "Rating"}, {"key": "games", "label": "Games"},
+               {"key": "wins", "label": "Wins"}]
     return {"boards": [
         {"key": "duel", "title": "Duel", "note": "Two seats.", "columns": columns, "rows": [
-            {"name": "Ada", "id": "a" * 64, "rating": 1612.25, "games": 40,
+            {"name": "Ada", "id": "a" * 64, "rating": 1612.25, "games": 40, "wins": "63%",
              "version": "5.5", "owner": "octocat", "url": "https://example.org/ada",
              "description": "A language model playing through MCP."},
-            {"name": "rehex", "id": None, "rating": 1550, "games": 30, "pinned": True},
-            {"name": "Me", "id": MINE, "rating": 1500, "games": 12},
+            {"name": "rehex", "id": None, "rating": 1550, "games": 30, "pinned": True, "wins": "40%"},
+            {"name": "Me", "id": MINE, "rating": 1500, "games": 12, "wins": "50%"},
             {"name": "Newcomer", "id": None, "rating": 1490, "games": 9},
         ]},
         {"key": "four", "title": "Four seats", "columns": columns, "rows": [
@@ -96,9 +97,14 @@ def test_the_page_draws_each_board_and_marks_the_visitors_row(servers, browser):
             "Duel", "Four seats",
         ]
         assert page.eval_on_selector_all("#board th", "(ths) => ths.map((th) => th.textContent)") == [
-            "Name", "Rating", "Games",
+            "Name", "Rating", "Games", "Wins",
         ]
-        assert rows(page) == [["Ada", "1612.25", "40"], ["rehex", "1550", "30"], ["Me", "1500", "12"]]
+        assert rows(page) == [["Ada", "1612.25", "40", "63%"], ["rehex", "1550", "30", "40%"],
+                              ["Me", "1500", "12", "50%"]]
+        # A column of percentages is aligned as the numbers are.
+        assert page.eval_on_selector_all(
+            "#board th, #board tbody tr:first-child td", "(cs) => cs.map((c) => c.className)"
+        ) == ["", "number", "number", "number", "", "number", "number", "number"]
         # A rating the ranker holds fixed carries a pin, beside the rating.
         assert page.eval_on_selector_all(
             "#board svg.pin", "(ps) => ps.map((p) => [p.closest('tr').cells[0].innerText, p.closest('td').cellIndex])",
@@ -124,7 +130,7 @@ def test_the_page_draws_each_board_and_marks_the_visitors_row(servers, browser):
         assert "10 or more games" in page.text_content("#status")
         page.click('#tabs button[data-board="four"]')
         page.wait_for_selector('#tabs button[data-board="four"][aria-pressed="true"]')
-        assert rows(page) == [["Bea", "–", "11"]]
+        assert rows(page) == [["Bea", "–", "11", "–"]]
         assert page.text_content("#status") == "Only players with 10 or more games are shown."
     finally:
         context.close()

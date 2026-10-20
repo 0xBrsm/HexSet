@@ -109,6 +109,13 @@ function node(tag, attrs = {}, text) {
 }
 
 // A cell as the ranker sent it: text as is, a number to two places at most.
+// A percentage is text the ranker wrote, aligned as a number is.
+const PERCENT = /^-?\d+(\.\d+)?%$/;
+
+function isNumeric(value) {
+  return typeof value === "number" || (typeof value === "string" && PERCENT.test(value));
+}
+
 function cellText(value) {
   if (value === null || value === undefined) return "–";
   if (typeof value === "boolean") return value ? "yes" : "no";
@@ -201,7 +208,7 @@ function render() {
   const board = data.boards.find((b) => b.key === key);
   if (data.boards.length === 1) holder.appendChild(node("h2", {}, board.title));
   const numeric = new Set(board.columns
-    .filter((c) => board.rows.some((r) => typeof r[c.key] === "number"))
+    .filter((c) => board.rows.some((r) => isNumeric(r[c.key])))
     .map((c) => c.key));
   const table = node("table");
   const head = node("tr");

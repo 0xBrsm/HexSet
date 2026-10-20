@@ -162,7 +162,8 @@ Each seat:
 A board's `key` is unique and its `title` is text; `note` is optional. Rows
 are shown in the order given. Each row is a `name`, an optional `id` and
 `games`, and a value for any of the board's `columns`: text, a number,
-true/false or null, and `pinned: true` for a rating the ranker holds
+true/false or null (a column of numbers, or of percentages written as text
+such as `78%`, is right-aligned), and `pinned: true` for a rating the ranker holds
 fixed, a scale's reference, which the page marks with a pin. `games` is how
 many games it played: a row under
 `--rankings-min-games` is not served, one with no `games` is never cut,

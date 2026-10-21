@@ -49,21 +49,83 @@
   /* The visitor's own row, matched by the client id the game page sends. */
   tr.you td { background: var(--water); font-weight: 600; }
   td.empty { color: var(--muted); }
-  /* A name with a profile opens it in a row of its own under it; the
-     chevron says which way it goes. */
-  button.who {
-    font: inherit; color: inherit; background: none; border: 0; padding: 0;
-    cursor: pointer; text-align: left;
-  }
-  button.who::after { content: "▸"; color: var(--muted); margin-left: 0.35rem; font-size: 0.8em; }
-  button.who[aria-expanded="true"]::after { content: "▾"; }
   /* A rating the ranker holds fixed: a small pin before the rating, which
      keeps a right-aligned column's digits in line. */
   svg.pin { width: 0.8em; height: 0.8em; margin-right: 0.35rem; vertical-align: -0.05em; fill: var(--muted); }
-  tr.profile td { background: var(--panel); white-space: normal; font-size: 0.9rem; font-weight: 400; }
-  tr.profile dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.8rem; margin: 0; max-width: 40rem; }
-  tr.profile dt { color: var(--muted); }
-  tr.profile dd { margin: 0; overflow-wrap: anywhere; }
+  /* Click a row for its details in a card above the table, a second for the
+     two head to head: the first picked in blue, the second in the game's
+     first seat red (index.html SEAT_COLORS), with a lighter shade of each
+     for text on the dark panel. */
+  :root { --side-a: #3b82f6; --side-a-ink: #8ab4ff; --side-b: #d62828; --side-b-ink: #ff7b7b; }
+  tbody tr.pickable { cursor: pointer; }
+  tbody tr.pickable:hover td { background: rgba(255, 255, 255, 0.04); }
+  tbody tr.pickable:focus-visible { outline: 2px solid var(--muted); outline-offset: -2px; }
+  tbody tr.side-a td { background: rgba(59, 130, 246, 0.17); }
+  tbody tr.side-b td { background: rgba(214, 40, 40, 0.18); }
+  tbody tr.side-a:hover td { background: rgba(59, 130, 246, 0.23); }
+  tbody tr.side-b:hover td { background: rgba(214, 40, 40, 0.24); }
+  tr.side-a td:first-child { box-shadow: inset 3px 0 0 var(--side-a); }
+  tr.side-b td:first-child { box-shadow: inset 3px 0 0 var(--side-b); }
+  #hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.6rem; }
+  #versus {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.55rem 1.25rem 0.9rem; margin-bottom: 1rem;
+  }
+  #versus .head { display: flex; align-items: center; justify-content: space-between; margin: 0 -0.7rem 0.45rem 0; }
+  #versus .head h2 {
+    margin: 0; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
+  #versus .close {
+    font: inherit; font-size: 1.15rem; line-height: 1;
+    color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 0.2rem 0.45rem; cursor: pointer;
+  }
+  #versus .close:hover { color: var(--ink); background: var(--border); }
+  #versus .face { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 1rem; }
+  #versus .side.b { text-align: right; }
+  #versus .name { font-weight: 600; font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #versus .side .name::before, #versus .side.b .name::after {
+    content: ""; display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; vertical-align: 0.05em;
+  }
+  #versus .side.a .name::before { background: var(--side-a); margin-right: 0.45rem; }
+  #versus .side.b .name::before { display: none; }
+  #versus .side.b .name::after { background: var(--side-b); margin-left: 0.45rem; }
+  #versus .sub { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+  #versus .meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* One row picked: the card waits for a second, an empty slot on the
+     right, and shows the first one's details below; the second fills the
+     slot. What a click adds fades in. */
+  #versus .score.totals { display: flex; justify-content: center; gap: 1.6rem; }
+  #versus .score .total { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  #versus .details { margin-top: 1rem; font-size: 0.9rem; }
+  #versus .details p { margin: 0.5rem 0 0; color: var(--ink); overflow-wrap: anywhere; }
+  #versus .details a { color: var(--side-a-ink); }
+  .enter { animation: enter 200ms ease-out; }
+  @keyframes enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .enter { animation: none; } }
+  #versus .score { text-align: center; font-variant-numeric: tabular-nums; }
+  #versus .wins { font-size: 2rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
+  #versus .wins .dash { color: var(--muted); font-weight: 400; margin: 0 0.35rem; }
+  #versus .a { color: var(--side-a-ink); }
+  #versus .b { color: var(--side-b-ink); }
+  #versus .games { color: var(--muted); font-size: 0.85rem; margin-top: 0.1rem; white-space: nowrap; }
+  /* One bar: the share the ratings expect, lighter across the range they
+     give, with what each actually won at its ends (the expected shares,
+     muted, for two who never met). */
+  #versus .shares { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+    gap: 0.6rem; margin-top: 1rem; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  #versus .shares.unmet .pa, #versus .shares.unmet .pb { opacity: 0.6; }
+  #versus .bar { display: flex; height: 0.5rem; border-radius: 999px; overflow: hidden; background: var(--border); }
+  #versus .bar .fill-a { background: var(--side-a); }
+  #versus .bar .fill-b { background: var(--side-b); }
+  #versus .bar .band-a { background: rgba(59, 130, 246, 0.38); }
+  #versus .bar .band-b { background: rgba(214, 40, 40, 0.38); }
+  /* A phone: the names side by side above the score. */
+  @media (max-width: 520px) {
+    #versus .face { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "a b" "score score"; row-gap: 0.6rem; }
+    #versus .side.a { grid-area: a; }
+    #versus .side.b { grid-area: b; }
+    #versus .score { grid-area: score; }
+  }
 </style>
 </head>
 <body>
@@ -89,9 +151,12 @@ const REFRESH_MS = 60000;
 
 // What a client says of itself beside its name, as the open profile lists it.
 const PROFILE_LABELS = {version: "Version", owner: "Owner", url: "Link", description: "About"};
-// The one row whose profile is open, as `rowKey` names it; kept across the
-// refresh, which redraws the table.
-let openRow = null;
+// The rows picked to compare, by board key: their ids in the order clicked,
+// at most two. Kept across the refresh.
+const chosen = {};
+// The picks the card was last drawn with, so that only what a click adds
+// fades in, not every refresh.
+let drawn = "";
 
 async function clientId() {
   let secret = null;
@@ -123,24 +188,6 @@ function cellText(value) {
   return String(value);
 }
 
-function rowKey(board, row) {
-  return `${board.key}:${row.id || row.name}`;
-}
-
-// A row's name: a button opening its profile when it has one, plain text
-// when it has none.
-function nameCell(board, row) {
-  const td = node("td");
-  if (!Object.keys(PROFILE_LABELS).some((field) => row[field])) {
-    td.appendChild(document.createTextNode(row.name));
-  } else {
-    const key = rowKey(board, row);
-    const button = td.appendChild(node("button", {class: "who", "aria-expanded": String(openRow === key)}, row.name));
-    button.addEventListener("click", () => { openRow = openRow === key ? null : key; render(); });
-  }
-  return td;
-}
-
 // Where a pinned row's pin goes: its rating, the column keyed "rating", or
 // the board's first column when it has none.
 function pinColumn(board) {
@@ -162,23 +209,123 @@ function pinIcon() {
   return svg;
 }
 
-// The open profile, a row of its own spanning the table under its name. The
-// server only takes http(s) addresses; the link is checked again rather than
-// trusting one this page did not make.
-function profileRow(row, span) {
-  const tr = node("tr", {class: "profile"});
-  const list = tr.appendChild(node("td", {colspan: String(span)})).appendChild(node("dl"));
-  for (const [field, label] of Object.entries(PROFILE_LABELS)) {
-    if (!row[field]) continue;
-    list.appendChild(node("dt", {}, label));
-    const value = list.appendChild(node("dd"));
-    if (field === "url" && /^https?:\/\//i.test(row.url)) {
-      value.appendChild(node("a", {href: row.url, target: "_blank", rel: "noopener noreferrer nofollow"}, row.url));
-    } else {
-      value.textContent = row[field];
+function picked(board) {
+  const ids = new Set(board.rows.map((r) => r.id).filter(Boolean));
+  chosen[board.key] = (chosen[board.key] || []).filter((id) => ids.has(id));
+  return chosen[board.key];
+}
+
+// A click on a row: picked first, then second; a third replaces the second,
+// and a picked row clicked again is let go.
+function pick(board, id) {
+  const now = picked(board);
+  chosen[board.key] = now.includes(id) ? now.filter((x) => x !== id) : now.length < 2 ? [...now, id] : [now[0], id];
+  render();
+}
+
+// A pair's share for its first row (`a`) and the complement, as whole
+// percents adding up to 100, in the order shown: swapped when the card
+// shows the pair's second row first, so either order of picking shows the
+// same two numbers.
+function percents(share, flip = false) {
+  const first = Math.round(100 * share);
+  return flip ? [`${100 - first}%`, `${first}%`] : [`${first}%`, `${100 - first}%`];
+}
+
+// The comparison card, for one picked row or two, the first picked on the
+// left. One: its name, rating, version and owner where they will stay, its
+// other columns where the score will be, an empty slot on the right for the
+// second, and below, its description and link. Two: the second in the slot, the wins between them, as the ranker
+// counted them (the board's `pairs`), and one bar split at the share the
+// ranker expected, lighter across the range it gives, with the share each
+// won at its ends (the expected shares for two who never met). The server only takes http(s) addresses; a link
+// is checked again rather than trusting one this page did not make.
+function card(board, picks) {
+  const row = (id) => board.rows.find((r) => r.id === id);
+  const [a, b] = [row(picks[0]), picks[1] ? row(picks[1]) : null];
+  const before = drawn.split("|");
+  drawn = `${board.key}|${picks.join("|")}`;
+  const isNew = (i) => before[0] !== board.key || before[i + 1] !== picks[i];
+  const fresh = (el, i) => { if (isNew(i)) el.classList.add("enter"); return el; };
+  const rating = board.columns.find((c) => c.key === "rating");
+
+  const box = node("section", {id: "versus", "aria-label": b ? `${a.name} against ${b.name}` : a.name});
+  if (before[0] !== board.key || before.length < 2 || !before[1]) box.classList.add("enter");
+  const head = box.appendChild(node("div", {class: "head"}));
+  head.appendChild(node("h2", {}, "Head to head"));
+  const close = head.appendChild(node("button", {class: "close", type: "button", "aria-label": "Close"}, "×"));
+  close.addEventListener("click", () => { chosen[board.key] = []; render(); });
+
+  const face = box.appendChild(node("div", {class: "face"}));
+  const side = (r, which) => {
+    const el = node("div", {class: `side ${which}`});
+    el.appendChild(node("div", {class: "name"}, r.name));
+    if (rating && r.rating !== null && r.rating !== undefined) el.appendChild(node("div", {class: "sub"}, `${rating.label} ${cellText(r.rating)}`));
+    const meta = [r.version, r.owner].filter(Boolean).join(" · ");
+    if (meta) el.appendChild(node("div", {class: "meta", title: r.description || ""}, meta));
+    return el;
+  };
+  face.appendChild(fresh(side(a, "a"), 0));
+  const score = face.appendChild(node("div", {class: "score"}));
+  if (!b) {
+    // its other columns where the score will be, in the score's style
+    score.classList.add("totals");
+    for (const c of board.columns) {
+      if (c === rating) continue;
+      const total = fresh(score.appendChild(node("div")), 0);
+      total.appendChild(node("div", {class: "total"}, cellText(a[c.key])));
+      total.appendChild(node("div", {class: "games"}, c.label.toLowerCase()));
     }
+    face.appendChild(node("div", {class: "side b empty"}));
+    if (!a.description && !(a.url && /^https?:\/\//i.test(a.url))) return box;
+    const details = box.appendChild(fresh(node("div", {class: "details"}), 0));
+    if (a.description) details.appendChild(node("p", {}, a.description));
+    if (a.url && /^https?:\/\//i.test(a.url)) {
+      details.appendChild(node("p")).appendChild(
+        node("a", {href: a.url, target: "_blank", rel: "noopener noreferrer nofollow"}, a.url));
+    }
+    return box;
   }
-  return tr;
+
+  const found = (board.pairs || []).find((p) => (p.a === a.id && p.b === b.id) || (p.a === b.id && p.b === a.id));
+  const flip = found && found.a !== a.id;
+  const turn = (x) => (x === null || x === undefined ? null : flip ? 1 - x : x);
+  const games = found ? found.games : 0;
+  const wins = found ? (flip ? [found.b_wins, found.a_wins] : [found.a_wins, found.b_wins]) : [0, 0];
+  const expected = found ? turn(found.expected) : null;
+  // the range, its ends swapped with the sides
+  const range = found && found.expected_low !== null && found.expected_low !== undefined
+    ? [turn(flip ? found.expected_high : found.expected_low), turn(flip ? found.expected_low : found.expected_high)] : null;
+  fresh(score, 1);
+  const decided = wins[0] + wins[1];
+  if (games) {
+    const line = score.appendChild(node("div", {class: "wins"}));
+    line.appendChild(node("span", {class: "a"}, String(wins[0])));
+    line.appendChild(node("span", {class: "dash"}, "–"));
+    line.appendChild(node("span", {class: "b"}, String(wins[1])));
+    const others = games - decided;
+    score.appendChild(node("div", {class: "games"},
+      `${games} game${games === 1 ? "" : "s"}` + (others ? ` · ${others} won by others` : "")));
+  } else {
+    score.appendChild(node("div", {class: "games"}, "Not met yet"));
+  }
+  face.appendChild(fresh(side(b, "b"), 1));
+
+  if (expected === null && !decided) return box;
+  const won = decided ? wins[0] / decided : null;
+  const [left, right] = percents(decided ? found.a_wins / decided : found.expected, flip);
+  const shares = box.appendChild(fresh(node("div", {class: won === null ? "shares unmet" : "shares"}), 1));
+  shares.appendChild(node("span", {class: "pa a"}, left));
+  const split = expected === null ? won : expected;
+  const bar = shares.appendChild(node("div", {class: "bar", role: "img", "aria-label":
+    (won === null ? "" : `${a.name} won ${left}, ${b.name} ${right}. `) +
+    (expected === null ? "" : `Expected ${percents(found.expected, flip).join(" to ")}.`)}));
+  const parts = range
+    ? [["fill-a", range[0]], ["band-a", split - range[0]], ["band-b", range[1] - split], ["fill-b", 1 - range[1]]]
+    : [["fill-a", split], ["fill-b", 1 - split]];
+  for (const [cls, width] of parts) bar.appendChild(node("div", {class: cls, style: `width: ${100 * width}%`}));
+  shares.appendChild(node("span", {class: "pb b"}, right));
+  return box;
 }
 
 function chosenKey() {
@@ -207,6 +354,16 @@ function render() {
   }
   const board = data.boards.find((b) => b.key === key);
   if (data.boards.length === 1) holder.appendChild(node("h2", {}, board.title));
+  const picks = picked(board);
+  const comparable = board.rows.filter((r) => r.id).length > 1;
+  if (picks.length) holder.appendChild(card(board, picks));
+  else {
+    drawn = "";
+  }
+  if (!picks.length && board.rows.some((r) => r.id)) {
+    holder.appendChild(node("div", {id: "hint"},
+      comparable ? "Click a row for its details, or two to compare them head to head." : "Click a row for its details."));
+  }
   const numeric = new Set(board.columns
     .filter((c) => board.rows.some((r) => isNumeric(r[c.key])))
     .map((c) => c.key));
@@ -222,14 +379,23 @@ function render() {
     body.appendChild(tr);
   }
   for (const row of board.rows) {
-    const tr = node("tr", myId && row.id === myId ? {class: "you"} : {});
-    tr.appendChild(nameCell(board, row));
+    const at = picks.indexOf(row.id);
+    const classes = [myId && row.id === myId ? "you" : "", row.id ? "pickable" : "", ["side-a", "side-b"][at] || ""];
+    const tr = node("tr", {class: classes.filter(Boolean).join(" ")});
+    if (row.id) {
+      tr.setAttribute("tabindex", "0");
+      tr.setAttribute("aria-selected", String(at >= 0));
+      tr.addEventListener("click", () => pick(board, row.id));
+      tr.addEventListener("keydown", (event) => {
+        if (event.target === tr && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); pick(board, row.id); }
+      });
+    }
+    tr.appendChild(node("td", {}, row.name));
     for (const c of board.columns) {
       const td = tr.appendChild(node("td", numeric.has(c.key) ? {class: "number"} : {}, cellText(row[c.key])));
       if (row.pinned && c.key === pinColumn(board)) td.prepend(pinIcon());
     }
     body.appendChild(tr);
-    if (openRow === rowKey(board, row)) body.appendChild(profileRow(row, board.columns.length + 1));
   }
   const scroll = node("div", {class: "scroll"});
   scroll.appendChild(table);
@@ -259,6 +425,11 @@ async function load() {
 }
 
 window.addEventListener("hashchange", () => { if (data) render(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !data || !data.boards.length) return;
+  chosen[chosenKey()] = [];
+  render();
+});
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
 clientId().then((id) => { myId = id; return load(); });

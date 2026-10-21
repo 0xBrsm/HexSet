@@ -298,7 +298,7 @@ def check(value: object, min_games: int = 0) -> list[dict]:
     """A ranker's return value as served: its boards with every row cut to
     `name`, `id`, `games`, its profile and the board's own columns, less the rows
     whose `games` is under `min_games` (a row that says nothing of its games
-    stays). Raises `ValueError` naming the first thing that is not a
+    stays), and its head-to-head `pairs` between the rows left. Raises `ValueError` naming the first thing that is not a
     set of rankings."""
     if not isinstance(value, dict) or not isinstance(value.get("boards"), list):
         raise ValueError('a ranker returns {"boards": [...]}')
@@ -370,8 +370,47 @@ def check(value: object, min_games: int = 0) -> list[dict]:
             "note": note,
             "columns": [{"key": c["key"], "label": c["label"]} for c in columns],
             "rows": served,
+            "pairs": _pairs(board.get("pairs"), {row["id"] for row in served if row["id"] is not None}, where),
         })
     return boards
+
+
+def _pairs(pairs: object, shown: set[str], where: str) -> list[dict]:
+    """A board's head-to-head records as served: each pair of row ids once,
+    with the ranked games they shared, each one's wins in them and the
+    ranker's chance of `a` beating `b` with the range it gives around it
+    (`expected_low`, `expected_high`; null where it gives none), less the
+    pairs naming a row not shown. None is a board without them."""
+    if pairs is None:
+        return []
+    if not isinstance(pairs, list):
+        raise ValueError(f"{where}.pairs is not a list")
+    served, seen = [], set()
+    for i, pair in enumerate(pairs):
+        at = f"{where}.pairs[{i}]"
+        if not isinstance(pair, dict):
+            raise ValueError(f"{at} is not an object")
+        a, b = pair.get("a"), pair.get("b")
+        if not (isinstance(a, str) and isinstance(b, str)) or a == b:
+            raise ValueError(f"{at} does not name two rows by id")
+        counts = [pair.get(field) for field in ("games", "a_wins", "b_wins")]
+        if any(type(n) is not int or n < 0 for n in counts) or counts[1] + counts[2] > counts[0]:
+            raise ValueError(f"{at}: games, a_wins and b_wins are not counts within its games")
+        chances = {field: pair.get(field) for field in ("expected", "expected_low", "expected_high")}
+        for field, value in chances.items():
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                      or not 0 <= value <= 1):
+                raise ValueError(f"{at}.{field} is not a chance")
+        expected, low, high = chances.values()
+        if (low is None) != (high is None) or (low is not None and not (expected is not None and low <= expected <= high)):
+            raise ValueError(f"{at}: expected_low and expected_high are not a range around expected")
+        if frozenset((a, b)) in seen:
+            raise ValueError(f"{at} repeats a pair")
+        seen.add(frozenset((a, b)))
+        if a in shown and b in shown:
+            served.append({"a": a, "b": b, "games": counts[0], "a_wins": counts[1], "b_wins": counts[2],
+                           **{field: None if value is None else float(value) for field, value in chances.items()}})
+    return served
 
 
 class Rankings:

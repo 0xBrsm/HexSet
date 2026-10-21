@@ -343,10 +343,12 @@ more: like any player it sits once at a table, so a table short by two or
 more waits for players.
 
 A player here is an `id` at one profile `version`: a client, a server
-entrant (below) or the fill bot at the version it plays. Two players meet at
-no more than 100 ranked tables. Past that the queue seats neither with the
-other, and a ticket with no one left to meet waits; a new version of either
-starts afresh.
+entrant (below) or the fill bot at the version it plays. Two players play no
+more than 100 completed ranked games together: a game counts while it is in
+play and once it is played out to a result, and one aborted on its clock or
+cut short by a server restart does not. Past that the queue seats neither
+with the other, and a ticket with no one left to meet waits; a new version
+of either starts afresh.
 
 The server may also enter its own bots (`--ranked-entrant`,
 [server.md](server.md)). Each holds a ticket at every game type it plays, one
@@ -388,6 +390,13 @@ An `id` is a client id, the one a seat claims with
 its profile's `name` in place of the row's when it gave one. An `id` of
 `bot:<entry>` is a server bot's row, carrying the profile the server lists
 it with ([below](#opponent-names)).
+
+A board's `pairs` are its rows head to head, as the ranker counted them:
+`{"a": <id>, "b": <id>, "games", "a_wins", "b_wins", "expected",
+"expected_low", "expected_high"}`, one per pair of rows shown that the
+ranker gave, `expected` its chance of `a` beating `b` and the other two the
+range it gives around it (each null where it gave none); an empty list for
+none.
 
 ## Opponent names
 

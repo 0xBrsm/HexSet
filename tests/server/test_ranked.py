@@ -87,7 +87,7 @@ def test_waiting_clients_meet_each_other_first_and_least_met_first():
     table_b, _ = seats_of(tables, b)
     assert table_a is table_c and table_b is not table_a
     assert all(s.kind.value == "player" for s in table_a.seats[:2])
-    assert meetings[frozenset(("a" * 64, "c" * 64))] == 1
+    assert tables.queue.counts()[0][frozenset(("a" * 64, "c" * 64))] == 1
 
 
 def test_one_client_never_sits_twice_at_a_table():
@@ -128,7 +128,7 @@ def test_two_versions_that_met_at_the_cap_are_not_seated_together_again():
     tables.queue.tick()
     assert seats_of(tables, a)[0] is seats_of(tables, fresh)[0]
     assert polled(tables, b)["status"] == "waiting"
-    assert pairs[pair(entrant(client("a")), entrant(client("b", version="2")))] == 1
+    assert tables.queue.counts()[1][pair(entrant(client("a")), entrant(client("b", version="2")))] == 1
 
 
 def test_ranked_play_counts_against_no_allowance_only_the_unfinished_games_limit(tmp_path):
@@ -343,12 +343,18 @@ def test_an_entrant_meets_clients_and_the_fill_bot_under_the_pair_cap(tmp_path, 
     assert {h["game_type"] for h in headers(games)} == {"standard", "duel-variant"}
     me, it, fill = entrant(client("a")), (f"bot:{entry}", "2.0"), tables.queue._filler(FILL)
     met = lambda pairs: (pairs[pair(me, fill)], pairs[pair(it, fill)], pairs[pair(me, it)])  # noqa: E731
-    meetings, pairs = tables.queue._history()
+    # In play, counted; none completed yet.
+    meetings, pairs = tables.queue.counts()
     assert met(pairs) == (1, 2, 1) and meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
-    # Read back from the journals the same.
-    read = new_tables(games_dir=str(games), ranked_bot=FILL)
-    meetings, pairs = read.queue._history()
-    assert met(pairs) == (1, 2, 1) and meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
+    assert met(tables.queue._history()[1]) == (0, 0, 0)
+    # Played out, completed, and read back from the journals the same.
+    rng = random.Random(4)
+    for header in headers(games):
+        _play_out(tables.get(header["code"]).session, rng)
+    for queue_ in (tables.queue, new_tables(games_dir=str(games), ranked_bot=FILL).queue):
+        meetings, pairs = queue_.counts()
+        assert met(pairs) == (1, 2, 1) and meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
+        assert met(queue_._history()[1]) == (1, 2, 1)
 
 
 def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, entrant_model):
@@ -361,7 +367,8 @@ def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, en
     table, _ = seats_of(tables, ticket)
     assert [s.name for s in table.seats[:2] if s.kind.value == "bot"] == [entry]
     fill = tables.queue._filler(FILL)
-    for history in (tables.queue._history(), new_tables(games_dir=str(games)).queue._history()):
+    _play_out(table.session, random.Random(4))
+    for history in (tables.queue.counts(), new_tables(games_dir=str(games)).queue.counts()):
         meetings, pairs = history
         assert pairs[pair(entrant(client("a")), fill)] == 0 and pairs[pair((f"bot:{entry}", "2.0"), fill)] == 0
         assert pairs[pair(entrant(client("a")), (f"bot:{entry}", "2.0"))] == 1
@@ -379,3 +386,36 @@ def test_an_entrants_rankings_row_carries_its_models_profile(tmp_path, entrant_m
     tables.rankings.wait()
     [row] = tables.handle("GET", "/api/rankings", {}, None)["boards"][0]["rows"]
     assert (row["name"], row["version"], row["owner"], row["description"]) == (entry, "2.0", "octocat", "A test net.")
+
+
+def test_only_completed_games_count_toward_the_pair_cap(tmp_path):
+    """A table counts while it is in play and stays counted once played out;
+    one aborted on its clock, or cut short by a restart, stops counting."""
+    games = tmp_path / "games"
+    games.mkdir()
+    tables = new_tables(games_dir=str(games), ranked_bot=FILL)
+    me, fill = entrant(client("a")), tables.queue._filler(FILL)
+    count = lambda q: q.counts()[1][pair(me, fill)]  # noqa: E731
+
+    def deal(t):
+        ticket = queue(t, client("a"))
+        t.queue.tick()
+        return seats_of(t, ticket)[0]
+
+    table = deal(tables)
+    assert count(tables.queue) == 1
+    table.changed_at -= 61
+    tables.check_clocks()
+    assert count(tables.queue) == 0
+    deal(tables)
+    assert count(tables.queue) == 1
+    tables = new_tables(games_dir=str(games), ranked_bot=FILL)   # the restart cuts it short
+    assert count(tables.queue) == 0
+    _play_out(deal(tables).session, random.Random(4))
+    assert count(tables.queue) == 1
+    assert count(new_tables(games_dir=str(games), ranked_bot=FILL).queue) == 1
+    # at the cap of completed games, no further table
+    tables.queue._history()[1][pair(me, fill)] = PAIR_CAP
+    ticket = queue(tables, client("a"))
+    tables.queue.tick()
+    assert polled(tables, ticket)["status"] == "waiting"

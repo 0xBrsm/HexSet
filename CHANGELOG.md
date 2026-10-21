@@ -5,6 +5,37 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.20.0
+
+### Added
+
+- **Rankings head to head.** A ranker's board may carry `pairs`: two rows'
+  ids, the ranked games both played, each one's wins in them and the
+  ranker's expected chance of the first beating the second, optionally with
+  a range around it, `expected_low` and `expected_high` (`rankings.check`
+  validates them and drops pairs with a row not shown; `GET /api/rankings`
+  serves them). On `/rankings` a click picks a row with
+  an id, shown in blue, and a head-to-head card above the table holds it on
+  the left (name, rating, version and owner), its other columns large in the
+  middle where the score will be, and below, its description and link; the
+  profile no longer opens in a row of the table. A second click picks
+  another, in red, onto the right: the wins between them and their games,
+  and one bar split at the expected share, lighter across its range, with
+  the share each won at its ends (the expected shares for two who never
+  met), the same numbers in either order of picking. What a click adds fades
+  in. A third row replaces the second, a picked row clicked again is let
+  go, Escape or the card's close button clears both, and Enter or Space
+  picks a focused row.
+
+### Fixed
+
+- **The ranked pair cap counts completed games.** Two players now play 100
+  ranked games to a result together: a table counts while in play and once
+  played out (`RankedQueue.counts`, `ended`), and one aborted on its clock
+  or cut short by a restart no longer uses up the cap
+  (`_journal.ending_of` reads a journal's closing line).
+
+
 ## 1.19.1
 
 ### Fixed

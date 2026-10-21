@@ -544,6 +544,28 @@ def header_of(path: Path | str) -> dict | None:
     return event if event.get("kind") == "game" else None
 
 
+def ending_of(path: Path | str) -> dict | None:
+    """A journal's closing line (`CLOSING_KINDS`), read from the end of the
+    file alone, or None for a game still open or a file that will not read."""
+    try:
+        with open(path, "rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, size - 65536))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        return event if isinstance(event, dict) and event.get("kind") in CLOSING_KINDS else None
+    return None
+
+
 def is_closed(events: list[dict]) -> bool:
     return any(event.get("kind") in CLOSING_KINDS for event in events)
 

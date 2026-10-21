@@ -167,6 +167,49 @@ def test_anything_else_is_refused(value):
         check(value)
 
 
+def _paired(pairs, rows=({"name": "A", "id": "a", "games": 12}, {"name": "B", "id": "b", "games": 12},
+                          {"name": "C", "id": "c", "games": 3})):
+    return {"boards": [{"key": "k", "title": "t", "columns": [], "rows": list(rows), "pairs": pairs}]}
+
+
+def test_a_board_serves_head_to_head_pairs_between_the_rows_it_shows():
+    pairs = [{"a": "a", "b": "b", "games": 12, "a_wins": 8, "b_wins": 4, "expected": 0.64,
+              "expected_low": 0.5, "expected_high": 0.75},
+             {"a": "a", "b": "c", "games": 3, "a_wins": 1, "b_wins": 1},
+             {"a": "b", "b": "c", "games": 0, "a_wins": 0, "b_wins": 0, "expected": 1}]
+    served = check(_paired(pairs))[0]["pairs"]
+    none = {"expected_low": None, "expected_high": None}
+    assert served == [{"a": "a", "b": "b", "games": 12, "a_wins": 8, "b_wins": 4, "expected": 0.64,
+                       "expected_low": 0.5, "expected_high": 0.75},
+                      {"a": "a", "b": "c", "games": 3, "a_wins": 1, "b_wins": 1, "expected": None, **none},
+                      {"a": "b", "b": "c", "games": 0, "a_wins": 0, "b_wins": 0, "expected": 1.0, **none}]
+    # a row under the minimum games takes its pairs with it; a board without pairs serves none
+    assert [(p["a"], p["b"]) for p in check(_paired(pairs), min_games=10)[0]["pairs"]] == [("a", "b")]
+    assert check(_paired(None))[0]["pairs"] == []
+
+
+@pytest.mark.parametrize("pairs", [
+    {},
+    [["a", "b"]],
+    [{"a": "a", "b": "a", "games": 1, "a_wins": 1, "b_wins": 0}],
+    [{"a": "a", "b": None, "games": 1, "a_wins": 1, "b_wins": 0}],
+    [{"a": "a", "b": "b", "games": 2, "a_wins": 2, "b_wins": 1}],
+    [{"a": "a", "b": "b", "games": 2, "a_wins": -1, "b_wins": 1}],
+    [{"a": "a", "b": "b", "games": True, "a_wins": 0, "b_wins": 0}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0, "expected": 1.5}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0, "expected": True}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0, "expected": 0.5, "expected_low": 0.4}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0, "expected": 0.5,
+      "expected_low": 0.6, "expected_high": 0.7}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0, "expected_low": 0.4, "expected_high": 0.6}],
+    [{"a": "a", "b": "b", "games": 1, "a_wins": 1, "b_wins": 0},
+     {"a": "b", "b": "a", "games": 1, "a_wins": 0, "b_wins": 1}],
+])
+def test_a_pair_that_is_not_a_head_to_head_record_is_refused(pairs):
+    with pytest.raises(ValueError):
+        check(_paired(pairs))
+
+
 def test_rows_under_the_minimum_games_are_not_served():
     rows = [{"name": "nine", "games": 9}, {"name": "ten", "games": 10},
             {"name": "unsaid"}]

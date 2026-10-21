@@ -19,7 +19,11 @@ table, so a table short by two or more waits for players.
 Two players, each an id at one `version` of its profile (`entrant`), meet
 at no more than `PAIR_CAP` ranked tables: the fill bot and the server's
 entrants count as players like any client, so a new version of either side
-meets the other afresh. A client may hold any number of tickets, and so
+meets the other afresh. A table counts once it is dealt and stays counted if
+it is played out to a result; one aborted on its clock or cut short by a
+restart stops counting, so the cap is `PAIR_CAP` completed games. Completed
+games are read from the journals (`ended`); a server without journals
+counts only the tables in play. A client may hold any number of tickets, and so
 play any number of ranked games at once, within its address's
 unfinished-games limit (`api.Tables.admit_ranked`); ranked play counts
 against no game allowance.
@@ -137,8 +141,14 @@ class RankedQueue:
         self._changed = threading.Condition()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Completed games' meeting counts (`_history`), guarded by `_counting`:
+        # a game ends on its own thread.
         self._meetings: Counter | None = None
         self._pairs: Counter | None = None
+        self._counting = threading.Lock()
+        # Games `ended` has heard of whose tables are still held: counted as
+        # completed (or not at all), no longer as in play.
+        self._ended: set[str] = set()
 
     # --- clients ------------------------------------------------------------
 
@@ -247,7 +257,7 @@ class RankedQueue:
     def _match(self, game_type: str) -> None:
         seats = max(GAME_TYPES[game_type].seats)
         bot = self.tables.config.ranked_bot
-        meetings, pairs = self._history()
+        meetings, pairs = self.counts()
         filler = self._filler(bot)
         with self._changed:
             waiting = [t for t in self._tickets.values() if t.match is None and t.game_type == game_type]
@@ -275,13 +285,16 @@ class RankedQueue:
                 if first not in group or seats - len(group) > FILL_SEATS:
                     continue
             fill = seats - len(group)
+            filled = [filler] * fill if fill else []
+            units = ([t.client["id"] for t in group] + [f[0] for f in filled],
+                     [entrant(t.client) for t in group] + filled)
             try:
                 dealt = self.tables.deal_ranked(game_type, [t.bot or t.client for t in group], bot, fill,
-                                                [t.origin for t in group])
+                                                [t.origin for t in group], units)
             except Exception:
                 traceback.print_exc()
                 continue
-            self._count([t.client for t in group], [filler] * fill)
+            _add(meetings, pairs, *units)
             with self._changed:
                 for ticket, (seat, token) in zip(group, dealt["seats"]):
                     ticket.match = {"code": dealt["code"], "seat": seat, "token": token}
@@ -298,27 +311,46 @@ class RankedQueue:
 
         return _bot_entrant({"name": bot, "version": bot_profile(bot).get("version")})
 
-    def _history(self) -> tuple[Counter, Counter]:
-        """The meeting counts by id and by versioned pair (`entrant`), read
-        from the ranked journals the first time they are asked for and kept
-        up to date by `_count`."""
-        if self._meetings is None:
-            meetings, pairs = Counter(), Counter()
-            for header in _ranked_headers(self.tables.journal_directory()):
-                clients = {int(s): c for s, c in (header.get("clients") or {}).items() if c}
-                bots = {int(s): b for s, b in (header.get("bots") or {}).items()}
-                locked = set(header.get("locked") or ())
-                seats = [s for s in range(int(header.get("num_players", 0))) if s not in locked]
-                players = [_player(clients.get(s), bots.get(s)) for s in seats]
-                versioned = [_bot_entrant(bots[s]) if s in bots
-                             else entrant(clients[s]) if clients.get(s, {}).get("id") else None for s in seats]
-                _add(meetings, pairs, players, versioned)
-            self._meetings, self._pairs = meetings, pairs
-        return self._meetings, self._pairs
+    def counts(self) -> tuple[Counter, Counter]:
+        """The meeting counts matching reads, by id and by versioned pair
+        (`entrant`): every completed ranked game and every ranked table in
+        play."""
+        done_meetings, done_pairs = self._history()
+        live = self.tables.ranked_in_play()
+        with self._counting:
+            meetings, pairs = Counter(done_meetings), Counter(done_pairs)
+            # A table counts as in play until its ending is heard, even once
+            # its game is over: the ending is written just after.
+            self._ended &= {game_id for game_id, _, _ in live if game_id is not None}
+            in_play = [units for game_id, over, units in live
+                       if (game_id not in self._ended if game_id is not None else not over)]
+        for units in in_play:
+            _add(meetings, pairs, *units)
+        return meetings, pairs
 
-    def _count(self, clients: list[dict], fill: list[tuple[str, str | None]]) -> None:
-        players = [c["id"] for c in clients] + [unit[0] for unit in fill]
-        _add(self._meetings, self._pairs, players, [entrant(c) for c in clients] + fill)
+    def ended(self, path) -> None:
+        """A ranked game's journal just wrote its ending (`api.Tables._watch`):
+        counted, if it was played out to a result."""
+        with self._counting:
+            self._ended.add(Path(path).stem)
+            if self._meetings is None:
+                return   # the first `_history` reads it from the journal
+            header = journal.header_of(path)
+            ending = journal.ending_of(path)
+            if header and header.get("ranked") and ending and ending.get("kind") == "result":
+                _add(self._meetings, self._pairs, *_units(header))
+
+    def _history(self) -> tuple[Counter, Counter]:
+        """The completed games' meeting counts, read from the ranked journals
+        played out to a result the first time they are asked for and kept up
+        to date by `ended`."""
+        with self._counting:
+            if self._meetings is None:
+                meetings, pairs = Counter(), Counter()
+                for header in _completed_headers(self.tables.journal_directory()):
+                    _add(meetings, pairs, *_units(header))
+                self._meetings, self._pairs = meetings, pairs
+            return self._meetings, self._pairs
 
 
 def _add(meetings: Counter, pairs: Counter, players: list[str | None],
@@ -329,12 +361,32 @@ def _add(meetings: Counter, pairs: Counter, players: list[str | None],
         pairs[frozenset((a, b))] += 1
 
 
-def _ranked_headers(directory: str | None) -> list[dict]:
-    """The header of every ranked game journalled in `directory`."""
+def _units(header: dict) -> tuple[list, list]:
+    """A ranked game's players and versioned pair-cap units, from its
+    journal's header: a bot seat as `bot:<name>` at the version it played, a
+    client by its id and version."""
+    clients = {int(s): c for s, c in (header.get("clients") or {}).items() if c}
+    bots = {int(s): b for s, b in (header.get("bots") or {}).items()}
+    locked = set(header.get("locked") or ())
+    seats = [s for s in range(int(header.get("num_players", 0))) if s not in locked]
+    players = [_player(clients.get(s), bots.get(s)) for s in seats]
+    versioned = [_bot_entrant(bots[s]) if s in bots
+                 else entrant(clients[s]) if clients.get(s, {}).get("id") else None for s in seats]
+    return players, versioned
+
+
+def _completed_headers(directory: str | None) -> list[dict]:
+    """The header of every ranked game journalled in `directory` that was
+    played out to a result."""
     if not directory:
         return []
     try:
         paths = sorted(Path(directory).glob("*.jsonl"))
     except OSError:
         return []
-    return [h for h in (journal.header_of(p) for p in paths) if h and h.get("ranked")]
+    out = []
+    for path in paths:
+        header = journal.header_of(path)
+        if header and header.get("ranked") and (journal.ending_of(path) or {}).get("kind") == "result":
+            out.append(header)
+    return out

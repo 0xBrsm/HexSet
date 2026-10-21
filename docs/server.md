@@ -179,6 +179,17 @@ dropped, so what the ranker is handed is not published unless it names it.
 The page marks the row whose `id` is the visitor's own client id, and the MCP
 tool the rows whose `id` is the caller's.
 
+A board may also carry `pairs`, its rows head to head: each a pair of row ids
+`a` and `b` (each pair once), the ranked `games` both played, the ones each
+won (`a_wins`, `b_wins`, at most `games` together) and optionally
+`expected`, the ranker's chance of `a` beating `b`, with `expected_low` and
+`expected_high` around it for the range it gives. A pair naming a row not
+served is dropped. On the page a click on a row puts it in a card above the
+table with its columns and profile, and a click on a second compares the
+two from these: their wins and games, each one's share of the games one of
+them won at either end of a bar split at the expected share, lighter
+across its range.
+
 ## Seats and visibility
 
 Before the first move an empty seat can be closed and reopened. After it the

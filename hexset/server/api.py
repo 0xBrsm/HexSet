@@ -744,6 +744,10 @@ class Table:
     # every seated client's address in `addresses` instead.
     creator_ip: str | None = None
     addresses: frozenset = frozenset()
+    # Who a ranked table seats, as the queue counts its meetings: the players
+    # (client ids, `bot:<entry>`) and the versioned pair-cap units
+    # (`ranked.entrant`), one per seat; empty for any other table.
+    ranked_units: tuple = ()
     # When a view last changed (`bump`): a ranked table's clock.
     changed_at: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -1403,7 +1407,7 @@ class Tables:
     # --- ranked play (`ranked.py`) --------------------------------------------
 
     def deal_ranked(self, game_type: str, players: list[dict | str], bot: str | None, fill: int,
-                    origins: list) -> dict:
+                    origins: list, units: tuple = ()) -> dict:
         """A ranked table of `game_type` for `players`, each a client or the
         entry of a server bot entered as a player (`Config.ranked_entrants`),
         with `fill` more seats for `bot`, every seat placed at random:
@@ -1434,7 +1438,17 @@ class Tables:
         addresses = frozenset(o.ip for o in origins if o is not None and o.ip)
         table = self._open(seats, contract, self.config.board_mode, ranked=True,
                            entrants=tuple(sorted(entrants)), addresses=addresses)
+        table.ranked_units = units
         return {"code": table.code, "seats": placed}
+
+    def ranked_in_play(self) -> list[tuple]:
+        """(game id, over, `Table.ranked_units`) of every ranked table the
+        queue dealt still held here, for its meeting counts; the game id is
+        None for a table with no journal."""
+        with self._registry_lock:
+            tables = list(self._tables.values())
+        return [(t.session.journal.game_id if t.session.journal is not None else None, is_over(t.session.game),
+                 t.ranked_units) for t in tables if t.ranked_units and t.session.ranked]
 
     def in_ranked_play(self, entry: str, game_type: str) -> bool:
         """Whether `entry` holds an entrant's seat at a ranked `game_type`
@@ -1526,9 +1540,17 @@ class Tables:
             self.rankings.seen(client)
 
     def _watch(self, session: GameSession) -> None:
-        """Has `session`'s journal tell the rankings when the game ends."""
-        if self.rankings is not None and session.journal is not None:
-            session.journal.on_end = self.rankings.ended
+        """Has `session`'s journal tell the rankings, and for a ranked game the
+        queue, when the game ends."""
+        if session.journal is None or (self.rankings is None and not session.ranked):
+            return
+        told = [f for f in (self.rankings.ended if self.rankings is not None else None,
+                            self.queue.ended if session.ranked else None) if f is not None]
+
+        def ended(path: Path) -> None:
+            for tell in told:
+                tell(path)
+        session.journal.on_end = ended
 
     def _spawn_seats(self, seats: list[Seat], board: Board, game_type: str) -> dict[int, Bot]:
         """Seat -> a live bot for every bot seat in `seats`, spawned on

@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Sequence
 
 import numpy as np
@@ -32,7 +32,9 @@ from hexset.encoding import from_frame
 from hexset.game import Game, Phase, pending_free_roads
 from hexset.lockstep import forward
 from hexset.mcts import Search
+from hexset.rollout import RolloutPool
 from hexset.clients.onnxmeta import modes_of
+from hexset.clients.batching import coalesce
 from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
 from hexset.server.constants import RECORD_CONTRACTS
@@ -173,7 +175,7 @@ class V2Policy:
 #: What HexSet supplies a decision graph (`DecisionPolicy`), by name: each
 #: graph declares the ones it reads. `observation` is each row's position as
 #: `hexset.contract9` encodes it from the row's own seat
-#: (`contract9.flatten(contract9.encode9(game, seat))`); the rest are
+#: (`contract9.flatten(contract9.encode9(game, seat, self.contract))`); the rest are
 #: `hexset.decisions.arrays`' arrays of the decision at hand.
 DECISION_INPUTS = ("observation",) + D.ARRAYS
 
@@ -219,11 +221,18 @@ class DecisionPolicy:
                  players: int) -> None:
         self.session = session
         self.space = space
+        self.topology = topology
         self.players = players
-        self.layout = contract9.layout(players, topology.num_hexes, topology.num_vertices, topology.num_edges)
+        self.contract = session.get_modelmeta().custom_metadata_map.get("contract", "9")
+        self.layout = contract9.layout(players, topology.num_hexes, topology.num_vertices, topology.num_edges, self.contract)
         declared = [i.name for i in session.get_inputs()]
         # Per-row inputs first: a lane counts a feed's rows off its first array.
         self.inputs = sorted(declared, key=lambda name: name not in _PER_ROW)
+        self._cpu_inference = session.get_providers() == ["CPUExecutionProvider"]
+        self._dynamic_rows = all(not isinstance((getattr(item, "shape", None) or [None])[0], int)
+                                 for item in session.get_inputs() if item.name in _PER_ROW)
+        self._fixed_sizes = {item.name: item.shape[0] for item in session.get_inputs()
+                             if getattr(item, "shape", None) and isinstance(item.shape[0], int)}
         #: Whether the graph answers `prior`, and so can be searched.
         self.has_prior = "prior" in {o.name for o in session.get_outputs()}
         self._plans = D.Plans()
@@ -235,19 +244,25 @@ class DecisionPolicy:
         arrays = None
         for name in self.inputs:
             if name == "observation":
-                feed[name] = np.stack([contract9.flatten(contract9.encode9(game, seat)) for game, seat in rows])
+                feed[name] = np.stack([contract9.flatten(contract9.encode9(game, seat, self.contract)) for game, seat in rows])
             else:
                 if arrays is None:
-                    arrays = D.arrays(decisions, self.space, rows[0][0]._state.board.topology)
+                    arrays = D.arrays(decisions, self.space, self.topology)
                 feed[name] = arrays[name]
         return feed
 
     def _run(self, feed: dict, outputs: list[str]) -> dict[str, np.ndarray]:
         """The graph's `outputs` for `feed`: `value` alone through a lane's
         shared run where one is running, anything else on its own."""
+        grouped = coalesce(feed) if outputs == ["value"] and self._cpu_inference and self._dynamic_rows else None
+        if grouped is not None and any(len(grouped.feed[name]) != size for name, size in self._fixed_sizes.items()):
+            grouped = None
+        inputs = feed if grouped is None else grouped.feed
         if outputs == ["value"]:
-            return {"value": forward(self.session, outputs, feed)[0]}
-        return dict(zip(outputs, self.session.run(outputs, feed)))
+            result = {"value": forward(self.session, outputs, inputs)[0]}
+        else:
+            result = dict(zip(outputs, self.session.run(outputs, inputs)))
+        return result if grouped is None else {key: value[grouped.inverse] for key, value in result.items()}
 
     def _decision(self, game: Game, seat: int) -> "D.Decision":
         if _inside(game):
@@ -263,23 +278,41 @@ class DecisionPolicy:
 
     def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
         """One move per row: the plan's next, or the first of the decision
-        the graph chooses."""
-        return [self._plans.act(game, seat, options, self._decide, self._finish) for game, seat, options in rows]
+        the graph chooses. Every row that will ask the graph is asked in one
+        batch first; the rows are then played in order as one at a time
+        would play them, so a row whose plan is dropped part-way (`Plans`'s
+        limit) asks the graph on its own."""
+        ask = [i for i, (game, seat, options) in enumerate(rows)
+               if len(options) > 1 and not self._plans.planned(game, seat, options)]
+        chosen = dict(zip(ask, self._choose_many([rows[i][:2] for i in ask])))
+        out = []
+        for i, (game, seat, options) in enumerate(rows):
+            choose = (lambda g, s, i=i: chosen.pop(i)) if i in chosen else self._choose
+            out.append(self._plans.act(game, seat, options, choose, partial(self._finish, choose)))
+        return out
 
     def _choose(self, game: Game, seat: int) -> "D.Option":
-        decision = self._decision(game, seat)
-        ((kind, index),) = self._run(self._feed([(game, seat)], [decision]), ["decision"])["decision"]
-        return D.option_of(decision, int(kind), int(index), contract9.incidences(game._state.board.topology),
-                           seat, self.space, self.players)
+        (choice,) = self._choose_many([(game, seat)])
+        return choice
 
     def _decide(self, game: Game, seat: int) -> "D.Option":
         """The graph's decision at the position before its first move."""
         return self._choose(game, seat)
 
-    def _finish(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
+    def _choose_many(self, rows: Sequence[tuple[Game, int]]) -> list["D.Option"]:
+        """The graph's decision at each row, in one forward."""
+        if not rows:
+            return []
+        decisions = [self._decision(game, seat) for game, seat in rows]
+        got = self._run(self._feed(rows, decisions), ["decision"])["decision"]
+        incidences = contract9.incidences(self.topology)
+        return [D.option_of(decision, int(kind), int(index), incidences, seat, self.space, self.players)
+                for decision, (_, seat), (kind, index) in zip(decisions, rows, got)]
+
+    def _finish(self, choose, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
         """A position inside a decision with no plan: the graph's decision
-        over its legal moves alone."""
-        choice = self._choose(game, seat)
+        over its legal moves alone (`choose`, `act_rows`' answer for the row)."""
+        choice = choose(game, seat)
         if choice not in options:
             raise RuntimeError(f"the graph chose {choice}, not among {options}")
         return choice
@@ -315,7 +348,8 @@ def _decision_policy(
     declares is checked: every input one HexSet supplies, at the width it
     supplies it; a per-row input among them; and `decision` and `value`
     among its outputs."""
-    layout = contract9.layout(players, topology.num_hexes, topology.num_vertices, topology.num_edges)
+    contract = session.get_modelmeta().custom_metadata_map.get("contract", "9")
+    layout = contract9.layout(players, topology.num_hexes, topology.num_vertices, topology.num_edges, contract)
     widths = {
         "observation": (layout.width,), "flat": (space.size,), "setup": (len(contract9.incidences(topology)),),
         "road_building": (2,), "road_building_row": (), "discard": (10,), "discard_row": (), "double_rows": (),
@@ -432,7 +466,7 @@ def _load_cached(
         topology.num_vertices, topology.num_edges, topology.num_hexes, players
     )
     search = search_config(meta)
-    if contract == contract9.CONTRACT:
+    if contract in contract9.CONTRACTS:
         policy = _decision_policy(session, space, topology, players, path)
     else:
         policy = V2Policy(session, space)
@@ -541,11 +575,15 @@ def spawn(
     threads: int | None = DEFAULT_THREADS,
     players: int | None = None,
     game_type: str | None = None,
+    workers: int = 0,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
     Single forward or search over its own priors, and a trader to answer its
     trades, are the file's metadata to declare; `device` describes the host
-    and is deliberately never read from it.
+    and is deliberately never read from it, and so does `workers`: a file
+    that asks for paired rollouts plays its worlds out in that many worker
+    processes beside this one (`hexset.rollout.RolloutPool`, each loading
+    the file at one thread), and with 0 here alone. Other files ignore it.
 
     Everything that would fail later fails here, with the file named: a
     `trader` no loaded runtime registers (`netbot.declared_trader`) and,
@@ -564,12 +602,17 @@ def spawn(
             f"{path} plays {', '.join(loaded.modes)} games, not this table's {game_type}"
         )
     trader = declared_trader(loaded, path)
-    own = _spawn_own(path, board, loaded, rng, device, threads)
+    own = _spawn_own(path, board, loaded, rng, device, threads, workers)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
                   veto_picks=trader_veto_pick_of(loaded))
 
 
-def _spawn_own(path, board, loaded, rng, device, threads):
+def _pool_policy(path: str, topology: Topology, device: str):
+    """A rollout worker's own copy of the file's policy (`spawn`'s `workers`)."""
+    return load(path, topology, device, 1).policy
+
+
+def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
     (`hexset.clients.netbot.rollouts_for`), trading through its own gate."""
@@ -587,6 +630,7 @@ def _spawn_own(path, board, loaded, rng, device, threads):
             horizon=rollout.horizon,
             full_setup=rollout.full_setup,
             rng=rng,
+            pool=RolloutPool(partial(_pool_policy, path, board.topology, device), workers) if workers else None,
         )
     return searcher(
         path,

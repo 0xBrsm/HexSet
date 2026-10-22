@@ -19,7 +19,7 @@ from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Evaluation, Search, calibrate_own
-from hexset.rollout import PairedRollouts
+from hexset.rollout import PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
     gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
@@ -758,11 +758,13 @@ def rollouts_for(
     rng: random.Random | None = None,
     trade: TradeParams | None = None,
     full_setup: bool = False,
+    pool: RolloutPool | None = None,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
     gate. `rng` seeds both the rollouts and, derived from it, the gate's
-    sampling stream, so one seed reproduces the entrant."""
+    sampling stream, so one seed reproduces the entrant. `pool` plays the
+    worlds out in worker processes (`hexset.rollout.RolloutPool`)."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedRollouts(
         checkpoint.policy,
@@ -773,6 +775,7 @@ def rollouts_for(
         full_setup=full_setup,
         horizon=horizon,
         rng=rng,
+        pool=pool,
     )
 
 

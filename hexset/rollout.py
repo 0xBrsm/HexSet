@@ -30,10 +30,14 @@ playouts afterwards, without playing again.
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -43,9 +47,12 @@ from .game import Game, Phase, imagine, is_over, to_move
 from .victory import public_victory_points
 from .view import HoldReading
 
-__all__ = ["MARKS", "SETUP_PHASES", "STEP_LIMIT", "Decision", "PairedRollouts", "paired_copy"]
+__all__ = [
+    "MARKS", "SETUP_PHASES", "STEP_LIMIT", "Decision", "Lanes", "PairedRollouts", "RolloutPool", "RolloutBatch",
+    "paired_copy", "play_lanes",
+]
 
-#: The most lockstep decisions a playout makes before it is scored where it
+#: The most decisions a playout makes before it is scored where it
 #: stands, by the value head: a bound on a game the policy never finishes.
 STEP_LIMIT = 3000
 
@@ -184,7 +191,13 @@ class PairedRollouts:
     change no game, so the moves played are the same with or without them.
 
     `hold` is a reading of other seats' held development cards for the world
-    samples (`View.sample`); without one every unseen card is dealt alike."""
+    samples (`View.sample`); without one every unseen card is dealt alike.
+
+    `pool` (a `RolloutPool`) plays the worlds out in worker processes beside
+    this one. The worlds and their seeds are still drawn here, in the same
+    order, so a decision is the one made without the pool wherever the
+    policy's move for a row does not depend on the other rows batched with
+    it. A decision's `cpu_seconds` is then this process's share alone."""
 
     def __init__(
         self,
@@ -198,6 +211,7 @@ class PairedRollouts:
         marks: Sequence[int] = MARKS,
         hold: HoldReading | None = None,
         rng: random.Random | None = None,
+        pool: "RolloutPool | None" = None,
     ) -> None:
         if worlds < 1:
             raise ValueError("paired rollouts need at least one world")
@@ -219,6 +233,7 @@ class PairedRollouts:
         self.marks = marks
         self.hold = hold
         self.rng = rng or random.Random()
+        self.pool = pool
         self.truncated_rollouts = 0
         self.last_truncated_rollouts = 0
         self.decision_log: list[Decision] = []
@@ -266,16 +281,13 @@ class PairedRollouts:
             return decision
         candidates = tuple(order[: self.top])
 
-        copies: list[Game] = []
-        for _ in range(self.worlds):
-            world = self.world(game, seat)
-            seed = self.rng.getrandbits(64)
-            for index in candidates:
-                copy = paired_copy(world, seed, seat)
-                apply(copy, options[index])
-                copies.append(copy)
-        after = self._read_after(copies, seat) if self.marks else None
-        outcomes = self.play_out(copies, seat, game.turns)
+        # Worlds and seeds are drawn here, in order, whoever plays them out:
+        # a pool's decision is the one this process would have made alone.
+        tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
+        lanes = self._lanes(tasks, tuple(options[i] for i in candidates), seat, game.turns)
+        self._keep(lanes)
+        after = lanes.after
+        outcomes = lanes.outcomes
         table = outcomes.reshape(self.worlds, len(candidates))
         scores = table.mean(axis=0)
         best = max(range(len(candidates)), key=lambda j: (scores[j], -j))
@@ -304,110 +316,365 @@ class PairedRollouts:
         decision = self.decide(game)
         return decision.options[decision.chosen]
 
-    def _stops(self, game: Game, seat: int, start: int) -> bool:
-        if is_over(game):
-            return True
-        return (
-            self.horizon is not None
-            and game.turns - start >= self.horizon
-            and to_move(game) == seat
-            and game.phase is Phase.ROLL
-        )
+    def _lanes(self, tasks, moves, seat: int, start: int) -> "Lanes":
+        """Every world of `tasks` played out after each of `moves`: here, or
+        split across the pool's workers, with this process playing a share."""
+        if self.pool is None:
+            return play_lanes(self.policy, tasks, moves, seat, start, self.horizon, self.marks)
+        return self.pool.play(self.policy, tasks, moves, seat, start, self.horizon, self.marks)
 
-    def _read_after(self, games: Sequence[Game], seat: int) -> np.ndarray:
-        """Each copy's value for `seat` right after its candidate, before any
-        playout: 1 or 0 where the candidate ended the game (`decide`'s log
-        only)."""
-        out = np.zeros(len(games))
-        read = []
-        for i, game in enumerate(games):
-            if is_over(game):
-                out[i] = 1.0 if game.won_by == seat else 0.0
-            else:
-                read.append(i)
-        if read:
-            for i, vector in zip(read, self.policy.value_rows([(games[i], seat) for i in read])):
-                out[i] = float(vector[seat])
-        return out
-
-    def _read_marks(
-        self, games: Sequence[Game], live: Sequence[int], seat: int, start: int,
-        reads: np.ndarray, reached: list[int], at: np.ndarray, steps: int,
-    ) -> None:
-        """The value head's read of each live game at the mover's turn start,
-        for every mark it has newly reached (`decide`'s log only)."""
-        marks = self.marks
-        due = [
-            i for i in live
-            if reached[i] < len(marks)
-            and games[i].turns - start >= marks[reached[i]]
-            and to_move(games[i]) == seat
-            and games[i].phase is Phase.ROLL
-        ]
-        if not due:
-            return
-        values = self.policy.value_rows([(games[i], seat) for i in due])
-        for i, vector in zip(due, values):
-            while reached[i] < len(marks) and games[i].turns - start >= marks[reached[i]]:
-                reads[reached[i], i] = float(vector[seat])
-                at[reached[i], i] = steps
-                reached[i] += 1
+    def _keep(self, lanes: "Lanes") -> None:
+        self.last_truncated_rollouts = lanes.truncated
+        self.truncated_rollouts += lanes.truncated
+        self._mark_reads = lanes.reads
+        self._steps = lanes.steps
+        self._row_steps = lanes.row_steps
+        self._mark_row_steps = lanes.mark_row_steps
 
     def play_out(self, games: Sequence[Game], seat: int, start: int) -> np.ndarray:
         """Each game played on by the policy for every seat, in lockstep, one
         batched `act_rows` per step, and scored for `seat` (see the class)."""
-        reads = np.full((len(self.marks), len(games)), np.nan)
-        reached = [0] * len(games)
-        at = np.full((len(self.marks), len(games)), -1)
-        ended = np.zeros(len(games), dtype=np.int64)
-        steps = 0
-        live = [i for i, game in enumerate(games) if not self._stops(game, seat, start)]
-        for _ in range(STEP_LIMIT):
-            if not live:
-                break
-            rows = []
-            for i in live:
-                game = games[i]
-                rows.append((game, to_move(game), tuple(legal_actions(game))))
+        lanes = _play(self.policy, games, seat, start, self.horizon, self.marks, after=False)
+        self._keep(lanes)
+        return lanes.outcomes
+
+
+@dataclass(frozen=True)
+class Lanes:
+    """What playing a decision's copies out gives back, copy by copy in
+    world-major, candidate-minor order: `outcomes`, each copy's score;
+    `after`, the value head's read right after the candidate (`None` with
+    no `marks`); `reads`, the read at each mark, `(len(marks), copies)`; and
+    the counts `Decision` keeps (`steps`, `row_steps`, `mark_row_steps`,
+    `truncated`)."""
+
+    outcomes: np.ndarray
+    after: np.ndarray | None
+    reads: np.ndarray
+    steps: int
+    row_steps: int
+    mark_row_steps: tuple[int, ...]
+    truncated: int
+
+    @staticmethod
+    def joined(parts: Sequence["Lanes"]) -> "Lanes":
+        """`parts`, each a run of whole worlds in order, as one: the copies
+        side by side; `steps`, the longest part's lockstep count."""
+        return Lanes(
+            outcomes=np.concatenate([p.outcomes for p in parts]),
+            after=None if parts[0].after is None else np.concatenate([p.after for p in parts]),
+            reads=np.concatenate([p.reads for p in parts], axis=1),
+            steps=max(p.steps for p in parts),
+            row_steps=sum(p.row_steps for p in parts),
+            mark_row_steps=tuple(int(sum(c)) for c in zip(*(p.mark_row_steps for p in parts))),
+            truncated=sum(p.truncated for p in parts),
+        )
+
+
+def play_lanes(
+    policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action], seat: int, start: int,
+    horizon: int | None, marks: tuple[int, ...],
+) -> Lanes:
+    """Each `(world, seed)` of `tasks` copied once per move of `moves`
+    (`paired_copy`), the move applied, and every copy played out by `policy`
+    (`PairedRollouts.play_out`). A function of its arguments alone, so a
+    worker process plays a share of the worlds as this one would."""
+    return RolloutBatch.from_tasks(policy, tasks, moves, seat, start, marks).advance(horizon)
+
+
+def _stops(game: Game, seat: int, start: int, horizon: int | None) -> bool:
+    if is_over(game):
+        return True
+    return (
+        horizon is not None
+        and game.turns - start >= horizon
+        and to_move(game) == seat
+        and game.phase is Phase.ROLL
+    )
+
+
+def _read_after(policy, games: Sequence[Game], seat: int) -> np.ndarray:
+    """Each copy's score for `seat`: terminal 1/0 or its own-frame value."""
+    out = np.zeros(len(games))
+    read = []
+    for i, game in enumerate(games):
+        if is_over(game):
+            out[i] = 1.0 if game.won_by == seat else 0.0
+        else:
+            read.append(i)
+    if read:
+        for i, vector in zip(read, policy.value_rows([(games[i], seat) for i in read])):
+            out[i] = float(vector[seat])
+    return out
+
+
+class RolloutBatch:
+    """Persistent playout copies, advanced selectively to later turn cutoffs.
+
+    ``games`` are distinct, already constructed copies, with their candidate
+    moves applied. The batch owns their continuation: it retains chance
+    streams, reached mark values and cumulative per-copy decision counts.
+    ``from_tasks`` constructs them using the same paired chance as
+    ``play_lanes``. ``advance(horizon, indices)`` returns a ``Lanes`` snapshot
+    of the selected copies, in that order. Later work never rewrites it.
+
+    Horizons count from ``start`` and can only increase for a copy; ``None``
+    continues to the end or its cumulative ``STEP_LIMIT``. Copies stop at the
+    root seat's turn boundary, as in one-shot play. A paused copy's game and
+    chance source are retained, so extending it does not replay its prefix.
+
+    Identity across different schedules requires a policy whose row actions
+    and values are independent of batch composition and unrelated cache
+    eviction. Keep the policy fixed while retaining copies for a one-shot
+    comparison. The policy remains shared; its per-game state must stay
+    valid while other copies run.
+    """
+
+    def __init__(self, policy, games: Sequence[Game], seat: int, start: int,
+                 marks: Sequence[int] = (), *, after: bool = False) -> None:
+        self.policy, self.games = policy, tuple(games)
+        if len({id(game) for game in games}) != len(games):
+            raise ValueError("each rollout copy must be a distinct game")
+        self.seat, self.start = seat, start
+        self.marks = tuple(int(mark) for mark in marks)
+        if any(mark < 1 for mark in self.marks) or list(self.marks) != sorted(set(self.marks)):
+            raise ValueError("marks must be distinct increasing positive turns")
+        size = len(games)
+        self.counts = np.zeros(size, dtype=np.int64)
+        self.blocked = np.zeros(size, dtype=bool)
+        self.horizons = np.zeros(size, dtype=np.float64)
+        self.reads = np.full((len(self.marks), size), np.nan)
+        self.at = np.full((len(self.marks), size), -1, dtype=np.int64)
+        self.reached = np.zeros(size, dtype=np.int64)
+        self.after = _read_after(policy, self.games, seat) if after else None
+        self.scores = np.full(size, np.nan) if self.after is None else self.after.copy()
+
+    @classmethod
+    def from_tasks(cls, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action],
+                   seat: int, start: int, marks: Sequence[int] = ()) -> "RolloutBatch":
+        """A paired copy per world and move, in world-major order."""
+        batch = cls(policy, (), seat, start, marks, after=bool(marks))
+        batch.add_tasks(tasks, moves)
+        return batch
+
+    def add_tasks(self, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action]) -> tuple[int, ...]:
+        """Append paired copies for new worlds or moves; return their indices."""
+        copies = []
+        for world, seed in tasks:
+            for move in moves:
+                copy = paired_copy(world, seed, self.seat)
+                apply(copy, move)
+                copies.append(copy)
+        return self.add(copies)
+
+    def add(self, games: Sequence[Game]) -> tuple[int, ...]:
+        """Append distinct, already constructed copies with their move applied.
+
+        New copies start with no playout work. Existing copies, cutoffs and
+        mark reads stay in place; the caller can advance the returned indices.
+        """
+        games = tuple(games)
+        identities = [id(game) for game in (*self.games, *games)]
+        if len(set(identities)) != len(identities):
+            raise ValueError("each rollout copy must be a distinct game")
+        begin, size = len(self.games), len(games)
+        initial = _read_after(self.policy, games, self.seat) if self.after is not None else None
+        self.games += games
+        self.counts = np.concatenate([self.counts, np.zeros(size, dtype=np.int64)])
+        self.blocked = np.concatenate([self.blocked, np.zeros(size, dtype=bool)])
+        self.horizons = np.concatenate([self.horizons, np.zeros(size)])
+        self.reads = np.concatenate([self.reads, np.full((len(self.marks), size), np.nan)], axis=1)
+        self.at = np.concatenate([self.at, np.full((len(self.marks), size), -1, dtype=np.int64)], axis=1)
+        self.reached = np.concatenate([self.reached, np.zeros(size, dtype=np.int64)])
+        if self.after is not None:
+            self.after = np.concatenate([self.after, initial])
+        self.scores = np.concatenate([self.scores, np.full(size, np.nan) if initial is None else initial])
+        return tuple(range(begin, begin + size))
+
+    def _values(self, indices: Sequence[int]) -> np.ndarray:
+        unread = [i for i in indices if np.isnan(self.scores[i])]
+        if unread:
+            self.scores[unread] = _read_after(self.policy, [self.games[i] for i in unread], self.seat)
+        return self.scores[list(indices)].copy()
+
+    def _marks(self, indices: Sequence[int], scores: np.ndarray | None = None) -> None:
+        due = [(j, i) for j, i in enumerate(indices)
+               if self.reached[i] < len(self.marks)
+               and not is_over(self.games[i])
+               and self.games[i].turns - self.start >= self.marks[self.reached[i]]
+               and to_move(self.games[i]) == self.seat
+               and self.games[i].phase is Phase.ROLL]
+        if not due:
+            return
+        values = (self._values([i for _, i in due])
+                  if scores is None else [scores[j] for j, _ in due])
+        for (_, i), value in zip(due, values):
+            while self.reached[i] < len(self.marks) and (
+                self.games[i].turns - self.start >= self.marks[self.reached[i]]
+            ):
+                m = self.reached[i]
+                self.reads[m, i], self.at[m, i] = value, self.counts[i]
+                self.reached[i] += 1
+
+    def advance(self, horizon: int | None, indices: Sequence[int] | None = None) -> Lanes:
+        """Continue selected copies; return their cumulative work and values."""
+        if horizon is not None and horizon < 1:
+            raise ValueError("horizon must be a positive turn count or None")
+        selected = list(range(len(self.games))) if indices is None else list(indices)
+        if len(set(selected)) != len(selected) or any(i < 0 or i >= len(self.games) for i in selected):
+            raise ValueError("indices must name distinct rollout copies")
+        requested = float('inf') if horizon is None else horizon
+        if any(requested < self.horizons[i] for i in selected):
+            raise ValueError("a rollout horizon cannot move backwards")
+        self.horizons[selected] = requested
+        live = [i for i in selected if not self.blocked[i] and self.counts[i] < STEP_LIMIT
+                and not _stops(self.games[i], self.seat, self.start, horizon)]
+        while live:
+            rows = [(self.games[i], to_move(self.games[i]), tuple(legal_actions(self.games[i]))) for i in live]
             moving = [(i, row) for i, row in zip(live, rows) if row[2]]
+            self.counts[live] += 1
+            for i, row in zip(live, rows):
+                if not row[2]:
+                    self.blocked[i] = True
             chosen = self.policy.act_rows([row for _, row in moving])
             for (i, _), action in zip(moving, chosen):
-                apply(games[i], action)
-            steps += 1
-            # A seat with no legal move is scored where it stands.
-            before = live
-            live = [i for i, _ in moving if not self._stops(games[i], seat, start)]
-            if len(live) < len(before):
-                kept = set(live)
-                for i in before:
-                    if i not in kept:
-                        ended[i] = steps
+                apply(self.games[i], action)
+                self.scores[i] = np.nan
+            live = [i for i, _ in moving if self.counts[i] < STEP_LIMIT
+                    and not _stops(self.games[i], self.seat, self.start, horizon)]
             if self.marks:
-                self._read_marks(games, live, seat, start, reads, reached, at, steps)
-        scores = np.zeros(len(games))
-        read = []
-        for i, game in enumerate(games):
-            if is_over(game):
-                scores[i] = 1.0 if game.won_by == seat else 0.0
-            else:
-                read.append(i)
-        if read:
-            values = self.policy.value_rows([(games[i], seat) for i in read])
-            for i, vector in zip(read, values):
-                scores[i] = float(vector[seat])
-        self.last_truncated_rollouts = len(read)
-        self.truncated_rollouts += len(read)
-        # A mark a playout never reached -- it ended or stopped first -- keeps
-        # the playout's own score.
-        unread = np.isnan(reads)
-        reads[unread] = np.broadcast_to(scores, reads.shape)[unread]
-        self._mark_reads = reads
-        self._steps = steps
-        # A copy still live at the step limit has moved on every step.
-        ended[[i for i in live]] = steps
-        self._row_steps = int(ended.sum())
-        self._mark_row_steps = tuple(
-            int(np.where(at[m] >= 0, np.minimum(at[m], ended), ended).sum())
-            for m in range(len(self.marks))
+                self._marks(live)
+        scores = self._values(selected)
+        if self.marks:
+            self._marks(selected, scores)
+        reads = self.reads[:, selected].copy()
+        reads[np.isnan(reads)] = np.broadcast_to(scores, reads.shape)[np.isnan(reads)]
+        counts = self.counts[selected]
+        at = self.at[:, selected]
+        return Lanes(outcomes=scores, after=None if self.after is None else self.after[selected].copy(),
+                     reads=reads, steps=int(counts.max(initial=0)), row_steps=int(counts.sum()),
+                     mark_row_steps=tuple(int(np.where(row >= 0, np.minimum(row, counts), counts).sum()) for row in at),
+                     truncated=sum(not is_over(self.games[i]) for i in selected))
+
+
+def _play(
+    policy, games: Sequence[Game], seat: int, start: int, horizon: int | None,
+    marks: tuple[int, ...], *, after: bool,
+) -> Lanes:
+    """`games` played on in lockstep, one batched `act_rows` per step, and
+    scored for `seat` (`PairedRollouts`); with `after`, each read first right
+    after its candidate (`_read_after`)."""
+    return RolloutBatch(policy, games, seat, start, marks, after=after).advance(horizon)
+
+
+def _shares(tasks: Sequence, parts: int) -> list[list]:
+    """`tasks` cut into at most `parts` runs, in order, none empty, their
+    sizes as even as they can be."""
+    parts = max(1, min(parts, len(tasks)))
+    size, extra = divmod(len(tasks), parts)
+    out, at = [], 0
+    for k in range(parts):
+        n = size + (k < extra)
+        out.append(list(tasks[at: at + n]))
+        at += n
+    return out
+
+
+# The policy each worker process loads once (`RolloutPool`).
+_worker_policy = None
+
+
+def _start_worker(load_policy: Callable[[], object]) -> None:
+    global _worker_policy
+    _worker_policy = load_policy()
+
+
+def _ready(seconds: float) -> int:
+    time.sleep(seconds)
+    return os.getpid()
+
+
+def _play_share(tasks, moves, seat, start, horizon, marks) -> Lanes:
+    return play_lanes(_worker_policy, tasks, moves, seat, start, horizon, marks)
+
+
+class RolloutPool:
+    """Worker processes that play a decision's worlds out beside this one.
+
+    A playout is mostly Python (legal moves, encoding, applying moves), so
+    threads would share one core; processes do not. `load_policy` is a
+    picklable callable that each worker runs once for its own copy of the
+    searcher's policy: it must give the same policy, the same file loaded
+    the same way. All `workers` start here and load it before this returns,
+    so a failing load fails now and the first decision pays no start-up.
+
+    `play` cuts a decision's worlds into `workers + 1` runs of whole worlds,
+    plays the first here while the workers play the rest, and joins them in
+    world order: what `play_lanes` gives on all of them at once, wherever
+    the policy's move for a row does not depend on the rows batched with it.
+    A worker reads `STEP_LIMIT` as its module defines it.
+
+    A worker that dies breaks the pool. That decision, and every one after,
+    plays the worlds the workers had here instead, and `broken` says so: a
+    slower decision rather than a lost one. `close` stops the workers."""
+
+    def __init__(self, load_policy: Callable[[], object], workers: int) -> None:
+        if workers < 1:
+            raise ValueError(f"a pool has at least one worker, not {workers!r}")
+        methods = multiprocessing.get_all_start_methods()
+        # Not fork: the searching process may hold threads (a client's socket)
+        # that a forked child would inherit mid-state.
+        method = "forkserver" if "forkserver" in methods else "spawn"
+        self.workers = workers
+        self.broken = False
+        self._executor = ProcessPoolExecutor(
+            workers, mp_context=multiprocessing.get_context(method),
+            initializer=_start_worker, initargs=(load_policy,),
         )
-        return scores
+        # Busy tasks, one a worker: the executor starts a process for each
+        # task no idle worker can take, so all of them start and load now.
+        started = [self._executor.submit(_ready, 0.2) for _ in range(workers)]
+        try:
+            for future in started:
+                future.result()
+        except BrokenProcessPool as error:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+            raise RuntimeError("a rollout worker could not load its policy") from error
+
+    def play(
+        self, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action], seat: int,
+        start: int, horizon: int | None, marks: tuple[int, ...],
+    ) -> Lanes:
+        """`play_lanes(policy, tasks, ...)`, with the workers playing all
+        but the first run of worlds; `policy` is this process's own."""
+        if self.broken:
+            return play_lanes(policy, tasks, moves, seat, start, horizon, marks)
+        runs = _shares(tasks, self.workers + 1)
+        futures = []
+        try:
+            for run in runs[1:]:
+                futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks))
+        except BrokenProcessPool:
+            self.broken = True
+        here = play_lanes(policy, runs[0], moves, seat, start, horizon, marks)
+        parts = [here]
+        if not self.broken:
+            try:
+                parts += [future.result() for future in futures]
+            except BrokenProcessPool:
+                self.broken = True
+        if self.broken:
+            rest = [task for run in runs[1:] for task in run]
+            parts = [here] + ([play_lanes(policy, rest, moves, seat, start, horizon, marks)] if rest else [])
+        return Lanes.joined(parts)
+
+    def close(self) -> None:
+        """Stops the workers; a closed pool plays every decision here."""
+        self.broken = True
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+    def __enter__(self) -> "RolloutPool":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()

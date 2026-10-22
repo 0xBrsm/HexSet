@@ -5,6 +5,60 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.21.0
+
+### Added
+
+- **Rollout copies can be paused and extended.** `RolloutBatch` retains
+  game copies, chance streams, reached marks, cached values and cumulative per-copy step
+  limits. `advance` continues selected copies to a later turn cutoff,
+  returning an independent snapshot without replaying their prefixes.
+  One-shot playouts use the same implementation.
+
+- **Rule-aware decision observations.** Contract `9.1` appends live-seat
+  flags, the victory target, discard limit, robber and dice settings, and
+  next-roll odds to contract `9`'s tokens. Hexes also carry their number
+  token, so equally likely sums remain distinguishable. Seat points use the victory
+  target as their scale. Existing contract `9` files keep their encoding.
+
+- **Per-game formats in batched environments.** `LaneEnv(deal_law=...)`
+  accepts a `hexset.gym.distribution.Deal` per game index. `Distribution`
+  draws weighted presets or independent rule and board settings, retires
+  unused seats before setup, and supports excluded combinations. Draws are
+  stable across lane counts and resumed game indices.
+
+- **Rollouts in worker processes.** `hexset.rollout.RolloutPool(load_policy,
+  workers)` starts `workers` processes, each loading its own copy of the
+  policy, and `PairedRollouts(pool=...)` plays a decision's worlds out across
+  them and this process. The worlds and their seeds are still drawn by the
+  searcher, in order, so the decision is the one made without a pool
+  wherever a row's move does not depend on the rows batched with it. A dead
+  worker breaks the pool and that decision, and every later one, plays out
+  in the searcher alone. `onnxbot.spawn(workers=N)` gives a rollout file a
+  pool of `N` (each worker at one ONNX thread); like `device`, it is the
+  host's choice and never read from the file. The playout itself is now
+  `hexset.rollout.play_lanes`, a function of its arguments, returning
+  `Lanes`. A program that makes a pool must guard its main module
+  (`if __name__ == "__main__":`), as any forkserver or spawn child needs.
+
+### Changed
+
+- Identical complete inputs within a dynamic CPU value batch share
+  inference. Compound candidate ordering, masks and output row mappings are
+  preserved; fixed batch-size contracts retain their declared shapes.
+
+- **Evaluation worker defaults respect CPU affinity and container quotas.**
+  The default uses the CPUs available to the process rather than the host's
+  unrestricted count.
+
+- **A decision graph answers a batch of rows in one forward.**
+  `DecisionPolicy.act_rows` asks the graph once for every row that needs a
+  decision, rather than once per row, then plays the rows in order exactly as
+  row-by-row asking would. A lockstep playout (`hexset.rollout`) makes the
+  same moves at a fraction of the CPU. `hexset.decisions.Plans.planned` says
+  whether `act` would answer a seat from a plan it holds.
+
+
 ## 1.20.0
 
 ### Added

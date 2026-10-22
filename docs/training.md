@@ -326,3 +326,51 @@ Player trading is not in either action space; bank and port trades are.
 the opponents' bots are their own gates and trade with each other where they
 implement it; the learner has no gate and takes no part. A learner that
 trades uses `LaneEnv` with a gate.
+
+## Rule-conditioned decision observations
+
+`hexset.contract9.encode9(game, seat, contract="9.1")` and
+`layout(players, hexes, vertices, edges, contract="9.1")` provide 40-feature
+seat tokens and a 35-feature table token. Contract `9` remains the default
+(39 and 20 features). The appended seat feature is `live`, false for a
+retired slot. The appended table features are `winning_points / 10`,
+`discard_limit / 10`, `friendly_robber`, `balanced_dice`, and the next roll's
+probabilities for sums 2 through 12, including zeros for depleted sums.
+`SEAT_COLUMNS_91` and `TABLE_COLUMNS_91` name the slices. Hex tokens append
+their number token divided by 12 (0 for desert), giving eight features;
+pips alone cannot distinguish two sums with different conditional odds.
+Under `9.1` a
+seat's public points are divided by its game's victory target. Building
+points on vertices retain their unit scale. Board mode is not an input:
+the observation already states the dealt board. ONNX decision files select
+the encoding with their `contract` metadata; both contracts are served.
+
+`LaneEnv(deal_law=law)` asks `law(index)` for a
+`hexset.gym.distribution.Deal(game_type, locked, board_mode)` before setup.
+The engine checks the number of live seats and records the rules and
+retired slots for replay. `Distribution(specification, players, seed)`
+builds such a law from JSON or a mapping:
+
+```python
+from hexset.gym.distribution import Distribution
+
+law = Distribution({
+    "random": {
+        "weight": 1,
+        "players": [[2, 1], [3, 1], [4, 1]],
+        "winning_points": [[10, 1], [15, 1]],
+        "discard_limit": [[7, 1], [9, 1]],
+        "friendly_robber": [[False, 1], [True, 1]],
+        "balanced_dice": [[False, 1], [True, 1]],
+        "board_mode": [["random", 1], ["spiral", 1]],
+    },
+}, players=4, seed=0)
+```
+
+Every random field lists `[value, weight]` pairs; fields are drawn
+independently. `presets` is a list of fixed values for those same six
+fields, each with its own `weight`. Component weights determine their
+shares. `exclude` is a list of partial field mappings to hold out from the
+random component, conditioning that component on the remaining formats.
+Fewer live players retire a uniformly drawn subset of the dealt slots.
+Draws depend only on `(seed, index)` and remain stable across worker counts.

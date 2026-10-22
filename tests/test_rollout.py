@@ -287,3 +287,178 @@ def test_marks_are_checked():
     for marks in ((0,), (4, 2), (2, 2)):
         with pytest.raises(ValueError, match="marks"):
             PairedRollouts(Stub(lambda options: np.ones(len(options)) / len(options)), marks=marks)
+
+
+def favours_the_road(options):
+    return favouring(ActionType.BUILD_ROAD, 0.6)(options)
+
+
+def a_stub():
+    """The pool tests' policy: a worker process loads its own."""
+    return Stub(favours_the_road)
+
+
+def never_loads():
+    raise OSError("no such model")
+
+
+def decided(pool, seed: int = 7):
+    search = PairedRollouts(a_stub(), worlds=7, top=2, horizon=3, marks=(1, 2),
+                            rng=random.Random(seed), pool=pool)
+    d = search.decide(a_road_or_not())
+    return (d.chosen, d.scores, d.outcomes, d.mark_values, d.after_values, d.steps, d.row_steps,
+            d.mark_row_steps, d.truncated, search.truncated_rollouts, search.rng.getstate())
+
+
+def test_a_pool_decides_as_one_process_does():
+    from hexset.rollout import RolloutPool
+
+    alone = decided(None)
+    with RolloutPool(a_stub, workers=2) as pool:
+        assert decided(pool) == alone
+        assert not pool.broken
+
+
+def persistent_batch(policy=None, marks=(2, 4, 8)):
+    from hexset.rollout import RolloutBatch
+
+    game = a_road_or_not(3)
+    moves = (next(o for o in legal_actions(game) if o.type is ActionType.BUILD_ROAD),
+             next(o for o in legal_actions(game) if o.type is ActionType.END_TURN))
+    return RolloutBatch.from_tasks(policy or a_stub(), [(game, 19), (game, 29)],
+                                   moves, 0, game.turns, marks)
+
+
+def assert_same_lanes(a, b):
+    np.testing.assert_array_equal(a.outcomes, b.outcomes)
+    np.testing.assert_array_equal(a.after, b.after)
+    np.testing.assert_array_equal(a.reads, b.reads)
+    assert (a.steps, a.row_steps, a.mark_row_steps, a.truncated) == (
+        b.steps, b.row_steps, b.mark_row_steps, b.truncated)
+
+
+def test_resumed_copies_keep_their_prefix_marks_and_chance():
+    batch = persistent_batch()
+    first = batch.advance(2)
+    frozen = first.reads.copy()
+    prefix_work = first.row_steps
+    early_counts = (batch.policy.acted, batch.policy.valued)
+    batch.advance(4)
+    assert (batch.policy.acted, batch.policy.valued) == early_counts
+    final = batch.advance(8)
+    assert_same_lanes(final, persistent_batch().advance(8))
+    np.testing.assert_array_equal(first.reads, frozen)
+    assert 0 < prefix_work < final.row_steps
+    assert batch.policy.acted == final.row_steps
+    acted, valued = batch.policy.acted, batch.policy.valued
+    assert_same_lanes(batch.advance(8), final)
+    assert batch.policy.acted == acted
+    assert batch.policy.valued == valued
+
+
+def test_selective_extension_keeps_paused_copies_untouched():
+    batch = persistent_batch()
+    batch.advance(2)
+    paused = [(batch.games[i].turns, batch.counts[i]) for i in (0, 2)]
+    part = batch.advance(8, [3, 1])
+    assert paused == [(batch.games[i].turns, batch.counts[i]) for i in (0, 2)]
+    reference = persistent_batch().advance(8, [3, 1])
+    assert_same_lanes(part, reference)
+    assert_same_lanes(batch.advance(8), persistent_batch().advance(8))
+
+
+def test_resume_keeps_a_cumulative_step_limit_and_the_root_value_frame(monkeypatch):
+    import hexset.rollout as rollout
+
+    frames = []
+
+    class Watching(Stub):
+        def value_rows(self, rows):
+            frames.extend(seat for _, seat in rows)
+            return super().value_rows(rows)
+
+    batch = persistent_batch(Watching(favours_the_road))
+    early = batch.advance(2)
+    monkeypatch.setattr(rollout, 'STEP_LIMIT', early.steps + 3)
+    end = batch.advance(None)
+    assert max(batch.counts) == early.steps + 3
+    assert batch.policy.acted == end.row_steps
+    assert frames and set(frames) == {0}
+    assert_same_lanes(batch.advance(None), end)
+
+
+def test_persistent_batch_checks_monotonic_horizons_and_distinct_copies():
+    from hexset.rollout import RolloutBatch
+
+    batch = persistent_batch()
+    batch.advance(4, [0])
+    with pytest.raises(ValueError, match='backwards'):
+        batch.advance(2, [0])
+    batch.advance(2, [1])
+    for indices in ([0, 0], [-1], [4]):
+        with pytest.raises(ValueError, match='indices'):
+            batch.advance(8, indices)
+    with pytest.raises(ValueError, match='positive'):
+        batch.advance(0)
+    with pytest.raises(ValueError, match='distinct game'):
+        RolloutBatch(a_stub(), [batch.games[0]] * 2, 0, 0)
+    empty = batch.advance(8, [])
+    assert empty.row_steps == empty.steps == empty.truncated == 0
+
+
+def test_new_worlds_can_be_added_without_replaying_existing_copies():
+    batch = persistent_batch()
+    batch.advance(2)
+    prefix_counts = batch.counts.copy()
+    game = a_road_or_not(3)
+    moves = (next(o for o in legal_actions(game) if o.type is ActionType.BUILD_ROAD),
+             next(o for o in legal_actions(game) if o.type is ActionType.END_TURN))
+    added = batch.add_tasks([(game, 39)], moves)
+    assert added == (4, 5)
+    np.testing.assert_array_equal(batch.counts[:4], prefix_counts)
+    assert not batch.counts[4:].any()
+    full = batch.advance(8)
+    from hexset.rollout import RolloutBatch
+    direct = RolloutBatch.from_tasks(a_stub(), [(game, 19), (game, 29), (game, 39)],
+                                     moves, 0, game.turns, (2, 4, 8)).advance(8)
+    assert_same_lanes(full, direct)
+    with pytest.raises(ValueError, match='distinct game'):
+        batch.add([batch.games[0]])
+
+
+def test_finished_copies_remain_exact_scores_without_policy_work():
+    from hexset.rollout import RolloutBatch
+
+    game = a_road_or_not()
+    game.won_by = 0
+    game.phase = Phase.GAME_OVER
+    stub = a_stub()
+    batch = RolloutBatch(stub, [game], 0, game.turns, (2, 4), after=True)
+    first = batch.advance(2)
+    assert_same_lanes(first, batch.advance(None))
+    np.testing.assert_array_equal(first.outcomes, [1.])
+    np.testing.assert_array_equal(first.reads, [[1.], [1.]])
+    assert stub.acted == stub.valued == first.row_steps == first.truncated == 0
+
+
+def test_a_dead_worker_costs_speed_not_the_decision():
+    import os
+    from concurrent.futures.process import BrokenProcessPool
+    from hexset.rollout import RolloutPool
+
+    alone = decided(None)
+    with RolloutPool(a_stub, workers=2) as pool:
+        with pytest.raises(BrokenProcessPool):
+            pool._executor.submit(os._exit, 1).result()
+        assert decided(pool) == alone
+        assert pool.broken
+        assert decided(pool) == alone
+
+
+def test_a_pool_that_cannot_load_its_policy_fails_at_once():
+    from hexset.rollout import RolloutPool
+
+    with pytest.raises(RuntimeError, match="could not load"):
+        RolloutPool(never_loads, workers=1)
+    with pytest.raises(ValueError, match="at least one worker"):
+        RolloutPool(a_stub, workers=0)

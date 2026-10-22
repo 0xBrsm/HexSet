@@ -13,6 +13,7 @@ import os
 import platform
 import sys
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from hexset.arena import PRESETS, compete
 from hexset.game import UNSTRUCTURED_TURN_CAP
@@ -60,8 +61,18 @@ def run(games: int, players: int, seed: int, workers: int) -> Result:
 
 
 def default_workers() -> int:
-    """Every core by default; runners print the count they used."""
-    return os.cpu_count() or 1
+    """Available CPUs, respecting affinity and a container's CPU quota."""
+    try:
+        available = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        available = os.cpu_count() or 1
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            available = min(available, max(1, int(quota) // int(period)))
+    except (OSError, ValueError, ZeroDivisionError):
+        pass
+    return max(1, available)
 
 
 def environment() -> dict[str, str]:

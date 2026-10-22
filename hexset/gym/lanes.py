@@ -41,7 +41,7 @@ from ..arena import MAX_ACTIONS, deal_game, game_key
 from ..board.board import BOARD_MODES, Board
 from ..game import MAX_TURNS, Game, Phase, is_over, players_owing_discards, to_move
 from ..record import Record, Tape, recording
-from ..rules import STANDARD
+from .distribution import Deal
 from ..victory import victory_points
 
 if TYPE_CHECKING:  # annotation-only
@@ -245,6 +245,7 @@ class LaneEnv:
         turn_cap: int = MAX_TURNS,
         board: Board | Callable[[int], Board | None] | None = None,
         board_mode: str = "random",
+        deal_law: Callable[[int], Deal] | None = None,
         caster: Callable[[int], Sequence[int]] | None = None,
         bots: Mapping[int, Callable[[Board], Bot]] | None = None,
         gates: Mapping[int, Callable[[Game, int], object]] | None = None,
@@ -289,6 +290,7 @@ class LaneEnv:
         self.turn_cap = turn_cap
         self.board = board
         self.board_mode = board_mode
+        self.deal_law = deal_law
         self.caster = caster
         self.gates = dict(gates or {})
         self.bots = {
@@ -341,15 +343,17 @@ class LaneEnv:
         index = self._next
         self._next += self.stride
         cast = self._cast(index)
+        drawn = self.deal_law(index) if self.deal_law is not None else Deal(board_mode=self.board_mode)
         board = self.board(index) if callable(self.board) else self.board
         game = deal_game(
             self.seed,
             index,
             self.players,
             board=board,
-            board_mode=self.board_mode,
-            # Lanes deal the standard game (`deal_game`'s default type).
-            chance=(lambda rng: recording(rng, STANDARD)) if self.records else None,
+            board_mode=drawn.board_mode,
+            game_type=drawn.game_type,
+            locked=drawn.locked,
+            chance=(lambda rng: recording(rng, drawn.game_type.rules)) if self.records else None,
             turn_cap=self.turn_cap,
         )
         game.gates = self._seat_gates(game, cast)

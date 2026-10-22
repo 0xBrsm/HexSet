@@ -285,3 +285,36 @@ def test_spawn_refuses_a_checkpoint_at_a_game_type_it_does_not_declare(checkpoin
     with pytest.raises(ValueError, match="plays duel-variant games"):
         spawn(str(duel), board, rng=random.Random(0), game_type="standard")
     assert spawn(str(duel), board, rng=random.Random(0)) is not None, "no game type asked, none checked"
+
+
+def test_a_rollout_file_with_workers_plays_as_it_does_alone(tmp_path):
+    """`spawn(workers=)` is the host's: the same file and seed make the same
+    moves with its worlds played out in worker processes."""
+    from hexset.actions import apply
+    from hexset.clients.onnxbot import spawn
+    from hexset.clients.onnxmeta import with_metadata
+
+    stub9 = Path(__file__).parent / "fixtures" / "stub-contract9.onnx"
+    path = tmp_path / "rollouts.onnx"
+    path.write_bytes(with_metadata(stub9.read_bytes(),
+                                   {"search": "rollout", "worlds": "3", "top": "2", "horizon": "2"}))
+    board = random_base_board(random.Random(0))
+
+    def moves(workers):
+        bot = spawn(str(path), board, rng=random.Random(11), workers=workers)
+        game = start(board, 4, random.Random(3))
+        out = []
+        while len(out) < 12 and game.won_by is None:
+            action = bot.choose(game)
+            if to_move(game) == 0:
+                out.append(action)
+            apply(game, action)
+        return out, bot
+
+    alone, _ = moves(0)
+    pooled, bot = moves(2)
+    assert pooled == alone
+    # No trader declared: `spawn` hands back the rollouts themselves.
+    assert bot.pool is not None and not bot.pool.broken
+    bot.pool.close()
+

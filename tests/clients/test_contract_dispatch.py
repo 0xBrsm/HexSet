@@ -89,7 +89,7 @@ def test_the_served_contracts_are_the_record_ones_and_contract_9():
     from hexset.server.constants import RECORD_CONTRACTS
 
     assert CONTRACT_VERSION == "8.1" and CONTRACT == "9"
-    assert RECORD_CONTRACTS == {"6", "7", "8", "8.1", "9"}
+    assert RECORD_CONTRACTS == {"6", "7", "8", "8.1", "9", "9.1"}
     assert _metadata(STUB9)["contract"] == "9"
     assert _metadata(STUB8)["contract"] == "8"
     assert _metadata(STUB7)["contract"] == "7"
@@ -338,3 +338,37 @@ def test_a_stamped_contract_9_file_still_loads_and_names_itself(tmp_path):
     meta = read_metadata(target.read_bytes())
     assert meta["contract"] == "9" and meta["name"] == "c9stub" and meta["version"] == "1.0"
     assert isinstance(load(str(target), _board().topology).policy, DecisionPolicy)
+
+
+@pytest.mark.parametrize("limit", [256, 1])
+def test_a_batch_of_rows_plays_the_moves_one_row_at_a_time_plays(limit):
+    """`act_rows` asks the graph once for every row that needs it, and plays
+    the same moves as asking row by row, plans and their limit included."""
+    from hexset.game import to_move
+
+    board = _board()
+    loaded = load(str(STUB9), board.topology).policy
+    policies = [DecisionPolicy(loaded.session, loaded.space, loaded.topology, loaded.players) for _ in range(2)]
+    for policy in policies:
+        policy._plans.LIMIT = limit
+    tables = [[start(board, 4, random.Random(seed)) for seed in range(8)] for _ in policies]
+    runs = []
+    original = policies[0]._run
+
+    def counted(feed, outputs):
+        runs.append(len(feed["observation"]))
+        return original(feed, outputs)
+
+    policies[0]._run = counted
+    for _ in range(400):
+        live = [i for i, game in enumerate(tables[0]) if game.won_by is None]
+        if not live:
+            break
+        rows = [[(t[i], to_move(t[i]), tuple(options_for(t[i]))) for i in live] for t in tables]
+        batched = policies[0].act_rows(rows[0])
+        alone = [policies[1].act_rows([row])[0] for row in rows[1]]
+        assert batched == alone
+        for t, moves in zip(tables, (batched, alone)):
+            for i, action in zip(live, moves):
+                apply(t[i], action)
+    assert max(runs) > 1

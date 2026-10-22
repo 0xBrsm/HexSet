@@ -8,6 +8,24 @@ from hexset.arena import ClearedTrade, Entrant
 from hexset.bench import trade_census
 
 
+@pytest.mark.parametrize("quota,expected", [("max 100000", 6), ("200000 100000", 2), ("50000 100000", 1)])
+def test_default_workers_respects_process_affinity_and_cpu_quota(monkeypatch, quota, expected):
+    from hexset.bench import throughput
+    monkeypatch.setattr(throughput.os, "sched_getaffinity", lambda pid: set(range(6)), raising=False)
+    monkeypatch.setattr(throughput.Path, "read_text", lambda path: quota)
+    assert throughput.default_workers() == expected
+
+
+def test_default_workers_falls_back_when_affinity_and_quota_are_unavailable(monkeypatch):
+    from hexset.bench import throughput
+    def unavailable(*args):
+        raise OSError("unavailable")
+    monkeypatch.setattr(throughput.os, "sched_getaffinity", unavailable, raising=False)
+    monkeypatch.setattr(throughput.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(throughput.Path, "read_text", unavailable)
+    assert throughput.default_workers() == 4
+
+
 def test_census_maps_rotated_seats_and_preserves_resource_direction(monkeypatch):
     trade = ClearedTrade(
         step=12, turn=3, phase="MAIN", a=0, b=1,

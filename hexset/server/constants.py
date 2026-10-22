@@ -73,7 +73,9 @@ def profile_value(field: str, value: object) -> str | None:
 #
 # Contract 9: the contract-9 observation and decision candidates in, decision
 # out (`hexset.clients.onnxbot.DecisionPolicy`).
+# Contract 9.1 keeps the decision interface and appends public rules, next
+# roll odds and live-seat flags to the observation tokens.
 #
 # Every other value, and a file with no `contract` key at all, is refused by
 # name at load.
-RECORD_CONTRACTS = frozenset({"6", "7", "8", "8.1", "9"})
+RECORD_CONTRACTS = frozenset({"6", "7", "8", "8.1", "9", "9.1"})

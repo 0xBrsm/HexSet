@@ -41,7 +41,7 @@ from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import dev_count
 from .encoding import PLAYABLE_KINDS, knights_needed_all, to_frame
-from .game import Game, Phase
+from .game import Game, Phase, roll_odds
 from .roads import reach_all, roads_to_take_all
 from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, NO_OWNER, Building, GameState, pile_size
 from .victory import LARGEST_ARMY_VP, LONGEST_ROAD_VP
@@ -49,6 +49,10 @@ from .view import View
 
 __all__ = [
     "CONTRACT",
+    "CONTRACTS",
+    "features",
+    "SEAT_COLUMNS_91",
+    "TABLE_COLUMNS_91",
     "SEAT_FEATURES",
     "TABLE_FEATURES",
     "HEX_FEATURES",
@@ -64,6 +68,7 @@ __all__ = [
 ]
 
 CONTRACT = "9"
+CONTRACTS = ("9", "9.1")
 
 # One unit, one scale (module docstring).
 CARD_SCALE = 10.0
@@ -123,6 +128,19 @@ SEAT_COLUMNS = _columns(_SEAT_BLOCKS)
 TABLE_COLUMNS = _columns(_TABLE_BLOCKS)
 SEAT_FEATURES = sum(width for _, width in _SEAT_BLOCKS)
 TABLE_FEATURES = sum(width for _, width in _TABLE_BLOCKS)
+# 9.1 appends public rule settings and the next roll's conditional odds.
+SEAT_COLUMNS_91 = _columns((*_SEAT_BLOCKS, ("live", 1)))
+TABLE_COLUMNS_91 = _columns((*_TABLE_BLOCKS, ("winning_points", 1), ("discard_limit", 1),
+                             ("friendly_robber", 1), ("balanced_dice", 1), ("roll_odds", 11)))
+
+
+def features(contract: str = CONTRACT) -> tuple[int, int]:
+    """Seat and table widths for an observation contract; old columns stay put."""
+    if contract not in CONTRACTS:
+        raise ValueError(f"unknown observation contract {contract!r}: {CONTRACTS}")
+    return (SEAT_FEATURES, TABLE_FEATURES) if contract == "9" else (SEAT_FEATURES + 1, TABLE_FEATURES + 15)
+
+
 # A hex: the five producing terrains one-hot (the desert none), its pips, the robber.
 HEX_FEATURES = NUM_RESOURCES + 2
 # A vertex: its port one-hot (generic, then one per resource), its building's
@@ -157,15 +175,17 @@ class Layout9:
     slices: dict[str, slice]
     shapes: dict[str, tuple[int, ...]]
     width: int
+    contract: str = CONTRACT
 
 
 @lru_cache(maxsize=8)
-def layout(players: int, num_hexes: int, num_vertices: int, num_edges: int) -> Layout9:
+def layout(players: int, num_hexes: int, num_vertices: int, num_edges: int, contract: str = CONTRACT) -> Layout9:
     """The flat layout for a board of this size seating `players`."""
+    seat_width, table_width = features(contract)
     shapes = {
-        "seats": (players, SEAT_FEATURES),
-        "table": (TABLE_FEATURES,),
-        "hexes": (num_hexes, HEX_FEATURES),
+        "seats": (players, seat_width),
+        "table": (table_width,),
+        "hexes": (num_hexes, HEX_FEATURES + int(contract == "9.1")),
         "vertices": (num_vertices, VERTEX_FEATURES),
         "vertex_owner": (num_vertices,),
         "road_owner": (num_edges,),
@@ -176,7 +196,7 @@ def layout(players: int, num_hexes: int, num_vertices: int, num_edges: int) -> L
         size = int(np.prod(shape))
         slices[name] = slice(at, at + size)
         at += size
-    return Layout9(players, num_hexes, num_vertices, num_edges, slices, shapes, at)
+    return Layout9(players, num_hexes, num_vertices, num_edges, slices, shapes, at, contract)
 
 
 def flatten(observation: Observation9) -> np.ndarray:
@@ -294,8 +314,9 @@ def _reach_closeness(reach: tuple[tuple[int, ...], ...]) -> np.ndarray:
     return out
 
 
-def encode9(game: Game, perspective: int) -> Observation9:
+def encode9(game: Game, perspective: int, contract: str = CONTRACT) -> Observation9:
     """`game` as `perspective` may know it, in contract 9."""
+    seat_width, table_width = features(contract)
     state = game._state
     players = state.num_players
     if not 0 <= perspective < players:
@@ -348,17 +369,18 @@ def encode9(game: Game, perspective: int) -> Observation9:
         quota = quotas[s] if quotas else 0
         direct[i] = (
             *place, float(s == mover), float(s == perspective), view.sizes[s] / CARD_SCALE, cards / CARD_SCALE,
-            *_ages(state, s), points / POINT_SCALE, _closeness(roads[s]), _closeness(knights[s]),
+            *_ages(state, s), points / (state.rules.winning_points if contract == "9.1" else POINT_SCALE),
+            _closeness(roads[s]), _closeness(knights[s]),
             quota / CARD_SCALE,
             (MAX_SETTLEMENTS - settlements[s]) / PIECE_SCALE,
             (MAX_CITIES - cities[s]) / PIECE_SCALE,
             (MAX_ROADS - state.edge_owner.count(s)) / PIECE_SCALE,
         )
-    seats = np.zeros((players, SEAT_FEATURES), dtype=np.float32)
+    seats = np.zeros((players, seat_width), dtype=np.float32)
     seats[:, _COUNT_COLUMNS] = counts / CARD_SCALE
     seats[:, _DIRECT_COLUMNS] = direct
 
-    table = np.zeros(TABLE_FEATURES, dtype=np.float32)
+    table = np.zeros(table_width, dtype=np.float32)
     t = TABLE_COLUMNS
     table[t["bank"]] = np.asarray(state.bank, dtype=np.float32) / CARD_SCALE
     table[t["pool"]] = np.asarray(view.pool, dtype=np.float32) / CARD_SCALE
@@ -368,9 +390,21 @@ def encode9(game: Game, perspective: int) -> Observation9:
     table[t["setup"]] = float(game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD))
     table[t["rolled"]] = float(rolled(game))
     table[t["robber"]] = float(game.phase in (Phase.DISCARD, Phase.ROBBER))
+    if contract == "9.1":
+        seats[:, SEAT_COLUMNS_91["live"]] = [[float(s not in game.locked)] for s in rows]
+        t91 = TABLE_COLUMNS_91
+        table[t91["winning_points"]] = state.rules.winning_points / POINT_SCALE
+        table[t91["discard_limit"]] = state.rules.discard_limit / CARD_SCALE
+        table[t91["friendly_robber"]] = float(state.rules.friendly_robber)
+        table[t91["balanced_dice"]] = float(state.rules.balanced_dice)
+        odds = dict(roll_odds(game))
+        table[t91["roll_odds"]] = [odds.get(total, 0.0) for total in range(2, 13)]
 
     template = _template(board)
     hexes = template.hexes.copy()
+    if contract == "9.1":
+        # Pips alone identify neither the roll sum nor its conditional odds.
+        hexes = np.column_stack((hexes, np.asarray(board.tokens, dtype=np.float32) / 12.0))
     if state.robber >= 0:  # `OFF_BOARD` marks no hex
         hexes[state.robber, NUM_RESOURCES + 1] = 1.0
     vertices = template.vertices.copy()

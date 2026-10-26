@@ -405,3 +405,26 @@ def test_the_second_game_of_a_pair_trades_the_two_sides_seats(geometry, compleme
         assert {two[e] for e in a} == {one[e] for e in b}
         assert {two[e] for e in b} == {one[e] for e in a}
         assert [two[e] for e in others] == [one[e] for e in others]
+
+
+def test_seat_bots_seats_a_trader_with_no_moves_of_its_own():
+    """A `TradesBy` seat's trader is seated at the game with the table, before
+    any move of its seat's mover."""
+    import random as _random
+
+    from hexset.arena import seat_bots
+    from hexset.board.board import random_base_board
+    from hexset.bots import RandomBot, TradesBy
+    from hexset.game import start
+
+    class Trader:
+        seated = None
+
+        def seat_at(self, game):
+            self.seated = game
+
+    rng = _random.Random(0)
+    game = start(random_base_board(rng), 4, rng)
+    traders = [Trader() for _ in range(4)]
+    seat_bots(game, [TradesBy(RandomBot(_random.Random(s)), t) for s, t in enumerate(traders)])
+    assert all(t.seated is game for t in traders)

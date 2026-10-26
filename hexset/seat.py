@@ -232,7 +232,8 @@ class Seat:
         rebuilt game is still in the same turn."""
         if not isinstance(game.chance, Hosted):
             raise ValueError("a hosted seat's game takes its outcomes from the host")
-        game.before_roll = self.game.before_roll     # the host's rule, for the whole game
+        game.before_roll = self.game.before_roll     # the host's rules, for the whole game
+        game.open_offers = self.game.open_offers
         self.game = game
         self._seat_bots()
         self._sync()
@@ -309,6 +310,14 @@ class Seat:
         takes there, or `None` for the rulebook's (any). It holds for the
         rest of the game (`Game.before_roll`)."""
         self.game.before_roll = None if cards is None else frozenset(cards)
+
+    def allow_open_offers(self, allowed: bool) -> None:
+        """The host's rule for offers: whether one may leave cards for the
+        answerer to name (`Offer.any`). A host whose offers name every card
+        takes none, so this seat's open ask goes up as the one-for-one it
+        stands for (`trading.offer`). It holds for the rest of the game
+        (`Game.open_offers`)."""
+        self.game.open_offers = bool(allowed)
 
     def set_embargoes(self, pairs: Iterable[tuple[int, int]]) -> None:
         """The table's trade embargoes as the host states them now: `(seat,

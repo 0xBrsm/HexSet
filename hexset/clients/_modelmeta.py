@@ -56,7 +56,10 @@ class SearchConfig:
     simulations: int = 0
     wave: int = DEFAULT_WAVE
     #: `(a, b)` for `hexset.mcts.calibrate_own`, or `None`: metadata
-    #: `own_calibration = "a,b"`, read only for an MCTS file.
+    #: `own_calibration = "a,b"`, read for every file. An MCTS file reads its
+    #: own seat through it at every evaluated position and in its trade gate;
+    #: any other file, in its trade gate alone (trades and robber deals), so
+    #: a rollout's playouts and a one-forward policy choose moves as before.
     own_calibration: tuple[float, float] | None = None
     #: The prior at which a root is played without searching
     #: (`hexset.mcts.Search`, `hexset.rollout.PairedRollouts`), or `None`:
@@ -125,6 +128,27 @@ def trader_of(checkpoint: object) -> str | None:
     return getattr(checkpoint, "trader", None)
 
 
+def closer_config(meta: dict[str, str]) -> str | None:
+    """The bot `meta` names to close the checkpoint's games, as a lineup
+    names it (`hexset.arena.closed`, `hexset.bots.Closes`): a move it names
+    is played in place of the checkpoint's own. `None` for none. Resolved
+    when the checkpoint is spawned (`hexset.clients.netbot.declared_closer`)."""
+    return meta.get("closer") or None
+
+
+def closer_of(checkpoint: object) -> str | None:
+    """The closer `checkpoint` declares, read by name like `trader_of`."""
+    return getattr(checkpoint, "closer", None)
+
+
+def finish_decisions_config(meta: dict[str, str]) -> bool:
+    """Whether `meta` asks for its values to be read where its decisions are
+    finished (`finish_decisions`, `hexset.clients.finishing.Finishing`): for
+    a checkpoint whose win head was taught only at positions where a
+    decision starts. Off unless the key reads as true."""
+    return str(meta.get("finish_decisions", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
 def trader_veto_config(meta: dict[str, str]) -> bool:
     """Whether `meta` asks for its own gate to veto its trader
     (`trader_veto`, `hexset.arena.traded`): each exchange the trader would
@@ -171,17 +195,18 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
     """The search `meta` asks for, read only when the file actually asks to be
     searched, so a stale `simulations` cannot turn a policy into a search.
 
-    `search = mcts` reads `simulations`, `wave`, `own_calibration` and
-    `decisive`; `search = rollout` reads `worlds`, `top`, `decisive`,
-    `horizon` and `setup`. Budgets (`simulations`, `wave`, `worlds`, `top`)
-    are bounded and an unreadable one takes its default; a setting that
-    changes what the search is (`decisive`, `horizon`, `setup`,
-    `own_calibration`) fails the load when it does not read. Any other `search` is no search."""
+    `search = mcts` reads `simulations`, `wave` and `decisive`; `search =
+    rollout` reads `worlds`, `top`, `decisive`, `horizon` and `setup`. Every
+    file reads `own_calibration` (`SearchConfig.own_calibration` says where
+    it applies). Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
+    and an unreadable one takes its default; a setting that changes what the
+    seat does (`decisive`, `horizon`, `setup`, `own_calibration`) fails the
+    load when it does not read. Any other `search` is no search."""
     method = meta.get("search", "none")
+    calibration = _calibration(meta.get("own_calibration"))
     if method == "rollout":
-        if meta.get("own_calibration", "").strip():
-            raise ValueError("own_calibration recalibrates an MCTS search; a rollout file cannot ask for it")
         return SearchConfig(
+            own_calibration=calibration,
             decisive=_decisive(meta.get("decisive")),
             rollout=RolloutConfig(
                 worlds=_clamp(meta.get("worlds"), DEFAULT_WORLDS, MAX_WORLDS) or DEFAULT_WORLDS,
@@ -192,12 +217,12 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
             ),
         )
     if method != "mcts":
-        return SearchConfig()
+        return SearchConfig(own_calibration=calibration)
     return SearchConfig(
         simulations=_clamp(meta.get("simulations"), DEFAULT_SIMULATIONS, MAX_SIMULATIONS)
         or DEFAULT_SIMULATIONS,
         wave=_clamp(meta.get("wave"), DEFAULT_WAVE, MAX_WAVE) or DEFAULT_WAVE,
-        own_calibration=_calibration(meta.get("own_calibration")),
+        own_calibration=calibration,
         decisive=_decisive(meta.get("decisive")),
     )
 
@@ -241,8 +266,8 @@ def _decisive(value: str | None) -> float | None:
 
 def _calibration(value: str | None) -> tuple[float, float] | None:
     """`"a,b"` as `(a, b)`; absent is `None`. A value that does not read as
-    two finite numbers with `b > 0` fails the load rather than searching on
-    a guess: the order of positions has to survive the recalibration."""
+    two finite numbers with `b > 0` fails the load rather than playing on a
+    guess: the order of positions has to survive the recalibration."""
     if value is None or not value.strip():
         return None
     try:

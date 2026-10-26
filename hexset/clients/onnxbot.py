@@ -27,20 +27,21 @@ import onnxruntime as ort
 from hexset import contract9, decisions as D
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
-from hexset.clients.netbot import NetworkBot, bot_for, declared_trader, rollouts_for, searcher_for
+from hexset.clients.netbot import NetworkBot, bot_for, declared_closer, declared_trader, rollouts_for, searcher_for
 from hexset.encoding import from_frame
 from hexset.game import Game, Phase, pending_free_roads
 from hexset.lockstep import forward
 from hexset.mcts import Search
 from hexset.rollout import RolloutPool
 from hexset.clients.onnxmeta import modes_of
-from hexset.clients.batching import coalesce
+from hexset.clients.batching import coalesce, coalesce_rows
+from hexset.clients.finishing import Finishing
 from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
-    SearchConfig, gate_config, robber_tip_config, search_config, trader_config, trader_veto_config,
-    trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
+    SearchConfig, closer_config, finish_decisions_config, gate_config, robber_tip_config, search_config, trader_config,
+    trader_veto_config, trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
 
@@ -73,6 +74,14 @@ class V2Policy:
     def __init__(self, session: ort.InferenceSession, space: ActionSpace) -> None:
         self.session = session
         self.space = space
+        # Byte-identical rows of one forward run once (`coalesce_rows`) on a
+        # CPU session whose every input has a dynamic batch axis.
+        providers = getattr(session, "get_providers", None)
+        self._coalesce = (
+            providers is not None and providers() == ["CPUExecutionProvider"]
+            and all(not isinstance((getattr(item, "shape", None) or [None])[0], int)
+                    for item in session.get_inputs())
+        )
 
     def _run(
         self,
@@ -106,9 +115,11 @@ class V2Policy:
                 "it was exported against a newer contract than this server builds"
             )
         inputs = {key: batch[key] for key in wanted}
+        grouped = coalesce_rows(inputs) if self._coalesce else None
         # `session.run`, or inside a `hexset.lockstep` lane, these rows of a
         # run shared with the other lanes' waiting forwards.
-        return forward(self.session, outputs, inputs)
+        result = forward(self.session, outputs, inputs if grouped is None else grouped.feed)
+        return result if grouped is None else [value[grouped.inverse] for value in result]
 
     def _batchable(self, count: int) -> bool:
         """Whether the graph's declared input shapes allow a batch of `count`
@@ -377,7 +388,7 @@ class Loaded:
     """A `hexset.clients.policy.Checkpoint`, plus the search the file asks to
     be played with and its training iteration."""
 
-    policy: V2Policy | DecisionPolicy
+    policy: V2Policy | DecisionPolicy | Finishing
     space: ActionSpace
     players: int
     iteration: int
@@ -389,6 +400,9 @@ class Loaded:
     #: The bot the file names to answer its trades (`hexset.arena.traded`),
     #: `None` for its own gate.
     trader: str | None = None
+    #: The bot the file names to close its games (`hexset.arena.closed`),
+    #: `None` for none.
+    closer: str | None = None
     #: Whether the file's own gate vetoes that trader (`trader_veto`).
     trader_veto: bool = False
     #: Whether that veto picks which taker to deal with (`trader_veto_pick`).
@@ -470,6 +484,8 @@ def _load_cached(
         policy = _decision_policy(session, space, topology, players, path)
     else:
         policy = V2Policy(session, space)
+    if finish_decisions_config(meta):
+        policy = Finishing(policy)
     if search.searches and not getattr(policy, "has_prior", True):
         raise ValueError(
             f"{path} asks to be searched (`search` {meta.get('search')}) but declares no `prior`"
@@ -489,6 +505,7 @@ def _load_cached(
             else {**meta, "max_offers": legacy_offers}
         ),
         trader=trader_config(meta),
+        closer=closer_config(meta),
         trader_veto=trader_veto_config(meta),
         trader_veto_pick=trader_veto_pick_config(meta),
         robber_tip=robber_tip_config(meta),
@@ -561,9 +578,11 @@ def network_bot(
     device: str = "cpu",
     threads: int | None = DEFAULT_THREADS,
     rng: random.Random | None = None,
+    own_calibration: tuple[float, float] | None = None,
 ) -> NetworkBot:
-    """The checkpoint at `path`, with `rng` controlling trade belief worlds."""
-    return bot_for(load(path, board.topology, device, threads), rng=rng)
+    """The checkpoint at `path`, with `rng` controlling trade belief worlds
+    and `own_calibration` the seat's own chance in its gate (`bot_for`)."""
+    return bot_for(load(path, board.topology, device, threads), rng=rng, own_calibration=own_calibration)
 
 
 def spawn(
@@ -585,12 +604,17 @@ def spawn(
     processes beside this one (`hexset.rollout.RolloutPool`, each loading
     the file at one thread), and with 0 here alone. Other files ignore it.
 
+    A `closer` the file names plays its move wherever it has one, in place
+    of the file's own (`hexset.arena.closed`); the trader trades for the
+    seat either way.
+
     Everything that would fail later fails here, with the file named: a
-    `trader` no loaded runtime registers (`netbot.declared_trader`) and,
+    `trader` or `closer` no loaded runtime registers
+    (`netbot.declared_trader`, `netbot.declared_closer`) and,
     where the caller passes the table's `players`, a checkpoint trained for
     another player count, and where it passes the table's `game_type` (a
     `hexset.rules.GAME_TYPES` name), one whose `modes` do not include it."""
-    from hexset.arena import traded
+    from hexset.arena import closed, traded
 
     loaded = load(path, board.topology, device, threads)
     if players is not None and players != loaded.players:
@@ -602,7 +626,9 @@ def spawn(
             f"{path} plays {', '.join(loaded.modes)} games, not this table's {game_type}"
         )
     trader = declared_trader(loaded, path)
+    closer = declared_closer(loaded, path)
     own = _spawn_own(path, board, loaded, rng, device, threads, workers)
+    own = closed(own, closer, board, random.Random() if rng is None else rng)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
                   veto_picks=trader_veto_pick_of(loaded))
 
@@ -615,10 +641,13 @@ def _pool_policy(path: str, topology: Topology, device: str):
 def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
-    (`hexset.clients.netbot.rollouts_for`), trading through its own gate."""
+    (`hexset.clients.netbot.rollouts_for`), trading through its own gate.
+    The file's `own_calibration` reaches every kind's gate, and an MCTS
+    file's leaves as well (`SearchConfig.own_calibration`)."""
     if not loaded.search.searches:
         return network_bot(
-            path, board, device=device, threads=threads, rng=rng
+            path, board, device=device, threads=threads, rng=rng,
+            own_calibration=loaded.search.own_calibration,
         )
     rollout = loaded.search.rollout
     if rollout is not None:
@@ -631,6 +660,7 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
             full_setup=rollout.full_setup,
             rng=rng,
             pool=RolloutPool(partial(_pool_policy, path, board.topology, device), workers) if workers else None,
+            own_calibration=loaded.search.own_calibration,
         )
     return searcher(
         path,

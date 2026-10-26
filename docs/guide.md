@@ -117,7 +117,8 @@ be one.
 
 ## Trade rounds
 
-`Game.trade_mode` is the only bargaining setting a table has:
+`Game.trade_mode` is the only bargaining setting a table has, beside the
+seats a lineup takes out of trading (below):
 
 | Mode | Trading |
 | --- | --- |
@@ -145,6 +146,20 @@ and execution checks only that both hands still cover the exchange.
 Menus, hooks, counters and the public ledger of offers are in
 [trading.md](trading.md). Results from `"round"` and `"auto"` are not
 comparable ([evaluation.md](evaluation.md)).
+
+
+### Seats out of trading
+
+`<entrant>!notrade` takes that seat out of player trading altogether,
+whatever its gate or deal settings declare: `[mybot!notrade, other, other,
+other]` seats `mybot` where no offer is made by it or to it and no robber deal
+asks, counts or spares it, while the other seats trade with each other as
+usual. The table puts the seat under a trade embargo with every other seat
+(`Game.embargoes`, set by `seat_bots` from `Entrant.no_trade`), which both
+mechanisms and the deal event already honour. Bank and port trades are moves,
+not trades, and stay open. The suffix is outermost, so it composes with
+`~<trader>` and `^<deal spec>`: `mybot^answer,ask!notrade`. A lineup
+without it plays exactly as before.
 
 ## Implement a bot
 

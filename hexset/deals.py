@@ -944,7 +944,7 @@ class ValueDealer:
                     if plan.value[i] + plan.pay * g <= plan.best:
                         break                     # the rest are worth less
                     if y == give and (veto is None or veto is self.net):
-                        takes = veto is None or clears_floor(g, veto)
+                        takes = veto is None or clears_floor(g, veto, view)
                     else:
                         takes = self._takes(game, seat, t, _swap(r, y), g)
                     if takes:
@@ -1122,7 +1122,7 @@ class ValueDealer:
         answer = [Response(s, RESPONSE_ACCEPT, received)]
         veto = self._veto()
         if veto is not None and veto is self.net:
-            if not clears_floor(gain, veto):
+            if not clears_floor(gain, veto, g.state(seat)):
                 return False
             trader = _own(self.gate, "trader")
             trader = trader if trader is not None else self.gate

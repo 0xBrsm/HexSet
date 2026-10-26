@@ -962,9 +962,10 @@ def test_plain_onnx_web_spawn_matches_arena_seeded_trade_worlds(board, monkeypat
     from types import SimpleNamespace
 
     from hexset.clients import onnxbot
+    from hexset.clients._modelmeta import SearchConfig
 
     loaded = SimpleNamespace(
-        **vars(stub_checkpoint(board)), search=SimpleNamespace(searches=())
+        **vars(stub_checkpoint(board)), search=SearchConfig()
     )
     monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
 

@@ -78,6 +78,13 @@ class TradeParams:
     #: valuation is in. `hexset.trading.trade_floor_of` reads it; there is no engine
     #: default, and a floor at `1.0` never trades.
     trade_floor: float = 0.0
+    #: Read the floor relative to the table's points: where the deciding
+    #: seat's view is at hand, `trade_floor` times its share of the table's
+    #: victory points (its own, hidden cards counted, over its own and every
+    #: other seat's public points), so a seat behind on points clears
+    #: exchanges a seat ahead would refuse. Off, the floor is `trade_floor`
+    #: everywhere.
+    trade_floor_relative: bool = False
     #: What a *response* costs this seat per outgoing card, charged on
     #: responses and on final consent and never to the proposer. `0.0` prices
     #: parting with a card at nothing beyond what the value function already
@@ -242,6 +249,7 @@ class TradeParams:
             max_offers=_int(meta.get("max_offers"), on.max_offers, MAX_OFFERS, floor=0),
             max_give_cards=_int(meta.get("max_give_cards"), on.max_give_cards),
             trade_floor=_float(meta.get("trade_floor"), on.trade_floor, MAX_TRADE_FLOOR),
+            trade_floor_relative=_bool(meta.get("trade_floor_relative"), on.trade_floor_relative),
             responder_card_risk=_float(
                 meta.get("responder_card_risk"), on.responder_card_risk, MAX_CARD_RISK
             ),
@@ -277,6 +285,8 @@ class TradeParams:
             declared = getattr(self, name)
             if declared is not None:
                 out[name] = str(declared)
+        if self.trade_floor_relative:
+            out["trade_floor_relative"] = "1"
         if not self.open_asks:
             out["open_asks"] = "0"
         if not self.gate_own_frame:

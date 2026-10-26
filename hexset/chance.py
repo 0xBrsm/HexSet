@@ -88,6 +88,12 @@ class ChanceMismatch(ChanceError):
 class Chance:
     """One method per chance event. Subclassed, never instantiated."""
 
+    #: The two dice of the last roll this source drew, where it draws them as
+    #: two (`Live`, `Balanced`); `None` before a roll, or where a source knows
+    #: only the total (a scripted replay, a hosted table). The total is what
+    #: the rules read; the pair is for a host that shows both dice.
+    last_dice: tuple[int, int] | None = None
+
     def deck_order(self, deck: list[int]) -> list[int]:
         """The deck in draw order, bottom first since `devcards.buy` pops the
         end. Called once, at `game.start`."""
@@ -148,7 +154,9 @@ class Live(Chance):
         return deck
 
     def roll(self) -> int:
-        return self.dice.randint(1, DICE_SIDES) + self.dice.randint(1, DICE_SIDES)
+        first = self.dice.randint(1, DICE_SIDES)
+        self.last_dice = (first, self.dice.randint(1, DICE_SIDES))
+        return sum(self.last_dice)
 
     def steal(self, hand: Sequence[int]) -> int | None:
         total = sum(hand)
@@ -355,7 +363,7 @@ class Balanced(Live):
         total = self.dice.choices(sums, weights=[w[t] for t in sums])[0] if sum(w[t] for t in sums) > 0 \
             else self.dice.choices(sums, weights=[len(self.left[t]) for t in sums])[0]
         cards = self.left[total]
-        cards.pop(self.dice.randrange(len(cards)))
+        self.last_dice = cards.pop(self.dice.randrange(len(cards)))
         self.cards -= 1
         self.recent.append(total)
         if len(self.recent) > DICE_RECENT_ROLLS:
@@ -440,6 +448,10 @@ class Recording(Chance):
         if resource is not None:
             self.events.append(("steal", resource))
         return resource
+
+    @property
+    def last_dice(self) -> tuple[int, int] | None:
+        return self.inner.last_dice
 
 
 class Hosted(Chance):

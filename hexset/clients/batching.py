@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["Coalesced", "coalesce"]
+__all__ = ["Coalesced", "coalesce", "coalesce_rows"]
 
 _ROWS = ("observation", "flat", "setup")
 _CANDIDATES = {"road_building": "road_building_row", "discard": "discard_row"}
@@ -107,3 +107,34 @@ def coalesce(feed: dict[str, np.ndarray]) -> Coalesced | None:
         if name in _CANDIDATES and name in feed:
             compact[name] = feed[name][np.asarray(selected, dtype=np.int64)]
     return Coalesced(compact, inverse, scatter)
+
+
+def coalesce_rows(feed: dict[str, np.ndarray]) -> Coalesced | None:
+    """Group byte-identical rows of a feed whose every input carries the
+    batch on its first axis (a record-contract graph's), retaining first order.
+
+    A row's key is its bytes in every input, so two rows group only where
+    the graph is given exactly the same thing. Return `None` where nothing
+    can be removed, the call has two rows or fewer, or the inputs disagree
+    on the row count. As `coalesce`, a multirow call keeps at least two
+    rows, and grouping assumes a graph whose rows do not read one another.
+    `candidates` is empty: outputs restore through `inverse` alone."""
+    if not feed:
+        return None
+    arrays = [np.ascontiguousarray(value) for value in feed.values()]
+    count = len(arrays[0])
+    if count <= 2 or any(value.ndim == 0 or len(value) != count for value in arrays):
+        return None
+    flat = np.concatenate([value.reshape(count, -1).view(np.uint8) for value in arrays], axis=1)
+    keys = np.ascontiguousarray(flat).view(np.dtype((np.void, flat.shape[1]))).ravel()
+    _, first, inverse = np.unique(keys, return_index=True, return_inverse=True)
+    if len(first) == count:
+        return None
+    # `unique` orders groups by key; put them back in first-occurrence order.
+    order = np.argsort(first, kind="stable")
+    rank = np.empty_like(order)
+    rank[order] = np.arange(len(order))
+    first, inverse = first[order], rank[inverse.ravel()]
+    if len(first) == 1:
+        first = np.concatenate([first, first])
+    return Coalesced({name: value[first] for name, value in feed.items()}, inverse, {})

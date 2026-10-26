@@ -103,11 +103,12 @@ def test_a_rollout_file_can_ask_for_its_opening_searched_in_full():
         search_config({"search": "rollout", "setup": "half"})
 
 
-def test_a_rollout_file_reads_decisive_as_a_search_does_and_refuses_a_calibration():
+def test_a_rollout_file_reads_decisive_and_a_calibration_as_a_search_does():
     with pytest.raises(ValueError, match="decisive"):
         search_config({"search": "rollout", "decisive": "1.2"})
+    assert search_config({"search": "rollout", "own_calibration": "0.32,0.81"}).own_calibration == (0.32, 0.81)
     with pytest.raises(ValueError, match="own_calibration"):
-        search_config({"search": "rollout", "own_calibration": "0.32,0.81"})
+        search_config({"search": "rollout", "own_calibration": "0.32"})
 
 
 def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():
@@ -167,16 +168,19 @@ def test_a_checkpoint_names_its_trader_or_trades_for_itself():
 
 
 
-def test_a_searched_file_can_ask_for_its_own_seat_recalibrated():
+def test_every_file_can_ask_for_its_own_seat_recalibrated():
     assert search_config({"search": "mcts", "own_calibration": "0.32,0.81"}).own_calibration == (0.32, 0.81)
     assert search_config({"search": "mcts"}).own_calibration is None
-    assert search_config({"own_calibration": "0.32,0.81"}).own_calibration is None   # not searched
+    one_forward = search_config({"own_calibration": "0.32,0.81"})
+    assert one_forward.own_calibration == (0.32, 0.81) and not one_forward.searches   # the gate's, not a search
+    assert search_config({}).own_calibration is None
 
 
+@pytest.mark.parametrize("search", ["mcts", "rollout", "none"])
 @pytest.mark.parametrize("value", ["0.3", "a,b", "0.3,0", "0.3,-1", "nan,1"])
-def test_an_unreadable_calibration_fails_the_load(value):
+def test_an_unreadable_calibration_fails_the_load(search, value):
     with pytest.raises(ValueError):
-        search_config({"search": "mcts", "own_calibration": value})
+        search_config({"search": search, "own_calibration": value})
 
 
 def test_a_searched_file_can_ask_to_play_its_confident_roots_unsearched():

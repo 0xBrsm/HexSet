@@ -105,10 +105,13 @@ def _tie(received: Sequence[int]) -> tuple:
     return (tuple(-int(n) for n in received),)
 
 
-def trade_floor_of(gate: object) -> float:
+def trade_floor_of(gate: object, view: "View | None" = None) -> float:
     """The clearing floor `gate`'s own gains are held to: its declared
-    `trade_floor`. There is no engine default, so a gate declaring none
-    raises `TypeError`; a negative floor raises `ValueError`."""
+    `trade_floor`, read relative to the table's points where the gate
+    declares `trade_floor_relative` and `view`, the deciding seat's, is
+    given (`relative_points_factor`). There is no engine default, so a gate
+    declaring none raises `TypeError`; a negative floor raises
+    `ValueError`."""
     floor = getattr(gate, "trade_floor", None)
     if floor is None:
         raise TypeError(
@@ -117,16 +120,30 @@ def trade_floor_of(gate: object) -> float:
         )
     if floor < 0.0:
         raise ValueError(f"{type(gate).__name__}.trade_floor is negative")
+    if view is not None and params_of(gate).trade_floor_relative:
+        return float(floor) * relative_points_factor(view)
     return float(floor)
 
 
-def clears_floor(gain: float, gate: object) -> bool:
+def relative_points_factor(view: "View") -> float:
+    """The deciding seat's share of the table's victory points: its own,
+    hidden cards counted, over its own and the public points every other seat
+    shows (at least one)."""
+    from ..victory import public_victory_points, victory_points
+
+    st, me = view.state, view.perspective
+    own = victory_points(st, me)
+    table = own + sum(public_victory_points(st, s) for s in range(st.num_players) if s != me)
+    return own / max(table, 1)
+
+
+def clears_floor(gain: float, gate: object, view: "View | None" = None) -> bool:
     """Whether `gain` clears `gate`'s own floor -- the one predicate every
     admission point reads. A gain at or below zero short-circuits, so a gate
     that only ever declines is never asked for a floor."""
     if gain <= 0.0:
         return False
-    return gain > trade_floor_of(gate)
+    return gain > trade_floor_of(gate, view)
 
 
 class Trade(NamedTuple):
@@ -464,13 +481,13 @@ def execute_agreed(
     if ask_actor or price_actor:
         trader = gates[actor] if gates is not None else None
         gain_a = consent(trader, game.state(actor), received, counterparty, role="actor")
-        if ask_actor and not clears_floor(gain_a, trader):
+        if ask_actor and not clears_floor(gain_a, trader, game.state(actor)):
             raise ValueError(f"seat {actor} does not want this exchange")
     if ask_counterparty or price_counterparty:
         trader = gates[counterparty] if gates is not None else None
         mirror = tuple(-n for n in received)
         gain_b = consent(trader, game.state(counterparty), mirror, actor, role="responder")
-        if ask_counterparty and not clears_floor(gain_b, trader):
+        if ask_counterparty and not clears_floor(gain_b, trader, game.state(counterparty)):
             raise ValueError(f"seat {counterparty} does not want this exchange")
 
     state = game._state
@@ -532,7 +549,7 @@ def _best_clearing(
     # preserved within each group: one call per counterparty.
     by_counterparty: dict[int, list[int]] = {}
     for i, gain in enumerate(mine):
-        if clears_floor(gain, gate_of(me)):
+        if clears_floor(gain, gate_of(me), view(me)):
             by_counterparty.setdefault(thems[i], []).append(i)
     if not by_counterparty:
         return None
@@ -561,7 +578,7 @@ def _best_clearing(
         # counterparty seat.
         return (primary, gain_me, *_tie(receiveds[i]), -thems[i])
 
-    cleared = [i for i, gain in theirs.items() if clears_floor(gain, gate_of(thems[i]))]
+    cleared = [i for i, gain in theirs.items() if clears_floor(gain, gate_of(thems[i]), view(thems[i]))]
     if not cleared:
         return None
     winner = max(cleared, key=key)
@@ -661,12 +678,12 @@ def default_offer(
     receiveds = [b for _, b in candidates]
     thems = [c for c, _ in candidates]
     own_gains = valued_many(gate, view, receiveds, thems)
-    if not any(clears_floor(gain, gate) for gain in own_gains):
+    if not any(clears_floor(gain, gate, view) for gain in own_gains):
         return None
     estimates = _estimate_many(gate, view, candidates, own_gains)
     eligible = [
         i for i in range(len(candidates))
-        if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
+        if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate, view)
     ]
     if not eligible:
         return None
@@ -691,7 +708,7 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     # coverage here costs nothing in information and saves a later failure.
     covers = all(view.known[me][r] >= n for r, n in enumerate(offer.received) if n > 0)
     gain = valued(gate, view, received_for_me, actor)
-    if covers and clears_floor(gain, gate):
+    if covers and clears_floor(gain, gate, view):
         return Response(me, RESPONSE_ACCEPT, offer.received)
     return _best_counter(gate, view, actor)
 
@@ -705,13 +722,13 @@ def _best_counter(gate: object, view: "View", actor: int) -> Response:
     if candidates:
         counterparties = [actor] * len(candidates)
         own_gains = valued_many(gate, view, candidates, counterparties)
-        if not any(clears_floor(gain, gate) for gain in own_gains):
+        if not any(clears_floor(gain, gate, view) for gain in own_gains):
             return Response(me, RESPONSE_PASS)
         estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)), own_gains)
         eligible = [
             i
             for i in range(len(candidates))
-            if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
+            if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate, view)
         ]
         if eligible:
             best = max(eligible, key=lambda i: (own_gains[i], *_tie(candidates[i])))
@@ -759,7 +776,7 @@ def default_pick(
     best_idx: int | None = None
     best_key: tuple | None = None
     for (i, r), gain in zip(eligible, gains):
-        if not clears_floor(gain, gate):
+        if not clears_floor(gain, gate, view):
             continue
         key = (gain, *_tie(r.bundle), -r.seat)
         if best_key is None or key > best_key:
@@ -934,7 +951,8 @@ def offer(
     one-for-one for the same card, it offers "any card for" that card (`Offer.any == -1`) in their
     place. That offer counts as many offers as the asks it replaces
     (`offer_slots`), all of them go into `already_offered`, and the gate asks
-    for that card no more this turn (`Game.open_asks`).
+    for that card no more this turn (`Game.open_asks`). At a table that takes
+    no open offers (`Game.open_offers` false) the one-for-one goes up as it is.
     """
     from ..game import Phase  # local: avoids a game/trading import cycle
 
@@ -993,7 +1011,8 @@ def offer(
     params = params_of(gate)
     # A planned gate's menu is its plan's next fragment, which a look ahead
     # never folds, so it is not asked again for one.
-    replaced = _open_asks(params.open_asks and not params.fragment_trades, received, slots_left, pick, offered)
+    replaced = _open_asks(params.open_asks and not params.fragment_trades and game.open_offers,
+                          received, slots_left, pick, offered)
     if len(replaced) < 2:
         return Offer(me, received)
     card = _asked_for(received)

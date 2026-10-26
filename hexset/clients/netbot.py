@@ -22,7 +22,7 @@ from hexset.mcts import Evaluation, Search, calibrate_own
 from hexset.rollout import PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
-    gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
+    closer_of, gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
 )
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
@@ -42,6 +42,7 @@ __all__ = [
     "tip_robber",
     "register_entrants",
     "declared_trader",
+    "declared_closer",
 ]
 
 
@@ -759,16 +760,19 @@ def rollouts_for(
     trade: TradeParams | None = None,
     full_setup: bool = False,
     pool: RolloutPool | None = None,
+    own_calibration: tuple[float, float] | None = None,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
     gate. `rng` seeds both the rollouts and, derived from it, the gate's
     sampling stream, so one seed reproduces the entrant. `pool` plays the
-    worlds out in worker processes (`hexset.rollout.RolloutPool`)."""
+    worlds out in worker processes (`hexset.rollout.RolloutPool`).
+    `own_calibration` reaches the gate alone (`bot_for`): the playouts read
+    the value head as it is."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedRollouts(
         checkpoint.policy,
-        bot_for(checkpoint, rng=gate_rng, trade=trade),
+        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration),
         worlds=worlds,
         top=top,
         decisive=decisive,
@@ -857,3 +861,25 @@ def declared_trader(checkpoint: object, source: str) -> str | None:
             f"remove the key to trade through the checkpoint's own gate"
         ) from None
     return trader
+
+
+def declared_closer(checkpoint: object, source: str) -> str | None:
+    """The closer `checkpoint` declares (`modelmeta.closer_of`), resolved
+    now, as `declared_trader` resolves a trader: a name this process cannot
+    build is refused here, naming `source` and the metadata key. `None`
+    where the checkpoint names none."""
+    closer = closer_of(checkpoint)
+    if closer is None:
+        return None
+    from hexset.arena import entrant_from_name
+
+    try:
+        entrant_from_name(closer)
+    except ValueError as error:
+        raise ValueError(
+            f"{source}: metadata key `closer` names {closer!r}, which this process "
+            f"cannot build ({error}). Load the module that registers it first "
+            f"(`--runtime <module>`, or `hexset.arena.load_runtime` in code), or "
+            f"remove the key to play every move as the checkpoint's own"
+        ) from None
+    return closer

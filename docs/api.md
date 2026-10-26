@@ -21,7 +21,7 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `GET /api/board` | Static board layout |
 | `GET /api/record` | The seat's ONNX input record, `options` and `space`; 409 unless the seat may act |
 | `POST /api/action` | `{"action": <legal_actions entry>, "version": n}` |
-| `POST /api/undo` | Take back the seat's last action; see `can_undo` |
+| `POST /api/undo` | The web page's: take back the seat's last action; see `can_undo` |
 | `POST /api/name` | `{"name": "Alice"}`; an empty name restores the seat's default |
 | `POST /api/bot` | `{"seat": 1, "model": "mybot"}`; seats a bot on an empty seat or replaces a bot |
 | `POST /api/close` | `{"seat": 1}`; closes an empty seat, or one a bot holds, before the first move |
@@ -78,7 +78,7 @@ fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POS
 | `claimed_seats`, `locked`, `started` | Occupied seats, closed or retired seats, whether the first move is made |
 | `game_type`, `board_mode`, `seats_fixed`, `fixed_seats` | The game type and board mode the table was dealt with (`board_mode` is `null` for a board no mode dealt); whether the type is played at one seat count only (duel), and the seats its deal closed for good. A table's other seats can be closed before the first move, down to one person practising alone |
 | `legal_actions` | The seat's moves now, as `{"type", "a", "b"}` objects; empty off turn |
-| `can_undo`, `awaiting_confirm` | Whether `/api/undo` succeeds now; the seat holding its setup turn open |
+| `can_undo`, `awaiting_confirm` | Whether `/api/undo` succeeds now (always false for an API or MCP seat); the seat holding its setup turn open |
 | `players` | Per seat: `name`, `bot`, `victory_points`, `hand_size`, `dev_card_count`, `knights_played`, `road_length`, award flags, `last_roll`, ledger `known`/`unknown`; `hand` and `dev_cards` for this seat only |
 | `bank`, `robber`, `vertex_owner`, `vertex_building`, `edge_owner` | Board and bank state; `robber` is `-1` while it stands beside a board with no desert, before its first move |
 | `discard_quota`, `dev_cards_remaining`, `last_roll`, `round`, `winning_points` | Per-seat cards owed to a seven, deck size, dice, round, points to win |
@@ -119,7 +119,8 @@ only action, so that the placement stays undoable.
 `POST /api/undo` takes back the seat's most recent setup placement, build,
 bank trade, or Road Building or Knight play while it is still the last
 action in the game and no trade round of the seat's own is open (400
-otherwise).
+otherwise). It is the web page's, for a click taken back: a seat an API or
+MCP client claimed gets a 403 and plays each move as meant.
 
 `GET /api/table/<code>/replay?round=N` clamps `N` to the game's rounds; a
 missing or non-integer `round` is a 400. A token for a seat at that game reads
@@ -360,7 +361,10 @@ met the fill bot.
 A ranked table's seats are fixed: `/api/bot`, `/api/open` and `/api/close`
 are a 409 there. It runs on a clock: when a move takes longer than 60
 seconds, the game is aborted and its journal names the seats it was waiting
-on, which the ranker is handed with every seat's points. A ranked game a
+on, which the ranker is handed with every seat's points. Only a move restarts
+the clock. The trading between two moves (opening, answering, picking or
+declining a trade round) counts as one action, and so does a rename: they
+share the 60 seconds of the move that follows them. A ranked game a
 server restart cut short is closed at start and counts for nothing: its
 seats get a 404 and queue again.
 

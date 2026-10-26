@@ -1,7 +1,7 @@
 """Complete-input grouping, candidate ownership and output restoration."""
 import numpy as np
 
-from hexset.clients.batching import coalesce
+from hexset.clients.batching import coalesce, coalesce_rows
 
 
 def feed():
@@ -81,3 +81,48 @@ def test_onnx_restores_rows_and_uses_the_current_session_without_cross_call_stat
     p._run(f,['value']);assert p.session.count==4
     p._fixed_sizes={};p._cpu_inference=False
     p._run(f,['value']);assert p.session.count==4
+
+
+def records():
+    return dict(terrain=np.array([[1,2],[3,4],[1,2],[1,2],[5,6]],np.int64),
+        action_mask=np.array([[1,0],[0,1],[1,0],[1,1],[0,1]],bool),turns=np.array([3,4,3,3,4],np.int64))
+
+
+def test_record_rows_group_on_every_input_and_restore_in_first_order():
+    f=records(); before={k:v.copy() for k,v in f.items()}
+    g=coalesce_rows(f)
+    assert g is not None and g.candidates=={}
+    np.testing.assert_array_equal(g.inverse,[0,1,0,2,3])
+    for k,v in f.items():
+        np.testing.assert_array_equal(g.feed[k][g.inverse],v); np.testing.assert_array_equal(v,before[k])
+
+
+def test_record_rows_that_all_match_keep_two_and_distinct_or_small_ones_keep_their_feed():
+    g=coalesce_rows({k:np.repeat(v[:1],4,axis=0) for k,v in records().items()})
+    assert g is not None and len(g.feed['turns'])==2
+    np.testing.assert_array_equal(g.inverse,[0,0,0,0])
+    assert coalesce_rows({k:v[:2] for k,v in records().items()}) is None
+    assert coalesce_rows({'turns':np.arange(5)}) is None
+    assert coalesce_rows({'turns':np.zeros(5),'robber':np.zeros(4)}) is None
+    assert coalesce_rows({'turns':np.zeros(5),'robber':np.int64(3)}) is None
+
+
+def test_a_record_policy_runs_each_distinct_row_once_on_a_cpu_dynamic_session_only():
+    import pytest
+    pytest.importorskip('onnxruntime')
+    from types import SimpleNamespace
+    from hexset.clients.onnxbot import V2Policy
+
+    class Session:
+        def __init__(self,providers=('CPUExecutionProvider',),shape='batch'):
+            self.providers,self.shape=list(providers),shape
+        def get_providers(self): return self.providers
+        def get_inputs(self): return [SimpleNamespace(name=k,shape=[self.shape,2]) for k in records()]
+        def run(self,outputs,inputs):
+            self.count=len(inputs['turns'])
+            return [inputs['terrain'].sum(1)*(1+i)+inputs['action_mask'][:,0] for i,_ in enumerate(outputs)]
+    f=records(); want=f['terrain'].sum(1)+f['action_mask'][:,0]
+    for session,rows in ((Session(),4),(Session(('CUDAExecutionProvider','CPUExecutionProvider')),5),(Session(shape=5),5)):
+        got=V2Policy(session,None)._run_batch(f,['value','prior'])
+        assert session.count==rows
+        np.testing.assert_array_equal(got[0],want); np.testing.assert_array_equal(got[1],f['terrain'].sum(1)*2+f['action_mask'][:,0])

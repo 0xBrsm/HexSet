@@ -748,7 +748,7 @@ class Table:
     # (client ids, `bot:<entry>`) and the versioned pair-cap units
     # (`ranked.entrant`), one per seat; empty for any other table.
     ranked_units: tuple = ()
-    # When a view last changed (`bump`): a ranked table's clock.
+    # When a move last changed the table (`bump`): a ranked table's clock.
     changed_at: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -758,11 +758,16 @@ class Table:
     version: int = 0
     changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
-    def bump(self) -> None:
-        """Marks this table changed and wakes everyone parked on it."""
+    def bump(self, clock: bool = True) -> None:
+        """Marks this table changed and wakes everyone parked on it. With
+        `clock` false the change wakes readers but leaves the ranked clock
+        where the last move set it: the trading between two moves counts as
+        one action, so offers, answers and picks can't keep a turn alive, and
+        neither can a rename."""
         with self.changed:
             self.version += 1
-            self.changed_at = time.monotonic()
+            if clock:
+                self.changed_at = time.monotonic()
             self.changed.notify_all()
 
     def wait_for_change(self, after: int, timeout: float) -> None:
@@ -856,6 +861,7 @@ class Table:
         Called with the table's lock held, or on a table nobody else can
         reach."""
         state = self.session.state_view(viewer, omniscient=omniscient, finished=finished)
+        state["can_undo"] = state["can_undo"] and self.page_seat(viewer)
         waiting = self.waiting_for()
         state["waiting_for"] = waiting
         # The manual seats a bot's trade offer waits on. Nobody moves while
@@ -868,6 +874,16 @@ class Table:
         state["version"] = self.version
         state["your_move"], state["waiting_on"] = your_move(state)
         return state
+
+
+    def page_seat(self, seat: int | None) -> bool:
+        """Whether this server's own page claimed `seat`. Undo is the page's:
+        a click taken back. An API or MCP seat plays each move as meant, and
+        an undo there would let a seat build, take it back and build again,
+        restarting a ranked table's clock for ever."""
+        if seat is None or not 0 <= seat < len(self.seats):
+            return False
+        return (self.seats[seat].client or {}).get("kind") == "web"
 
 
 def spawn_bot(
@@ -1465,7 +1481,7 @@ class Tables:
     def check_clocks(self) -> list[str]:
         """Aborts every ranked table that has waited on one move longer than
         `ranked.TURN_SECONDS` (`Table.close`, naming the seats it waited on);
-        the codes aborted."""
+        the codes aborted. Trading doesn't restart the wait (`Table.bump`)."""
         now = time.monotonic()
         with self._registry_lock:
             late = [t for t in self._tables.values()
@@ -1771,7 +1787,10 @@ class Tables:
     def undo(self, table: Table, seat: int) -> dict:
         """`POST /api/undo`: take back `seat`'s most recent build, bank trade,
         or Road Building or Knight play, while it is still the last thing that
-        happened (`GameSession.undo_last_build`)."""
+        happened (`GameSession.undo_last_build`). The page's alone
+        (`Table.page_seat`): 403 for an API or MCP seat."""
+        if not table.page_seat(seat):
+            raise ApiError("undo is for the web page; a client plays each move as meant", status=403)
         table.session.undo_last_build(seat)
         table.bump()
         return table.view(seat)
@@ -1785,7 +1804,7 @@ class Tables:
         clean = clean_name(name) or default_seat_name(client.get("kind", "api"))
         table.seats[seat].name = clean
         table.session.rename(seat, clean)
-        table.bump()
+        table.bump(clock=False)
         if self.rankings is not None and client.get("id"):
             self.rankings.renamed(client["id"], clean)
         return table.view(seat)
@@ -1983,7 +2002,7 @@ class Tables:
         if not holds(state, seat, [max(0, -n) for n in received]):
             raise ApiError("you cannot cover your side of that offer", status=400)
         table.session.open_round_for(seat, received, any_cards)
-        table.bump()
+        table.bump(clock=False)
         return table.view(seat)
 
     def answer_round(self, table: Table, seat: int, payload: dict) -> dict:
@@ -2010,7 +2029,7 @@ class Tables:
             table.session.answer_round(seat, actor, received, kind, bundle)
         except ValueError as error:
             raise ApiError(str(error), status=409) from None
-        table.bump()
+        table.bump(clock=False)
         return table.view(seat)
 
     def choose_round(self, table: Table, seat: int, payload: dict) -> dict:
@@ -2023,7 +2042,7 @@ class Tables:
                 table.session.decline_round(seat)
             except ValueError as error:
                 raise ApiError(str(error), status=409) from None
-            table.bump()
+            table.bump(clock=False)
             return table.view(seat)
         responder = payload.get("seat")
         if not isinstance(responder, int):
@@ -2033,7 +2052,7 @@ class Tables:
             table.session.execute_round_choice(seat, responder, bundle)
         except ValueError as error:
             raise ApiError(str(error), status=409) from None
-        table.bump()
+        table.bump(clock=False)
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:

@@ -40,10 +40,12 @@ names its seats (`entrants`), so only the other bot seats are fill.
 
 ## The clock
 
-A ranked table that goes `TURN_SECONDS` without a change is aborted
+A ranked table that goes `TURN_SECONDS` without a move is aborted
 (`api.Tables.check_clocks`): the journal's closing line names the seats it
 was waiting on and every seat's points, and what that is worth is the
-ranker's call.
+ranker's call. The trading between two moves counts as one action: offers,
+answers and picks (and renames) don't restart the clock, so they share the
+time of the move that follows them.
 """
 
 from __future__ import annotations

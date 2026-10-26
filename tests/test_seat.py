@@ -507,3 +507,11 @@ def test_the_hosts_before_roll_rule_survives_a_rebuilt_game():
     assert seat.game.before_roll == frozenset({DevCard.KNIGHT})
     seat.limit_before_roll(None)
     assert seat.game.before_roll is None
+
+
+def test_the_hosts_open_offer_rule_survives_a_rebuilt_game():
+    seat = _seat(_main(), object())
+    assert seat.game.open_offers
+    seat.allow_open_offers(False)
+    seat.resync(observe(seat.game, 0))
+    assert seat.game.open_offers is False

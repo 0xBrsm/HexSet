@@ -256,6 +256,21 @@ def test_a_lone_ask_or_a_gate_turning_it_off_or_no_offers_left_asks_as_it_stands
     assert made == Offer(0, asks[0]) and offer_slots(game, made) == 1
 
 
+def test_a_table_taking_no_open_offers_gets_each_ask_as_it_stands():
+    """`Game.open_offers` off: the asks an open ask would stand for go up
+    one at a time, each counting as one offer, and a search's copy of the
+    game keeps the rule."""
+    from hexset.game import imagine
+    from hexset.trading import offer_slots
+    game, offered = _asking(), set()
+    game.open_offers = False
+    assert imagine(game, random.Random(0)).open_offers is False
+    gates = [_Asker((WOOD_ORE, SHEEP_ORE, BRICK_ORE)), None, None, None]
+    made = offer(game, gates, offered, slots_left=3)
+    assert made == Offer(0, WOOD_ORE) and offer_slots(game, made) == 1
+    assert offer(game, gates, offered, slots_left=2) == Offer(0, SHEEP_ORE)
+
+
 def test_the_same_ask_listed_twice_is_one_ask():
     game = _asking()
     assert offer(game, [_Asker((WOOD_ORE, WOOD_ORE)), None, None, None], set(), slots_left=3) == Offer(0, WOOD_ORE)

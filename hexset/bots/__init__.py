@@ -5,7 +5,8 @@
 optional trading half, `TradesBy` seats one bot's moves over another's
 trading, `Vetoed` thins one gate's trading to what a second gate also gains
 from, `Handoff` seats one bot's moves up to a round and another's after
-it, `PlaysAgainst` is the optional hook for playing as one side against
+it, `Closes` plays a closer's move wherever it has one and a bot's own
+everywhere else, `PlaysAgainst` is the optional hook for playing as one side against
 named seats, `Coalition` seats any bot as one of a side against the rest of
 its table, and `RandomBot` is the one bot shipped here. `determinized`
 samples information-set worlds for a search; `stances` turns a per-seat
@@ -17,13 +18,13 @@ process (`hexset.arena.register_entrant_kind`, `register_preset`,
 HTTP API (`hexset.clients.botclient` is an example).
 """
 from .base import (
-    Bot, Handoff, PlaysAgainst, RandomBot, TradeGate, TradesBy, Vetoed, handed_off, play_against, seat_at,
+    Bot, Closes, Handoff, PlaysAgainst, RandomBot, TradeGate, TradesBy, Vetoed, handed_off, play_against, seat_at,
 )
 from .coalition import Coalition, targets_at
 from .stances import STANCES, own, paranoid, relative
 
 __all__ = [
-    "Bot", "RandomBot", "TradeGate", "TradesBy", "Vetoed", "Handoff", "handed_off", "seat_at",
+    "Bot", "RandomBot", "TradeGate", "TradesBy", "Vetoed", "Handoff", "handed_off", "Closes", "seat_at",
     "PlaysAgainst", "play_against", "Coalition", "targets_at",
     "STANCES", "own", "paranoid", "relative",
 ]

@@ -6,7 +6,8 @@ A bot only needs ``choose(game)``. Trading is optional: a gate implements
 nonnegative ``trade_floor`` when it returns positive gains. ``hexset.trading``
 also accepts boolean ``accepts``/``accepts_many`` gates. ``TradesBy`` seats
 one bot's moves over another's trading; ``Handoff`` seats one bot's moves up
-to a round and another's after it. ``PlaysAgainst`` is the optional hook
+to a round and another's after it; ``Closes`` plays a closer's move wherever
+it has one and the bot's own everywhere else. ``PlaysAgainst`` is the optional hook
 a bot implements to play as one side against named seats
 (``hexset.bots.coalition``).
 """
@@ -29,6 +30,7 @@ __all__ = [
     "TradesBy",
     "Handoff",
     "handed_off",
+    "Closes",
     "PlaysAgainst",
     "seat_at",
     "play_against",
@@ -141,7 +143,7 @@ class Vetoed:
 
     def _clears(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[bool]:
         """Whether the veto gains from each of ``received`` above its floor."""
-        return [clears_floor(g, self.veto) for g in self._gains(view, received, counterparties)]
+        return [clears_floor(g, self.veto, view) for g in self._gains(view, received, counterparties)]
 
     def candidates(self, view: View, counterparties: Sequence[int], *, turn=None, already_offered=()):
         menu = list(self.proposer.candidates(view, counterparties, turn=turn, already_offered=already_offered))
@@ -168,7 +170,7 @@ class Vetoed:
                 if r.kind in (RESPONSE_ACCEPT, RESPONSE_COUNTER) and r.bundle is not None]
         gains = dict(zip(live, self._gains(view, [responses[i].bundle for i in live],
                                            [responses[i].seat for i in live])))
-        ok = {i: clears_floor(g, self.veto) for i, g in gains.items()}
+        ok = {i: clears_floor(g, self.veto, view) for i, g in gains.items()}
         passed = [Response(r.seat, RESPONSE_PASS, None) for r in responses]
         thinned = [r if ok.get(i, True) else passed[i] for i, r in enumerate(responses)]
         if not self.picks:
@@ -243,11 +245,62 @@ class Handoff:
         return (Handoff, (self.first, self.second, self.at))
 
 
+class Closes:
+    """``mover``'s moves, except where ``closer`` has one of its own.
+
+    At each decision ``closer.closing(game)`` is asked first: an action it
+    names is played, whatever the mover would choose; ``None`` leaves the
+    decision to ``mover``. A closer's move that is not legal at the position
+    is not played either: the mover chooses. Every other name -- each trade
+    hook, the trade params, the offer budget, a network gate's values -- is
+    the mover's, read, written and deleted through, as `TradesBy` does to its
+    trader, so the seat trades and is vetoed exactly as the mover alone
+    would. Seat it over another bot's trading with
+    ``TradesBy(Closes(mover, closer), trader)``.
+
+    A closer is meant to be narrow and deterministic: a rule that sees
+    something the mover may miss -- a finish this turn its hand holds -- and
+    stays out of everything else. A mover that plays a decision a move at a
+    time (`hexset.decisions.Plans`) checks each planned move against the
+    legal moves, so a decision the closer steps into part-way is finished
+    from the position as it then stands.
+    """
+
+    __slots__ = ("mover", "closer")
+
+    def __init__(self, mover: Bot, closer: object) -> None:
+        object.__setattr__(self, "mover", mover)
+        object.__setattr__(self, "closer", closer)
+
+    def choose(self, game: Game) -> Action:
+        move = self.closer.closing(game)
+        if move is not None and move in options_for(game):
+            return move
+        return self.mover.choose(game)
+
+    def __getattr__(self, name: str):
+        return getattr(object.__getattribute__(self, "mover"), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        setattr(self.mover, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self.mover, name)
+
+    def __reduce__(self):
+        return (Closes, (self.mover, self.closer))
+
+
 def seat_at(bot: object, game: Game) -> None:
     """`seat_at(game)` on every part of `bot` that has one: a network bot's
     gate, a search's, both halves of a `TradesBy` seat and both bots of a
-    `Handoff`, so a gate asked about a trade before its first move prices it
-    on `game`. Other bots have nothing to seat."""
+    `Handoff`, and the mover and closer of a `Closes` seat, so a gate asked
+    about a trade before its first move prices it on `game`. Other bots have
+    nothing to seat."""
+    if isinstance(bot, Closes):
+        seat_at(bot.mover, game)
+        seat_at(bot.closer, game)
+        return
     if isinstance(bot, TradesBy):
         seat_at(bot.mover, game)
         seat_at(bot.trader, game)
@@ -281,8 +334,11 @@ class PlaysAgainst(Protocol):
 def play_against(bot: object, seats: Collection[int]) -> None:
     """`play_against(seats)` on every part of `bot` that implements
     `PlaysAgainst`: the bot, or both halves of a `TradesBy` seat, mover
-    first, and both bots of a `Handoff`. A part without one, or with it set
-    to `None`, is left as it is."""
+    first, both bots of a `Handoff`, and the mover of a `Closes` seat. A part
+    without one, or with it set to `None`, is left as it is."""
+    if isinstance(bot, Closes):
+        play_against(bot.mover, seats)
+        return
     if isinstance(bot, TradesBy):
         play_against(bot.mover, seats)
         play_against(bot.trader, seats)

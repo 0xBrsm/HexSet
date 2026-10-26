@@ -266,6 +266,12 @@ class Game:
     # the host (`Seat.limit_before_roll`); copied by `imagine`, so a search
     # plays every seat to the same table.
     before_roll: frozenset[DevCard] | None = None
+    # Whether an offer may leave cards for the answerer to name (an open
+    # offer, `trading.Offer.any`). A host whose offers name every card on
+    # both sides takes none, so a gate's open ask goes up as the one-for-one
+    # it stands for (`trading.offer`). Set by the host
+    # (`Seat.allow_open_offers`); copied by `imagine`.
+    open_offers: bool = True
     # The seat `start()` opened the setup snake at; read-only afterwards.
     # Its own field rather than `setup_queue[0]` because a
     # `hexset.record.Record` carries it to rebuild the snake on replay, and
@@ -448,6 +454,7 @@ def imagine(
         locked=game.locked,
         embargoes=game.embargoes,
         before_roll=game.before_roll,
+        open_offers=game.open_offers,
         first=game.first,
         turn_cap=game.turn_cap,
     )

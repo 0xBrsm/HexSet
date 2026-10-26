@@ -33,15 +33,12 @@ IID_REPEAT_RATE = 0.1127
 # The same deck with the recent-sum discount, two seats rolling in turn, measured off this implementation.
 DISCOUNTED_REPEAT_RATE = 0.0675
 
-
 def rolls(n: int, seed: int = 0) -> list[int]:
     source = Balanced(random.Random(seed))
     return [source.roll_by(i % 2) for i in range(n)]
 
-
 def repeat_rate(seq: list[int]) -> float:
     return sum(a == b for a, b in zip(seq, seq[1:])) / (len(seq) - 1)
-
 
 def test_the_deck_is_the_thirty_six_combinations():
     deck = dice_deck()
@@ -50,7 +47,6 @@ def test_the_deck_is_the_thirty_six_combinations():
     assert collections.Counter(a + b for a, b in deck) == {
         2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1
     }
-
 
 def test_the_deck_reshuffles_before_it_runs_out():
     """A deck is never played past the threshold, so the 36 combinations are
@@ -63,7 +59,6 @@ def test_the_deck_reshuffles_before_it_runs_out():
     assert min(seen) == DICE_DECK_RESHUFFLE_AT
     assert max(seen) == 35
 
-
 def test_a_sum_that_came_up_lately_is_discounted_per_time():
     source = Balanced(random.Random(0))
     source.recent = [8, 8, 3]
@@ -72,14 +67,12 @@ def test_a_sum_that_came_up_lately_is_discounted_per_time():
     assert w[3] == pytest.approx(2 / 36 * (1 - DICE_RECENT_DISCOUNT))
     assert w[6] == pytest.approx(5 / 36)
 
-
 def test_the_recent_discount_suppresses_repeats():
     """Independent dice repeat 11.3% of the time; the discounted deck about
     6.8%. 20,000 rolls put the standard error near 0.002."""
     discounted = repeat_rate(rolls(20_000))
     assert abs(discounted - DISCOUNTED_REPEAT_RATE) < 0.01
     assert discounted < IID_REPEAT_RATE - 0.03
-
 
 def test_a_seven_is_steered_toward_the_seat_short_of_its_share():
     source = Balanced(random.Random(0))
@@ -92,14 +85,12 @@ def test_a_seven_is_steered_toward_the_seat_short_of_its_share():
     assert source.seven_scale(0) == pytest.approx(1.4)
     assert source.seven_scale(1) == pytest.approx(0.6)
 
-
 def test_no_steering_before_every_roller_could_have_one():
     source = Balanced(random.Random(0))
     source.sevens = {0: 0, 1: 1}
     source.run = (None, 0)
     assert source.seven_scale(0) == 1.0
     assert source.seven_scale(None) == 1.0
-
 
 def test_rolled_sevens_follow_the_roller_share():
     """Two seats in turn over game-length runs: a seat holding fewer than half
@@ -121,7 +112,6 @@ def test_rolled_sevens_follow_the_roller_share():
                 sevens[seat] += 1
     assert hit["low"] / seen["low"] > 2 * hit["high"] / seen["high"]
 
-
 def test_the_engine_names_the_roller():
     from hexset.arena import play
     from hexset.bots import RandomBot
@@ -131,7 +121,6 @@ def test_the_engine_names_the_roller():
     game = play([RandomBot(random.Random(1)), RandomBot(random.Random(2))], board, random.Random(3),
                 game_type=DUEL_VARIANT_GAME, turn_cap=10_000)
     assert set(game.chance.sevens) == {0, 1}
-
 
 def test_the_rules_select_the_source():
     from hexset.board.board import random_base_board
@@ -143,7 +132,6 @@ def test_the_rules_select_the_source():
     assert isinstance(start(board, 2, random.Random(0), game_type=DUEL_VARIANT_GAME).chance, Balanced)
     assert type(start(board, 2, random.Random(0), game_type=STANDARD_GAME).chance) is Live
 
-
 def test_the_published_seven_rate_matches_the_deck_it_describes():
     """`BALANCED_SEVEN_ODDS` is measured off `Balanced` with two seats in
     turn, so it has to be re-measurable. 200,000 rolls put the standard error
@@ -152,13 +140,11 @@ def test_the_published_seven_rate_matches_the_deck_it_describes():
     assert abs(seq.count(7) / len(seq) - BALANCED_SEVEN_ODDS) < 0.004
     assert BALANCED_SEVEN_ODDS < 6 / 36
 
-
 def test_a_seat_yet_to_roll_is_counted_with_no_sevens():
     source = Balanced(random.Random(0))
     source.sevens = {0: 1}
     source.run = (0, 1)
     assert source.seven_scale(1) == pytest.approx(1.4)   # no share term until each seat could hold one; +0.4 for the other's run
-
 
 def _duel(seed: int, chance=None):
     from hexset.board.board import random_base_board
@@ -166,7 +152,6 @@ def _duel(seed: int, chance=None):
 
     rng = random.Random(seed)
     return start(random_base_board(rng), 2, rng, game_type=DUEL_VARIANT_GAME, chance=chance)
-
 
 def _played(game, seed: int):
     """`game` with random play, one action at a time, as a generator of the game before each roll."""
@@ -180,7 +165,6 @@ def _played(game, seed: int):
             yield game
         apply(game, rng.choice(legal))
 
-
 def _expected_odds(source: Balanced, seat: int) -> dict[int, float]:
     """`source`'s next roll by `seat`, as `roll_by` draws it (the reshuffle first)."""
     if source.cards <= DICE_DECK_RESHUFFLE_AT:
@@ -190,7 +174,6 @@ def _expected_odds(source: Balanced, seat: int) -> dict[int, float]:
     sums = [t for t in sorted(w) if source.left[t]]
     mass = sum(w[t] for t in sums)
     return {t: w[t] / mass for t in sums}
-
 
 def test_the_state_tracks_the_deck_the_dice_are_drawn_from():
     """Before every roll of played duels, `GameState.dice` gives the odds the
@@ -206,7 +189,6 @@ def test_the_state_tracks_the_deck_the_dice_are_drawn_from():
             assert all(got[t] == pytest.approx(want[t], abs=1e-12) for t in want)
             checked += 1
     assert checked > 200
-
 
 def test_a_source_built_from_the_deck_rolls_on_as_the_game_would():
     """`Balanced.from_deck` continues the real deck: on the same generator it
@@ -224,7 +206,6 @@ def test_a_source_built_from_the_deck_rolls_on_as_the_game_would():
         seat = i % 2
         assert copy.roll_by(seat) == source.roll_by(seat)
 
-
 def test_a_search_copy_rolls_from_the_deck_under_balanced_dice_only():
     from hexset.board.board import random_base_board
     from hexset.game import ROLL_ODDS, imagine, roll_odds, start
@@ -241,7 +222,6 @@ def test_a_search_copy_rolls_from_the_deck_under_balanced_dice_only():
     assert type(imagine(standard, random.Random(0)).chance) is Live
     assert roll_odds(standard) is ROLL_ODDS
 
-
 def test_a_given_roll_moves_the_deck_on():
     """A search enumerating rolls (`roll_dice(game, roll)`) moves its copy's
     deck as a drawn roll would, and leaves the original's alone."""
@@ -257,7 +237,6 @@ def test_a_given_roll_moves_the_deck_on():
     assert copy._state.dice == before.rolled(g.current_player, 8)
     assert g._state.dice is before
 
-
 def test_the_deck_is_public():
     """Every seat's view carries the same deck as the true state."""
     game = _duel(2)
@@ -265,3 +244,21 @@ def test_the_deck_is_public():
         if g.turns >= 15:
             break
     assert g.state(0).state.dice == g.state(1).state.dice == g._state.dice
+def test_a_roll_keeps_its_two_dice_and_draws_as_before():
+    """`last_dice` is the pair the roll drew, summing to its total, under
+    both sources and through a recording; the totals a seed rolls are the
+    ones it rolled before the pair was kept."""
+    import random
+
+    from hexset.chance import DICE_SIDES, Balanced, Live, Recording
+
+    assert Live(random.Random(1)).last_dice is None
+    plain, before = Live(random.Random(7)), random.Random(7)
+    for _ in range(200):
+        total = plain.roll()
+        assert total == before.randint(1, DICE_SIDES) + before.randint(1, DICE_SIDES)
+        assert sum(plain.last_dice) == total and all(1 <= d <= DICE_SIDES for d in plain.last_dice)
+    deck = Recording(Balanced(random.Random(9), split=True))
+    for seat in (0, 1) * 60:
+        total = deck.roll_by(seat)
+        assert sum(deck.last_dice) == total and deck.events[-1] == ("roll", total)

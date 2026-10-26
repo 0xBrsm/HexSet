@@ -5,6 +5,120 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.22.0
+
+### Breaking
+
+- **Undo is the web page's alone.** `POST /api/undo` is a 403 for a seat
+  an API or MCP client claimed, and its `can_undo` always reads false; a
+  seat the page claimed undoes as before. A client plays each move as meant,
+  and an undo let a seat build, take it back and build again, restarting a
+  ranked table's clock for ever.
+
+### Added
+
+- **A checkpoint's values can be read where its decisions are finished.**
+  `finish_decisions=1` in a file's metadata wraps its policy in
+  `hexset.clients.finishing.Finishing`: a value asked for at a position
+  inside a setup turn (the settlement placed, its road owed) or a Road
+  Building card (free roads owed) is read on an exact copy where the
+  deciding seat finishes that decision with the policy's own most probable
+  moves; the prior is still read at the position itself. For a checkpoint
+  that decides those turns as one choice and whose win head was taught only
+  where a decision starts, so that a search walking one move at a time reads
+  values where the head was trained. Without the key nothing changes.
+
+- **A trade floor can be read relative to the table's points.**
+  `TradeParams.trade_floor_relative` (checkpoint metadata
+  `trade_floor_relative=1`) holds a gate's gains to `trade_floor` times the
+  deciding seat's share of the table's victory points (its own, hidden cards
+  counted, over its own and every other seat's public points): a seat behind
+  clears exchanges a seat ahead would refuse. `trade_floor_of` and `clears_floor` take the deciding
+  seat's `view` for it, and every floor check the engine, `Vetoed` and the
+  robber deals make passes theirs; without the key, or without a view, the
+  floor is `trade_floor` as before.
+
+- **A closer can play a seat's move ahead of the seat's own.**
+  `hexset.bots.Closes(mover, closer)` asks `closer.closing(game)` at each
+  decision and plays the move it names, the mover's choice where it names
+  none or names one that is not legal; every other name, the trade hooks
+  among them, is the mover's. A checkpoint names its closer in its metadata
+  (`closer=<entrant>`, `hexset.clients.netbot.declared_closer`), resolved at
+  spawn as `trader` is, and `hexset.arena.closed` seats one the way
+  `traded` seats a trader; a closed seat that also names a trader trades
+  through it as before.
+
+- **A seat can be taken out of player trading.** `<entrant>!notrade` in a
+  lineup (`Entrant.no_trade`) puts that seat under a trade embargo with every
+  other seat for the whole game, whatever its gate or deal settings declare:
+  it makes no offer, is asked none, and neither asks for nor takes part in a
+  robber deal, under `"round"` and `"auto"` alike. The other seats trade with
+  each other as before; bank and port trades stay open. `seat_bots`,
+  `play_game` and the recorded game loop take the seats as `no_trade`.
+
+- **The game page has a menu.** The header's hamburger opens it in place
+  of the game log alone: this game's code with a button that copies its
+  link, a Log tab with the log as before, and a History tab listing every
+  game this browser has played, newest first, with its date, game type,
+  opponents and result, each one a tap away. The rankings link moves there
+  from the New game modal. History is kept in the browser, per game, so it
+  holds this browser's games only; a game played before it was kept is read
+  from its table the first time History lists it.
+
+- **A roll keeps its two dice.** `Chance.last_dice` is the pair the last
+  roll drew under `Live` and `Balanced` (the balanced deck's card), passed
+  through `Recording`; `None` where a source knows only the total. Nothing
+  more is drawn, so a seed rolls the same totals as before.
+
+- **A host can refuse open offers.** `Game.open_offers` (default true), set
+  through `Seat.allow_open_offers(False)` and copied by `imagine`, is a
+  table's rule that every offer names every card on both sides: a gate's
+  "any card for" ask then goes up as the one-for-one it stands for.
+
+- **Coalition statements have a discrete public schema.** `coalition`
+  records supported and opposed seats, requested or offered resources,
+  quantities and intended actions. Events round-trip independently of text,
+  frame every participant consistently, and count opposition once per
+  utterance and target. Unresolved chronology cannot form a replay prefix.
+
+### Changed
+
+- **A seated arena game seats every part of each bot.** `arena.seat_bots`
+  calls `seat_at(game)` on each bot's parts, as `Seat` does: a trader with no
+  moves of its own (a `TradesBy` seat's trader, a `Vetoed` proposer) reads the
+  game it trades in from the first offer, not only once its seat's mover has
+  moved.
+
+- **Every network file can recalibrate its own seat.** The `own_calibration
+  = "a,b"` metadata key is read for one-forward and rollout files as well as
+  MCTS ones. An MCTS file reads its seat through it at every evaluated
+  position and in its trade gate, as before; any other file reads it in its
+  trade gate alone, so trades and robber deals are priced on the calibrated
+  scale while its moves are chosen as before. A rollout file that names the
+  key is no longer refused, and an unreadable value fails the load whatever
+  the file's search.
+
+- **The web page opens your most recently active game.** A visit with no
+  game code goes to the unfinished game this browser holds a seat at that
+  last moved, rather than the last game opened, so stepping Back to a
+  finished game no longer hides the one still being played. With none
+  still going it opens the last game, as before.
+
+- Record-contract checkpoints (`onnxbot.V2Policy`) run byte-identical rows of
+  one forward once on a CPU session with a dynamic batch axis, for decisions,
+  values and priors alike, and return every row's outputs in its original
+  order (`batching.coalesce_rows`). Other providers and fixed-shape graphs
+  keep their feed.
+
+### Fixed
+
+- **Trading no longer restarts a ranked table's clock.** The trading
+  between two moves counts as one action: opening, answering, declining or
+  picking a trade round, and renaming a seat, wake readers but leave the
+  clock where the last move set it. A seat that offered and declined over
+  and over could keep a ranked game from ever timing out.
+
+
 ## 1.21.0
 
 ### Added

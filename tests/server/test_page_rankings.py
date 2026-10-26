@@ -3,8 +3,8 @@
 ranker made, one tab each, leaves out the rows under the minimum games, marks
 the visitor's own row by the client id the game page sends, shows two checked
 rows head to head, and says so where the server keeps none; the game page's
-New game modal links it, at the front door and at a seat, only where there
-is one. Skipped without Playwright, which is not one of this project's
+menu links it at a seat, only where there is one, and the New game modal
+never does. Skipped without Playwright, which is not one of this project's
 extras.
 """
 
@@ -160,20 +160,25 @@ def test_a_server_without_a_ranker_says_it_keeps_none(servers, browser):
         page.close()
 
 
-def test_the_new_game_modal_links_it_at_the_front_door_and_at_a_seat(servers, browser):
+def test_the_menu_links_it_and_the_new_game_modal_does_not(servers, browser):
     page = browser.new_context().new_page()
     try:
         page.goto(f"{BASE_URL}/", wait_until="load")
-        page.wait_for_selector('#modal.show a.modal-link[href="/rankings"]')
+        page.wait_for_selector("#modal.show #deal-new-game")
+        assert not page.query_selector("#modal a")
         front_door(page, BASE_URL)
         page.wait_for_selector("#players .player-row")
         page.click("#new-game")
-        page.wait_for_selector('#modal.show a.modal-link[href="/rankings"]')
+        page.wait_for_selector("#modal.show #deal-new-game")
+        assert not page.query_selector("#modal a")
+        page.keyboard.press("Escape")
+        page.click("#open-log")
+        page.wait_for_selector('#log-sheet.show a#rankings-link[href="/rankings"]:visible')
     finally:
         page.close()
 
 
-def test_without_rankings_the_modal_links_nothing(servers, browser):
+def test_without_rankings_the_menu_links_nothing(servers, browser):
     page = browser.new_context().new_page()
     try:
         front_door(page, BARE_URL)
@@ -182,9 +187,9 @@ def test_without_rankings_the_modal_links_nothing(servers, browser):
             page.reload(wait_until="load")
         assert asked.value.status == 404
         page.wait_for_selector("#players .player-row")
-        page.click("#new-game")
-        page.wait_for_selector("#modal.show #deal-new-game")
-        assert not page.query_selector("#modal a.modal-link")
+        page.click("#open-log")
+        page.wait_for_selector("#log-sheet.show")
+        assert not page.is_visible("#rankings-link")
     finally:
         page.close()
 

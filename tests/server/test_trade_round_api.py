@@ -10,7 +10,7 @@ import pytest
 
 from hexset.board.terrain import Resource
 from hexset.game import Phase
-from hexset.server.api import ApiError
+from hexset.server.api import ApiError, Origin
 
 from conftest import new_tables
 
@@ -34,12 +34,13 @@ class _NeverWants:
         return [-1.0] * len(received)
 
 
-def _table(*, actor_is_human: bool, other_gate):
+def _table(*, actor_is_human: bool, other_gate, page: bool = False):
     """The human at `human`, `other` gated by `other_gate`, the rest never
     trading. The current player holds one wood and the other side one ore.
+    `page` deals the table from this server's own page, which alone may undo.
     """
     registry = new_tables()
-    data = registry.handle("POST", "/api/games", {"bots": []}, None)
+    data = registry.handle("POST", "/api/games", {"bots": []}, None, Origin(page=True) if page else None)
     code, token = data["code"], data["token"]
     table = registry.get(code)
     game = table.session.game
@@ -410,7 +411,8 @@ def test_a_seat_answers_a_round_once():
 
 
 def test_undo_is_refused_while_the_seats_own_round_is_open():
-    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD),
+                                                      page=True)
     state = table.session.game._state
     state.hands[human][Resource.BRICK] = 4
     state.bank[Resource.BRICK] -= 4
@@ -427,6 +429,25 @@ def test_undo_is_refused_while_the_seats_own_round_is_open():
         registry.handle("POST", "/api/undo", {}, token)
     registry.handle("POST", f"/api/games/{code}/trade/round/choose", {"decline": True}, token)
     assert registry.handle("GET", "/api/state", {}, token)["can_undo"] is True
+
+
+def test_undo_is_the_pages_alone():
+    # An API or MCP seat plays each move as meant: an undo there would let a
+    # seat build, take it back and build again, restarting a ranked clock.
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    state = table.session.game._state
+    state.hands[human][Resource.BRICK] = 4
+    state.bank[Resource.BRICK] -= 4
+    bank_trade = next(a for a in registry.handle("GET", "/api/state", {}, token)["legal_actions"]
+                      if a["type"] == "BANK_TRADE" and a["a"] == Resource.BRICK)
+    view = registry.handle("POST", "/api/action", {"action": bank_trade}, token)
+
+    assert table.session.can_undo(human), "the session holds the undo point"
+    assert view["can_undo"] is False
+    with pytest.raises(ApiError, match="web page") as refused:
+        registry.handle("POST", "/api/undo", {}, token)
+    assert refused.value.status == 403
+    assert state.hands[human][Resource.BRICK] == 0
 
 
 def _owe_road_building(table) -> None:
@@ -491,3 +512,29 @@ def test_a_bot_with_trade_now_opens_its_round_when_it_says_so():
     session.begin_round(entering=False)  # after one of its main-phase actions
     assert session.open_round is not None
     assert table.view(human)["pending"] == [{"actor": bot, "bundle": WOOD_FOR_ORE}]
+
+
+def test_trading_shares_the_ranked_clock_of_the_move_that_follows_it():
+    # The trading between two moves counts as one action: a seat that offers
+    # and declines (or renames itself) over and over can't keep a ranked
+    # table alive, while its readers still wake on every change.
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    table.session.ranked = True
+    started, version = table.changed_at, table.version
+    for _ in range(5):
+        registry.handle("POST", f"/api/games/{code}/trade/round",
+                        {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+        registry.handle("POST", f"/api/games/{code}/trade/round/choose", {"decline": True}, token)
+    registry.handle("POST", "/api/name", {"name": "stalling"}, token)
+    assert table.changed_at == started and table.version > version
+
+    table.changed_at -= 61
+    assert registry.check_clocks() == [code]
+
+
+def test_a_move_restarts_the_ranked_clock():
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    table.session.ranked = True
+    table.changed_at -= 61
+    registry.handle("POST", "/api/action", {"action": {"type": "END_TURN"}}, token)
+    assert registry.check_clocks() == []

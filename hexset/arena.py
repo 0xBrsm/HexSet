@@ -371,6 +371,13 @@ class Entrant:
     # kind that plays differently by game type. `None` is the entrant's own
     # default; a kind that does not read it ignores it.
     game_type: str | None = None
+    # A seat out of player trading altogether, whatever its gate declares:
+    # the table puts it under a trade embargo with every other seat
+    # (`Game.embargoes`, `seat_bots`), so it makes no offer, is asked none,
+    # and neither asks for nor promises a robber deal. Bank and port trades
+    # are moves, not trades, and stay open. Named `<entrant>!notrade` in a
+    # lineup.
+    no_trade: bool = False
 
     def __post_init__(self) -> None:
         pairs = self.options.items() if isinstance(self.options, Mapping) else self.options
@@ -467,6 +474,19 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
             raise ValueError(f"a seat that does not trade cannot veto its trader {trader!r}")
         gate = Vetoed(gate, bot, picks=veto_picks)
     return TradesBy(bot, gate)
+
+
+def closed(bot: Bot, closer: str | None, board: Board, rng: random.Random) -> Bot:
+    """`bot`'s moves, with `closer`'s wherever it has one
+    (`hexset.bots.Closes`), the closer named as a lineup names it; `bot`
+    itself where `closer` is `None`. The closer is seeded off `rng`'s state
+    without drawing from it, as a trader is (`traded`), and built bare."""
+    if closer is None:
+        return bot
+    from .bots import Closes
+
+    seed = int.from_bytes(hashlib.sha256(repr(rng.getstate()).encode() + b"closer").digest()[:8], "big")
+    return Closes(bot, _spawn(entrant_from_name(closer), board, random.Random(seed)))
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
@@ -670,15 +690,32 @@ def play(
     )
 
 
-def seat_bots(game: Game, bots: Sequence[Bot], trade_mode: str = "round") -> None:
+def seat_bots(
+    game: Game, bots: Sequence[Bot], trade_mode: str = "round", no_trade: Iterable[int] = (),
+) -> None:
     """Seat `bots` at `game` as its gates and choose the mechanism.
 
-    That is all a table decides. How hard a seat bargains, and whether it
-    trades at all, is that seat's own config -- an arm that does not trade is
-    built as a bot that does not trade, not as a table that forbids it.
+    That is all a table decides. How hard a seat bargains is that seat's own
+    config -- an arm that bargains differently is built as a bot that does.
+    The one exception is `no_trade`: the seats whose entrant is out of player
+    trading altogether (`Entrant.no_trade`) are put under a trade embargo with
+    every other seat (`Game.embargoes`), which closes offers, answers and
+    robber deals to them whatever their gates declare.
+
+    Every part of each bot that has a `seat_at` is seated at `game` here
+    (`hexset.bots.seat_at`), as `hexset.seat.Seat` seats its bot: a trader
+    with no moves of its own reads the game it trades in from the first
+    offer, not only once its seat's mover first moves.
     """
+    from .bots.base import seat_at
+
     game.gates = tuple(bots)
     game.trade_mode = trade_mode
+    for bot in bots:
+        seat_at(bot, game)
+    closed = {(seat, other) for seat in no_trade for other in range(len(game.gates)) if other != seat}
+    if closed:
+        game.embargoes = game.embargoes | frozenset(closed)
 
 
 def run_seated(
@@ -745,15 +782,17 @@ def play_game(
     *,
     action_cap: int = MAX_ACTIONS,
     trade_mode: str = "round",
+    no_trade: Iterable[int] = (),
 ) -> Game:
     """`play`'s loop over a game somebody else dealt (`deal_game`).
 
     `trade_mode` is the mechanism, and the only bargaining choice a table
-    makes; everything else is each seated bot's own config. `"auto"`
+    makes; everything else is each seated bot's own config, but for the
+    seats `no_trade` takes out of player trading (`seat_bots`). `"auto"`
     is the exhaustive automatic house, a comparability option rather than
     the thing to fit against (see `Game.trade_mode`).
     """
-    seat_bots(game, bots, trade_mode)
+    seat_bots(game, bots, trade_mode, no_trade)
     run_seated(game, bots, action_cap)
     return game
 
@@ -862,6 +901,7 @@ def _play_one(
     retired = frozenset(
         seats_taken[e] for e, entrant in enumerate(entrants) if entrant.kind == RETIRED
     )
+    closed = frozenset(seats_taken[e] for e, entrant in enumerate(entrants) if entrant.no_trade)
 
     # Every stream keys off `board_index`, not `index`: under antithetic the
     # two halves of a pair must differ in the seat assignment and in
@@ -879,7 +919,7 @@ def _play_one(
         game, record, cleared = _play_and_record(
             lineup, board, seed, board_index, action_cap,
             trade_mode=trade_mode, game_type=game_type, locked=retired,
-            turn_cap=turn_cap, first=first,
+            turn_cap=turn_cap, first=first, no_trade=closed,
         )
     else:
         game = play_game(
@@ -890,6 +930,7 @@ def _play_one(
             lineup,
             action_cap=action_cap,
             trade_mode=trade_mode,
+            no_trade=closed,
         )
     searches = tuple(_search_log(lineup[seats_taken[e]]) for e in range(seats))
     # true state: the verdict's own victory points include hidden
@@ -1056,6 +1097,7 @@ def _play_and_record(
     locked: Iterable[int] = (),
     turn_cap: int = MAX_TURNS,
     first: int = 0,
+    no_trade: Iterable[int] = (),
 ) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
     """`play_game`'s own loop (`run_seated`) with a `hexset.record.Tape` and the
     `ClearedTrade` census attached as hooks, so a record is exactly the game
@@ -1067,7 +1109,7 @@ def _play_and_record(
         chance=lambda rng: recording(rng, game_type.rules),
         game_type=game_type, locked=locked, turn_cap=turn_cap, first=first,
     )
-    seat_bots(game, lineup, trade_mode)
+    seat_bots(game, lineup, trade_mode, no_trade)
     tape = Tape()
     cleared: list[ClearedTrade] = []
     run_seated(game, lineup, action_cap, tape=tape, cleared=cleared)
@@ -1761,7 +1803,12 @@ def entrant_from_name(name: str) -> Entrant:
     `~` trader. A `~` names the trader of the whole name before it, so a
     handoff's two bots name none of their own: the seat trades as `<a>` or
     as the handoff's `~` trader. A trailing `^<deal spec>` names how the
-    whole seat makes robber deals (`hexset.deals.DealParams.parse`)."""
+    whole seat makes robber deals (`hexset.deals.DealParams.parse`). A
+    trailing `!notrade`, outermost, takes the whole seat out of player
+    trading (`Entrant.no_trade`), whatever the rest of the name sets."""
+    if name.endswith(NO_TRADE):
+        entrant = entrant_from_name(name[: -len(NO_TRADE)])
+        return replace(entrant, name=f"{entrant.name}{NO_TRADE}", no_trade=True)
     if DEALS in name:
         seat, _, spec = name.rpartition(DEALS)
         entrant = entrant_from_name(seat)
@@ -1816,10 +1863,14 @@ TRADER = "~"
 #: Separates a seat from how it makes robber deals.
 DEALS = "^"
 
+#: Ends a lineup name whose seat is out of player trading (`Entrant.no_trade`).
+NO_TRADE = "!notrade"
+
 
 def lineup_from_names(names: Sequence[str]) -> list[Entrant]:
     """Resolve names to entrants, numbering repeats so standings stay readable."""
-    parts = {part for name in names for part in name.partition(DEALS)[0].split(TRADER)}
+    parts = {part for name in names
+             for part in name.removesuffix(NO_TRADE).partition(DEALS)[0].split(TRADER)}
     _load_presets(tuple(parts))
     unknown = sorted(
         name

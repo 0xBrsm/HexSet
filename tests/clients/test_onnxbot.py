@@ -236,6 +236,53 @@ def test_a_file_naming_a_trader_nothing_registers_fails_at_spawn_naming_the_fix(
     assert "--runtime" in message
 
 
+def test_a_file_that_names_a_closer_is_seated_under_it_beneath_its_trader(checkpoint_v2, tmp_path):
+    """A `closer` key seats the checkpoint's moves under that closer
+    (`hexset.arena.closed`, `hexset.bots.Closes`), and a `trader` key seats
+    the closed seat over the trader's trading, so the closer only ever moves
+    and the trader only ever trades."""
+    onnx = pytest.importorskip("onnx")
+    from hexset.arena import Entrant, register_entrant_kind, register_preset
+    from hexset.bots import Closes, TradesBy
+    from hexset.clients.netbot import NetworkBot
+    from hexset.clients.onnxbot import load, spawn
+
+    class NoClose:
+        def closing(self, game):
+            return None
+
+    register_entrant_kind("test-closer-spawn", lambda entrant, board, rng: NoClose())
+    register_preset("test-closer-spawn", Entrant("test-closer-spawn", kind="test-closer-spawn"), listed=False)
+    path, board = checkpoint_v2
+    model = onnx.load(path)
+    for key, value in (("closer", "test-closer-spawn"), ("trader", "test-trader")):
+        entry = model.metadata_props.add()
+        entry.key, entry.value = key, value
+    named = tmp_path / "closed.onnx"
+    onnx.save(model, str(named))
+
+    assert load(str(named), board.topology).closer == "test-closer-spawn"
+    seat = spawn(str(named), board, rng=random.Random(0))
+    assert isinstance(seat, TradesBy) and isinstance(seat.mover, Closes)
+    assert isinstance(seat.mover.mover, NetworkBot) and isinstance(seat.mover.closer, NoClose)
+    assert load(path, board.topology).closer is None
+
+
+def test_a_file_naming_a_closer_nothing_registers_fails_at_spawn(checkpoint_v2, tmp_path):
+    onnx = pytest.importorskip("onnx")
+    from hexset.clients.onnxbot import spawn
+
+    path, board = checkpoint_v2
+    model = onnx.load(path)
+    entry = model.metadata_props.add()
+    entry.key, entry.value = "closer", "no-such-closer"
+    named = tmp_path / "unclosed.onnx"
+    onnx.save(model, str(named))
+
+    with pytest.raises(ValueError, match="`closer`"):
+        spawn(str(named), board, rng=random.Random(0))
+
+
 def test_a_file_that_asks_for_a_robber_tip_spawns_a_bot_that_tips(checkpoint_v2, tmp_path):
     """`robber_tip` in the file's metadata reaches the spawned seat, one
     forward and searched; a file without it plays its robber moves untouched."""
@@ -257,6 +304,31 @@ def test_a_file_that_asks_for_a_robber_tip_spawns_a_bot_that_tips(checkpoint_v2,
         assert (seat.gate if searched else seat).robber_tip == 0.5
     assert load(path, board.topology).robber_tip == 0.0
     assert spawn(path, board, rng=random.Random(0)).robber_tip == 0.0
+
+
+def test_a_file_that_asks_for_a_calibration_reads_its_own_seat_through_it_in_every_gate(checkpoint_v2, tmp_path):
+    """`own_calibration` in the file's metadata reaches the spawned seat's
+    gate one forward, searched by MCTS and by rollouts, and an MCTS file's
+    leaves as well; a file without it reads its value head as it is."""
+    onnx = pytest.importorskip("onnx")
+    from hexset.clients.onnxbot import spawn
+
+    path, board = checkpoint_v2
+    kinds = {"one forward": [], "mcts": [("search", "mcts"), ("simulations", "8")],
+             "rollout": [("search", "rollout"), ("worlds", "2"), ("top", "2")]}
+    for kind, keys in kinds.items():
+        model = onnx.load(path)
+        for key, value in [("own_calibration", "0.5,1")] + keys:
+            entry = model.metadata_props.add()
+            entry.key, entry.value = key, value
+        named = tmp_path / f"calibrated-{kind.replace(' ', '-')}.onnx"
+        onnx.save(model, str(named))
+        seat = spawn(str(named), board, rng=random.Random(0))
+        gate = seat if kind == "one forward" else seat.gate
+        assert gate.own_calibration == (0.5, 1.0), kind
+        if kind == "mcts":
+            assert seat.own_calibration == (0.5, 1.0)   # the leaves, `hexset.mcts.Search`
+    assert spawn(path, board, rng=random.Random(0)).own_calibration is None
 
 
 def test_spawn_refuses_a_checkpoint_trained_for_another_player_count(checkpoint_v2):

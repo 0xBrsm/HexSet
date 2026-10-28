@@ -23,6 +23,7 @@ from hexset.chance import Balanced, Live, Recording, for_rules
 from hexset.game import imagine, is_over, start, to_move
 from hexset.record import ReplayError, from_json, record_game, replay, to_json
 from hexset.rules import DUEL_VARIANT, STANDARD_GAME
+from journals import fresh
 
 ACTION_CAP = 600
 
@@ -36,7 +37,7 @@ def standard_record(seed: int, bot_seed: int):
     bots = [RandomBot(random.Random(bot_seed * 10 + s)) for s in range(4)]
     # RandomBot declines every offer: skipping the trade rounds plays the same game.
     return record_game(bots, board, seed, game_type=STANDARD_GAME,
-                       action_cap=ACTION_CAP, trade_mode="external")
+                       action_cap=ACTION_CAP, trade_mode="external", journal=fresh())
 
 
 def test_a_seed_rolls_the_same_dice_turn_for_turn_however_it_is_played():

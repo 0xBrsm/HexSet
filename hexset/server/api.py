@@ -1020,11 +1020,11 @@ def _fixed_seats(table: Table) -> str:
             f"{' or '.join(str(n) for n in game_type.seats)} seats; its seats are fixed")
 
 
-def journal_dir(config: Config) -> str | None:
+def journal_dir(config: Config) -> str:
     """Where this server's journals live: whatever `config` named, or the
-    environment's directory when it named nothing. An empty string means
-    journalling is off, which is not the same as `None`."""
-    return config.games_dir if config.games_dir is not None else journal.configured_dir()
+    environment's directory (`journal.configured_dir`) when it named nothing.
+    Every game is journalled."""
+    return config.games_dir or journal.configured_dir()
 
 
 def reopened_seats(events: list[dict]) -> list[Seat]:

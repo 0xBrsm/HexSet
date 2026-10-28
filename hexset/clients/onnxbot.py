@@ -638,6 +638,22 @@ def _pool_policy(path: str, topology: Topology, device: str):
     return load(path, topology, device, 1).policy
 
 
+def _pool_routed(path: str, opponents: tuple[str, str], topology: Topology, device: str):
+    """A rollout worker's copy of a playout that plays the other seats by the
+    file's opponent pair (`SearchConfig.rollout.opponents`): its own policy at
+    its own seat, the pair's policy at every other, conditioned as the
+    searching process sends each share (`SeatRouted.context`)."""
+    from hexset.clients.conditioned import ConditionedPolicy, SeatRouted
+
+    return SeatRouted(load(path, topology, device, 1).policy, ConditionedPolicy(opponents[0], topology, threads=1))
+
+
+def _opponent_files(path: str, names: tuple[str, str]) -> tuple[str, str]:
+    """The opponent pair a file names, as paths beside it."""
+    here = os.path.dirname(os.path.abspath(path))
+    return os.path.join(here, names[0]), os.path.join(here, names[1])
+
+
 def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
@@ -651,6 +667,14 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
         )
     rollout = loaded.search.rollout
     if rollout is not None:
+        opponents = pool_load = None
+        if rollout.opponents is not None:
+            from hexset.clients.conditioned import Opponents
+
+            files = _opponent_files(path, rollout.opponents)
+            opponents = Opponents(*files, board.topology, threads=threads,
+                                  rng=random.Random() if rng is None else random.Random(rng.getrandbits(64)))
+            pool_load = partial(_pool_routed, path, files, board.topology, device)
         return rollouts_for(
             load(path, board.topology, device, threads),
             worlds=rollout.worlds,
@@ -659,8 +683,9 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
             horizon=rollout.horizon,
             full_setup=rollout.full_setup,
             rng=rng,
-            pool=RolloutPool(partial(_pool_policy, path, board.topology, device), workers) if workers else None,
+            pool=RolloutPool(pool_load or partial(_pool_policy, path, board.topology, device), workers) if workers else None,
             own_calibration=loaded.search.own_calibration,
+            opponents=opponents,
         )
     return searcher(
         path,

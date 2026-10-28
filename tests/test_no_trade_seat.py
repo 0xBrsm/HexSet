@@ -15,6 +15,7 @@ from hexset.board.board import random_base_board
 from hexset.game import start
 from hexset.rules import STANDARD_GAME
 from traders import TRADER  # registers `test-trader`
+from journals import fresh
 
 DEALER = f"{TRADER}^answer,ask"
 # `test-trader` moves at random, so its games rarely finish; the first turns
@@ -24,7 +25,7 @@ TURNS = 60
 
 def _outcomes(names, games, trade_mode="round"):
     entrants = tuple(lineup_from_names(names))
-    return [_play_one((entrants, index, 7, MAX_ACTIONS, True, True, trade_mode, STANDARD_GAME, TURNS))
+    return [_play_one((entrants, index, 7, MAX_ACTIONS, True, trade_mode, STANDARD_GAME, TURNS, "random"), fresh())
             for index in range(games)]
 
 

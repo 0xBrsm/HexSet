@@ -19,6 +19,7 @@ from hexset.arena import (
 )
 from hexset.record import to_json
 from hexset.rules import STANDARD_GAME
+from journals import fresh
 
 FIXTURES = Path(__file__).parent / "clients" / "fixtures"
 
@@ -219,9 +220,9 @@ def _jobs(lineups: dict[str, list[str]], games: int, seed: int = 4):
 
 def test_a_lane_game_is_the_game_compete_plays_at_its_index(tmp_path):
     lineup = lineup_from_names(["random"] * 4)
-    whole = compete(lineup, 8, seed=4, records=True, **QUICK)
+    whole = compete(lineup, 8, seed=4, **QUICK, journal=fresh())
     lanes = compete_lanes(_jobs({"t": ["random"] * 4}, 8), tmp_path / "j.jsonl",
-                          lanes=3, records=True, **QUICK)
+                          lanes=3, **QUICK)
     assert [lanes[("t", 4, i)].winner for i in range(8)] == list(whole.winners)
     assert [lanes[("t", 4, i)].points for i in range(8)] == list(whole.points)
     assert [to_json(lanes[("t", 4, i)].record) for i in range(8)] == [to_json(r) for r in whole.records]
@@ -241,16 +242,16 @@ def test_every_lane_game_is_in_the_journal_under_its_key(tmp_path):
 
 def test_a_lane_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     jobs = _jobs({"a": ["random"] * 4}, 6)
-    whole = compete_lanes(jobs, tmp_path / "whole.jsonl", lanes=4, records=True, **QUICK)
+    whole = compete_lanes(jobs, tmp_path / "whole.jsonl", lanes=4, **QUICK)
     journal = tmp_path / "j.jsonl"
-    compete_lanes(jobs, journal, lanes=4, records=True, **QUICK)
+    compete_lanes(jobs, journal, lanes=4, **QUICK)
     kept = journal.read_text().splitlines(keepends=True)
     assert [json.loads(k)["kind"] for k in kept[:2]] == ["header", "source"]
     journal.write_text("".join(kept[:4]) + kept[4][: len(kept[4]) // 2])
     with pytest.raises(FileExistsError):
-        compete_lanes(jobs, journal, lanes=4, records=True, **QUICK)
+        compete_lanes(jobs, journal, lanes=4, **QUICK)
     played = []
-    resumed = compete_lanes(jobs, journal, lanes=4, records=True, resume=True,
+    resumed = compete_lanes(jobs, journal, lanes=4, resume=True,
                             progress=lambda done, total, key, outcome: played.append(key), **QUICK)
     assert set(resumed) == set(jobs) and len(played) == len(jobs)
     for key in jobs:
@@ -309,12 +310,12 @@ def test_a_served_file_plays_the_same_game_in_a_lane_as_alone(tmp_path, monkeypa
         stub = Entrant("lane-stub", kind="lane-stub", weights=_dyadic_stub(tmp_path))
         lineup = (stub, *lineup_from_names(["random"] * 3))
         jobs = {("t", 9, i): (lineup, 9, i) for i in range(2)}
-        lanes = compete_lanes(jobs, tmp_path / "j.jsonl", lanes=2, records=True, action_cap=50,
+        lanes = compete_lanes(jobs, tmp_path / "j.jsonl", lanes=2, action_cap=50,
                               turn_cap=500, backend=backend)
         # The file's value-head gate priced offers in the lanes, beside its moves.
         assert (True, ("value",)) in asked and (True, ("action_index",)) in asked
         for (_, seed, index), outcome in lanes.items():
-            alone = _play_one((lineup, index, seed, 50, True, True, "round", STANDARD_GAME, 500))
+            alone = _play_one((lineup, index, seed, 50, True, "round", STANDARD_GAME, 500, "random"), fresh())
             assert to_json(outcome.record) == to_json(alone.record)
             assert outcome.cleared == alone.cleared and outcome.deals == alone.deals
     finally:

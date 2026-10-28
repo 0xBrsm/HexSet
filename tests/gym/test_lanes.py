@@ -34,6 +34,7 @@ from hexset.chance import Live, Recording
 from hexset.gym.lanes import LaneEnv as _LaneEnv
 from hexset.record import advance, moves, open_record, replay, replay_to
 from hexset.victory import victory_points
+from journals import fresh
 
 SEED = 11
 CAP = 2000
@@ -91,7 +92,8 @@ def played_both_ways():
     try:
         theirs = _play_one(
             ((Entrant("scripted", "test-scripted"),) * 4, FINISHED, SEED, CAP, False,
-             True, "round", STANDARD_GAME, TURN_CAP, "random")
+             "round", STANDARD_GAME, TURN_CAP, "random"),
+            fresh(),
         )
     finally:
         arena.unregister_entrant_kind("test-scripted")
@@ -205,7 +207,7 @@ def test_a_board_mode_deals_every_lane_by_that_mode():
     from hexset.arena import deal_board
 
     env = LaneEnv(players=3, seed=5, lanes=2, deal=3, board_mode="spiral", bots={0: spawn},
-                  action_cap=60, records=True)
+                  action_cap=60)
     episodes = env.drain()
     assert sorted(e.index for e in episodes) == [0, 1, 2]
     for episode in episodes:
@@ -234,7 +236,7 @@ def drain_watching(env):
 
 
 def test_a_lane_record_replays_to_the_game_the_lane_played():
-    env = LaneEnv(4, SEED, 2, deal=2, action_cap=200, bots={0: spawn}, records=True)
+    env = LaneEnv(4, SEED, 2, deal=2, action_cap=200, bots={0: spawn})
     games, episodes = drain_watching(env)
 
     assert len(episodes) == 2
@@ -250,7 +252,7 @@ def test_a_lane_record_replays_to_the_game_the_lane_played():
 
 
 def test_replay_to_is_the_record_stepped_that_far():
-    env = LaneEnv(4, SEED, 1, deal=1, action_cap=200, bots={0: spawn}, records=True)
+    env = LaneEnv(4, SEED, 1, deal=1, action_cap=200, bots={0: spawn})
     (episode,) = env.drain()
     record = episode.record
     walk = list(moves(record))
@@ -273,21 +275,18 @@ def test_replay_to_is_the_record_stepped_that_far():
         replay_to(record, -1)
 
 
-def test_an_environment_not_asked_for_records_does_not_record_chance():
-    plain = LaneEnv(4, SEED, 1, deal=1, action_cap=40, bots={0: spawn})
-    assert [type(game.chance) for game in plain.in_flight()] == [Live]
-    (episode,) = plain.drain()
-    assert episode.record is None
-
-    recorded = LaneEnv(4, SEED, 1, deal=1, action_cap=40, bots={0: spawn}, records=True)
-    assert [type(game.chance) for game in recorded.in_flight()] == [Recording]
+def test_every_lane_game_records_its_chance_and_hands_back_its_record():
+    env = LaneEnv(4, SEED, 1, deal=1, action_cap=40, bots={0: spawn})
+    assert [type(game.chance) for game in env.in_flight()] == [Recording]
+    (episode,) = env.drain()
+    assert episode.record is not None
 
 
 @pytest.mark.parametrize("bad_response", ["missing", "illegal", "inactive"])
 def test_invalid_batch_does_not_advance_any_lane_and_can_be_retried(bad_response):
     from hexset.actions import Action, ActionType
 
-    env = LaneEnv(players=2, lanes=2, deal=2, action_cap=1, records=True)
+    env = LaneEnv(players=2, lanes=2, deal=2, action_cap=1)
     requests = env.requests()
     answers = {r.lane: r.options[0] for r in requests}
     if bad_response == "missing":
@@ -366,7 +365,7 @@ def test_lightweight_policy_collects_batched_training_rows_and_replayable_episod
         return bot
 
     env = LaneEnv(players=2, seed=19, lanes=3, deal=4, action_cap=48,
-                  gates={0: gate}, records=True)
+                  gates={0: gate})
     episodes, retained, collector_batches = [], {}, []
     while env.running:
         requests = env.requests()

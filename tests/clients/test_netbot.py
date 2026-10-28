@@ -27,6 +27,7 @@ from hexset.trading._engine import _candidates
 from hexset.view import View
 from traders import FRAGMENTED
 from helpers import give
+from journals import fresh
 
 # Read through a per-seat rotation: seat *s* prices resource *r* at
 # `WEIGHTS[(r + s) % 5]`. One shared set makes every exchange zero-sum,
@@ -404,7 +405,7 @@ def test_a_rollout_seat_journals_every_decision_it_made(board, arena_registry):
     lineup = tuple(entrant_from_name(name) for name in (
         "rollout:/tmp/x.onnx@2:top=2:horizon=1", "random", "random", "random",
     ))
-    outcome = _play_one((lineup, 0, 7, MAX_ACTIONS, False, False, "round", STANDARD_GAME, 3))
+    outcome = _play_one((lineup, 0, 7, MAX_ACTIONS, False, "round", STANDARD_GAME, 3, "random"), fresh())
     log, *others = outcome.searches
     assert log and not any(others)
     searched = [d for d in log if d["worlds"]]
@@ -946,7 +947,7 @@ def test_a_policy_duels_through_compete_batched(board, monkeypatch):
 
     verdict = compete_batched(
         {0: gated, 1: bare}, 2, players=PLAYERS, seed=5, lanes=1, action_cap=30
-    )
+    , journal=fresh())
     assert verdict.games == 2 and verdict.truncated == 2
     assert len(installed) == len(set(installed)) == 4, "two gated seats a game"
     assert priced, "no gated seat priced a trade"

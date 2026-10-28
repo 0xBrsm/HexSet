@@ -6,6 +6,7 @@ import pytest
 
 from hexset.arena import ClearedTrade, Entrant
 from hexset.bench import trade_census
+from journals import fresh
 
 
 @pytest.mark.parametrize("quota,expected", [("max 100000", 6), ("200000 100000", 2), ("50000 100000", 1)])
@@ -40,7 +41,8 @@ def test_census_maps_rotated_seats_and_preserves_resource_direction(monkeypatch)
 
     monkeypatch.setattr(trade_census, "compete", compete)
     result = trade_census.run_census(
-        [Entrant("first", "random"), Entrant("second", "random")], 1, records=True,
+        [Entrant("first", "random"), Entrant("second", "random")], 1,
+        journal=fresh(),
     )
     row, = result.trades
     assert (row.name_a, row.name_b) == ("second", "first")
@@ -119,7 +121,7 @@ def test_throughput_plays_random_games_under_the_unstructured_cap(monkeypatch):
         return SimpleNamespace(seconds=1.0, mean_turns=10.0, unfinished=0)
 
     monkeypatch.setattr(throughput, "compete", compete)
-    throughput.run(4, 4, seed=0, workers=1)
+    throughput.run(4, 4, seed=0, workers=1, journal=fresh())
     assert seen["turn_cap"] == UNSTRUCTURED_TURN_CAP
 
 

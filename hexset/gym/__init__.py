@@ -10,7 +10,7 @@ and checked lazily so `import hexset` stays numpy-only.
 
 from __future__ import annotations
 
-from .lanes import BoardBots, Decision, Episode, LaneEnv, Outcome, Request
+from .lanes import BoardBots, Decision, Episode, LaneEnv, Outcome, Request, episode_entry
 
 _EXTRA = "hexset.gym's PettingZoo/Gymnasium environments require the 'gym' extra: pip install \"hexset[gym]\""
 
@@ -47,6 +47,7 @@ __all__ = [
     "LaneEnv",
     "Outcome",
     "Request",
+    "episode_entry",
 ]
 if _HAVE_EXTRA:
     __all__ += ["HexSetAEC", "HexSetEnv", "register"]

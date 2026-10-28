@@ -18,6 +18,7 @@ from hexset.arena import RUNTIME_HELP, compete, entrant_from_name, load_runtime
 from hexset.record import write
 from hexset.bench.duel import add_table_options
 from hexset.rules import game_type
+from hexset.seeds import add_arguments as add_seed_arguments, resolve as resolve_seed
 
 __all__ = [
     "main",
@@ -34,7 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bot", required=True)
     parser.add_argument("--runtime", action="append", default=[], help=RUNTIME_HELP)
     parser.add_argument("--players", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=0)
+    # The games are a dataset to fit on, so their seed is a training seed
+    # (`hexset.seeds`), never one evaluations are scored on.
+    parser.add_argument("--seed-use", default="rl",
+                        help="the seed policy's training kind the dataset is for (default rl)")
+    add_seed_arguments(parser, help="the dataset's seed")
     # The records carry the game type, so a fit reads each game at the
     # points it was actually played to.
     add_table_options(parser)
@@ -58,13 +63,13 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     # Each game and its record are kept in the journal as they finish; the
     # flat file below is written from them once the run is whole.
+    resolve_seed(args, args.players, use=args.seed_use)
     journal = args.journal or f"{args.out}.s{args.seed}.g{args.games}.journal.jsonl"
     tournament = compete(
         [entrant] * args.players,
         args.games,
         seed=args.seed,
         workers=args.workers,
-        records=True,
         game_type=game_type(args.game_type),
         turn_cap=args.turn_cap,
         trade_mode=args.trade_mode,
@@ -73,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
         worker_initargs=tuple(args.runtime),
         journal=journal,
         resume=args.resume,
+        seed_use=args.seed_use,
+        seed_bypass=args.bypass_seed_policy,
+        registration=args.registration,
     )
     elapsed = time.perf_counter() - started
     records = tournament.records

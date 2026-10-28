@@ -10,12 +10,14 @@ import pytest
 
 from hexset.arena import (
     MAX_ACTIONS, _play_one, deal_board, deal_game, entrant_from_name, lineup_from_names,
-    play_game, spawn,
+    run_seated, seat_bots, spawn,
 )
+from hexset.record import Tape
 from hexset.bots import Handoff, RandomBot, TradesBy, handed_off, play_against, seat_at
 from hexset.rules import STANDARD_GAME
 from hexset.trading import retune
 from traders import ScarcityTrader
+from journals import fresh
 
 
 class Recording(RandomBot):
@@ -49,7 +51,9 @@ class Told:
 def test_moves_are_first_s_through_the_round_and_second_s_after():
     first, second = Recording(1), Recording(2)
     bots = [Handoff(first, second, 3)] + [RandomBot(random.Random(s)) for s in (3, 4, 5)]
-    game = play_game(deal_game(5, 0, 4), bots)
+    game = deal_game(5, 0, 4)
+    seat_bots(game, bots)
+    run_seated(game, bots, tape=Tape())
     # Three rounds of four seats: every turn count below 12 is first's
     # (setup included), every one from 12 on second's.
     assert first.at and second.at and game.turns > 12
@@ -130,7 +134,7 @@ def test_a_handoff_plays_as_its_first_until_it_hands_over():
     end of the game is its `first`, game for game."""
     def outcome(name, index):
         lineup = tuple(lineup_from_names([name, "random", "random", "random"]))
-        o = _play_one((lineup, index, 7, MAX_ACTIONS, True, True, "round", STANDARD_GAME, 1200))
+        o = _play_one((lineup, index, 7, MAX_ACTIONS, True, "round", STANDARD_GAME, 1200, "random"), fresh())
         return o.winner, o.turns, o.points
 
     for index in range(3):

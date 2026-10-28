@@ -13,6 +13,7 @@ from hexset.actions import Action, options_for
 from hexset.arena import Entrant, compete, register_entrant_kind
 from hexset.game import Game
 from hexset.record import replay
+from journals import fresh
 
 
 @dataclass
@@ -42,7 +43,8 @@ def test_a_registered_bot_plays_and_its_records_replay():
         workers=1,
         worker_initializer=register_example,
         action_cap=40,
-        records=True,
+
+        journal=fresh(),
     )
     assert len(tournament.records) == 2
     for record in tournament.records:

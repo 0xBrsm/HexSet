@@ -18,6 +18,7 @@ from pathlib import Path
 from hexset.arena import PRESETS, compete
 from hexset.game import UNSTRUCTURED_TURN_CAP
 from hexset.experiment import provenance
+from hexset.seeds import add_arguments as add_seed_arguments, resolve as resolve_seed
 
 __all__ = [
     "Result",
@@ -42,12 +43,17 @@ class Result:
     finished_by_win: int
 
 
-def run(games: int, players: int, seed: int, workers: int) -> Result:
-    """Time `games` games with the `random` entrant in all `players` seats, as
-    a `Result`."""
+def run(
+    games: int, players: int, seed: int | None, workers: int, journal: str | os.PathLike,
+    *, seed_bypass: str | None = None, registration: str | os.PathLike | None = None,
+) -> Result:
+    """Time `games` games with the `random` entrant in all `players` seats,
+    each kept in `journal` as `compete` keeps every game, as a `Result`.
+    `seed`, `seed_bypass` and `registration` are `compete`'s."""
     tournament = compete(
         [PRESETS["random"]] * players, games, seed=seed, workers=workers,
-        turn_cap=UNSTRUCTURED_TURN_CAP,
+        turn_cap=UNSTRUCTURED_TURN_CAP, journal=journal,
+        seed_bypass=seed_bypass, registration=registration,
     )
     return Result(
         games=games,
@@ -93,9 +99,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--players", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=0)
+    add_seed_arguments(parser)
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
+    parser.add_argument("--journal", default=None,
+                        help="where the games are kept (default: throughput.p<players>.s<seed>.g<games>"
+                             ".games.jsonl here); a journal that already holds a run is refused")
     args = parser.parse_args(argv)
 
     if args.games % args.players:
@@ -104,7 +113,10 @@ def main(argv: list[str] | None = None) -> int:
             "arena rotates its lineup through every seat"
         )
 
-    result = run(args.games, args.players, args.seed, args.workers)
+    resolve_seed(args, args.players)
+    journal = args.journal or f"throughput.p{args.players}.s{args.seed}.g{args.games}.games.jsonl"
+    result = run(args.games, args.players, args.seed, args.workers, journal,
+                 seed_bypass=args.bypass_seed_policy, registration=args.registration)
     payload = {"environment": environment(), **asdict(result)}
 
     if args.json:

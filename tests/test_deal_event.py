@@ -21,6 +21,7 @@ from hexset.robber import occupants, victims
 
 from helpers import clear_hand, deal
 from tests.test_game import run_setup
+from hexset.record import Tape
 
 WOOD, BRICK, SHEEP, WHEAT, ORE = range(5)
 
@@ -132,7 +133,7 @@ def play_out(dealing: bool, seed: int = 1, actions: int = 3000):
     if dealing:      # dealing params that ask nothing and answer nothing
         bots = [D.Dealing(b, D.DealParams()) for b in bots]
     seat_bots(game, bots)
-    run_seated(game, bots, actions)
+    run_seated(game, bots, actions, tape=Tape())
     s = game._state
     return game.turns, [list(h) for h in s.hands], s.robber, list(s.vertex_owner), game.deal_log
 

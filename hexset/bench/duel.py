@@ -24,6 +24,7 @@ from hexset.rules import GAME_TYPES, game_type
 from hexset.bench.throughput import default_workers
 from hexset.bench.metrics import json_metrics, paired_mean
 from hexset.experiment import provenance, result_document
+from hexset.seeds import add_arguments as add_seed_arguments, resolve as resolve_seed
 
 __all__ = [
     "ARENA_GEOMETRY",
@@ -111,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label-a", default=None)
     p.add_argument("--label-b", default=None)
     p.add_argument("--games", type=int, default=400)
-    p.add_argument("--duel-seed", type=int, default=20000)
+    add_seed_arguments(p, flag="--duel-seed", fallback=20000, help="the run's seed")
     p.add_argument("--workers", type=int, default=default_workers())
     p.add_argument("--geometry", default=ARENA_GEOMETRY,
                    help="a/b seat pattern or comma-separated lineup, e.g. a,b,random,random. "
@@ -122,10 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", default=None, help="append verdict to this JSON Lines file")
     p.add_argument("--verdicts", default="runs/eval", help="default verdict directory")
     p.add_argument("--no-json", action="store_true", help="print without writing a verdict file")
-    p.add_argument("--records", default=None, help="append replayable game records to this file")
+    p.add_argument("--records", default=None,
+                   help="also append the games' records to this flat file (the journal keeps "
+                        "them either way)")
     p.add_argument("--journal", default=None,
-                   help="where each game is kept as it finishes (default: beside the verdict, "
-                        "named for the pairing, seed and games; with --no-json, none)")
+                   help="where each game and its record are kept as it finishes (default: "
+                        "beside the verdict, named for the pairing, seed and games)")
     p.add_argument("--resume", action="store_true",
                    help="continue the run the journal holds, playing only the games it lacks")
     p.add_argument("--progress-seconds", type=float, default=60.0,
@@ -216,19 +219,19 @@ def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1), theirs=(2, 3)) 
     return renamed
 
 
-def _journal_path(args, label_a: str, label_b: str) -> Path | None:
-    """`--journal`, else one beside the verdict named for the pairing, the
-    seed and the games -- the same run finds the same journal to resume."""
+def _journal_path(args, label_a: str, label_b: str) -> Path:
+    """`--journal`, else one beside the verdict (where the verdict would go
+    under `--no-json`) named for the pairing, the seed and the games -- the
+    same run finds the same journal to resume."""
     if getattr(args, "journal", None):
         return Path(args.journal)
-    if getattr(args, "no_json", False):
-        return None
     if getattr(args, "json", None):
         verdict = Path(args.json)
     elif getattr(args, "verdicts", None):
         verdict = _verdict_path(args, label_a, label_b)
     else:
-        return None  # a caller building its own namespace names its own journal
+        raise ValueError("a duel keeps its games in a journal: give a journal, a verdict file or "
+                         "a verdict directory")
     return verdict.with_name(f"{verdict.stem}.s{args.duel_seed}.g{args.games}.games.jsonl")
 
 
@@ -247,7 +250,7 @@ def _verdict_path(args, label_a: str, label_b: str) -> Path:
 
 def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY) -> dict:
     """Two a side through `arena.compete`, sharded across `--workers`."""
-    from hexset.arena import compete, lineup_from_names, load_runtime, wilson
+    from hexset.arena import RETIRED, compete, lineup_from_names, load_runtime, wilson
 
     runtimes = tuple(args.runtime or ())
     load_runtime(*runtimes)
@@ -262,18 +265,17 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
             "seat and an incomplete rotation leaves the seat bias in the verdict"
         )
     lineup = sides(lineup_from_names(names), label_a, label_b, mine, theirs)
+    resolve_seed(args, sum(1 for e in lineup if e.kind != RETIRED), dest="duel_seed", fallback=20000)
 
     run_provenance = provenance(lineup)
     journal = _journal_path(args, label_a, label_b)
-    if journal is not None:
-        print(f"keeping each game in {journal}", file=sys.stderr)
+    print(f"keeping each game in {journal}", file=sys.stderr)
     started = time.monotonic()
     tournament = compete(
         lineup,
         args.games,
         seed=args.duel_seed,
         workers=args.workers,
-        records=bool(args.records),
         worker_initializer=load_runtime if runtimes else None,
         worker_initargs=runtimes,
         trade_mode=args.trade_mode,
@@ -283,6 +285,8 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         complement=side_swap(mine, theirs, len(names)),
         journal=journal,
         resume=getattr(args, "resume", False),
+        seed_bypass=getattr(args, "bypass_seed_policy", None),
+        registration=getattr(args, "registration", None),
         progress=None if getattr(args, "no_progress", False) else _progress(
             label_a, label_b, mine, theirs, started,
             every=getattr(args, "progress_seconds", 60.0), workers=args.workers,

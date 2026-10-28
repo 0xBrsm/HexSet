@@ -36,6 +36,7 @@ from ._source import source as _source
 from .actions import apply
 from .board.board import BOARD_MODES, Board, base_board
 from .deals import Deal, DealParams, Dealing, deal_seed
+from . import seeds as seed_policy
 from .economy import hand_size
 from .game import MAX_TURNS, Game, is_over, start, to_move
 from .rules import STANDARD_GAME, GameType
@@ -64,7 +65,7 @@ class Exhausted(RuntimeError):
     entrant took under `compete`, the policy id in each seat under
     `compete_batched`.
 
-    Not raised by `play_game`, so a served table with a wedged bot is the
+    Not raised by `run_seated`, so a served table with a wedged bot is the
     server's problem to survive rather than an exception through a live game.
     """
 
@@ -642,12 +643,9 @@ class Tournament:
     # Per game: which seat each entrant took, in entrant order -- what turns
     # anything the engine reports by *seat* back into an entrant.
     seating: tuple[tuple[int, ...], ...] = ()
-    # Per game, every trade the engine cleared, in order. Filled only when
-    # `compete(records=True)` asked, alongside `records`.
+    # Per game, every trade the engine cleared, in order.
     cleared: tuple[tuple[ClearedTrade, ...], ...] = ()
-    # One `Record` per game, in the same order as `winners`/`points`/`turns`,
-    # only when `compete(records=True)` asked (empty otherwise, never
-    # partially filled).
+    # One `Record` per game, in the same order as `winners`/`points`/`turns`.
     records: tuple["Record", ...] = ()
 
     def seat_balance(self, z: float = Z_95) -> list[tuple[int, int, tuple[float, float]]]:
@@ -664,30 +662,6 @@ class Tournament:
             for winner, row in zip(self.winners, self.points)
             if winner is not None
         ]
-
-
-def play(
-    bots: Sequence[Bot],
-    board: Board,
-    rng: random.Random,
-    *,
-    action_cap: int = MAX_ACTIONS,
-    game_type: GameType = STANDARD_GAME,
-    locked: Iterable[int] = (),
-    turn_cap: int = MAX_TURNS,
-) -> Game:
-    """One game, each bot seated at its own index.
-
-    Seating a bot also seats its private gate: `game.gates` is the lineup
-    itself. A bot defining none of `gains_many`/`accepts_many`/`accepts`
-    never trades.
-    """
-    return play_game(
-        start(board, len(bots), rng, game_type=game_type, locked=locked,
-              turn_cap=turn_cap),
-        bots,
-        action_cap=action_cap,
-    )
 
 
 def seat_bots(
@@ -723,23 +697,25 @@ def run_seated(
     bots: Sequence[Bot],
     action_cap: int = MAX_ACTIONS,
     *,
-    tape: "Tape | None" = None,
+    tape: "Tape",
     cleared: list[ClearedTrade] | None = None,
 ) -> None:
     """The engine's one loop: step `game` with `bots` until it is over or
     `action_cap` is reached. `game` must already be seated (`seat_bots`).
 
-    `tape` and `cleared` are hooks, not branches: a caller that passes
-    neither pays for neither, and the steps taken are identical whatever
-    combination is attached.
+    Every step is filed on `tape` (`hexset.record.Tape`): there is no
+    unrecorded loop. `cleared` is a hook, not a branch: the steps taken are
+    identical with or without it.
     """
+    from .bots.base import watch, watches
+
+    watching = [bot if watches(bot) else None for bot in bots]
     actions = 0
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = bots[seat]
-        watching = tape is not None or cleared is not None
-        before = len(game.trades) if watching else 0
-        shown_before = len(game.shown) if tape is not None else 0
+        before = len(game.trades)
+        shown_before = len(game.shown)
         if cleared is not None:
             # true state: a census of who was flush cannot be read off one
             # seat's view of the table.
@@ -748,10 +724,13 @@ def run_seated(
             turn, phase = game.turns, game.phase.name
             step = actions
         action = bot.choose(game)
+        # A bot modelling the other seats reads each move from its own seat
+        # (`hexset.bots.watch`), before it is applied.
+        for viewer, other in enumerate(watching):
+            watch(other, game, seat, action, viewer)
         apply(game, action)
-        if tape is not None:
-            # An END_TURN clears `game.shown`, and shows nothing itself.
-            tape.step(action, game.trades[before:], game.shown[shown_before:], before=before)
+        # An END_TURN clears `game.shown`, and shows nothing itself.
+        tape.step(action, game.trades[before:], game.shown[shown_before:], before=before)
         if cleared is not None:
             for trade in game.trades[before:]:
                 cleared.append(
@@ -776,30 +755,9 @@ def run_seated(
         actions += 1
 
 
-def play_game(
-    game: Game,
-    bots: Sequence[Bot],
-    *,
-    action_cap: int = MAX_ACTIONS,
-    trade_mode: str = "round",
-    no_trade: Iterable[int] = (),
-) -> Game:
-    """`play`'s loop over a game somebody else dealt (`deal_game`).
-
-    `trade_mode` is the mechanism, and the only bargaining choice a table
-    makes; everything else is each seated bot's own config, but for the
-    seats `no_trade` takes out of player trading (`seat_bots`). `"auto"`
-    is the exhaustive automatic house, a comparability option rather than
-    the thing to fit against (see `Game.trade_mode`).
-    """
-    seat_bots(game, bots, trade_mode, no_trade)
-    run_seated(game, bots, action_cap)
-    return game
-
-
 @dataclass(frozen=True)
 class Outcome:
-    """One played game, as `_play_one` hands it back to `compete`.
+    """One played game, as `_play_dealt` writes it and hands it back.
     `points`/`roads`/`settlements`/`cities` are in entrant rather than seat
     order, so they compare across differently rotated games; `seating` is
     the rotation that produced them, and `cleared` and `deals` stay in seat
@@ -814,6 +772,8 @@ class Outcome:
     settlements: tuple[int, ...]
     cities: tuple[int, ...]
     cleared: tuple[ClearedTrade, ...]
+    # The game's `hexset.record.Record`; None only in a journal written before
+    # every game was recorded.
     record: "Record | None"
     # Which game of the run this is, and the board it was dealt: under
     # antithetic pairing the two halves of a pair share `board_index`.
@@ -872,24 +832,38 @@ def deal_seats(
     return board_index, seating, first
 
 
-def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int, "bool | tuple[int, ...]", bool, str,
-               GameType, int, str],
-) -> Outcome:
-    """Play game `index` and return its `Outcome`. `record` and the
-    cleared-trade census are built only when the job's `records` flag is
-    set, never partially.
+#: A game's job: `(entrants, index, seed, action_cap, antithetic, trade_mode,
+#: game_type, turn_cap, board_mode)`. `antithetic` is the complement itself,
+#: `True` for `half_turn`, or `False`.
+Job = tuple[tuple[Entrant, ...], int, int, int, "bool | tuple[int, ...]", str, GameType, int, str]
 
-    Module level and taking only picklable arguments, so a pool can call it.
-    Every random stream derives from the seed and the game index, so a game
-    plays identically whichever worker draws it. The job's `antithetic` slot
-    is the complement itself, `True` for `half_turn`, or `False`.
+
+def _play_dealt(
+    job: Job, journal: str | os.PathLike, *, header: dict | None = None,
+    extra: dict | None = None,
+) -> Outcome:
+    """Play game `index` of the job, write it to `journal` and return its
+    `Outcome`, record included.
+
+    The game's line (`_journal_entry`, plus `extra`) is written and fsynced
+    before this returns, by whichever process plays the game, so no game
+    played here goes unwritten: there is no way to play a dealt game without
+    naming its journal. `header`, when given, heads a journal that is still
+    empty (`gamelog.append_after_header`); a journal opened elsewhere
+    (`compete`, `compete_lanes`) already has its own. Module level and taking
+    only picklable arguments, so a pool can call it. Every random stream
+    derives from the seed and the game index, so a game plays identically
+    whichever worker draws it.
     """
-    (entrants, index, seed, action_cap, antithetic, records, trade_mode,
-     game_type, turn_cap, *mode) = job
-    # Callers outside `compete` still build the nine-slot job from before
-    # boards had a mode; theirs deals the default.
-    board_mode = mode[0] if mode else "random"
+    if not journal:
+        raise ValueError("a game is played into a journal: name one")
+    if len(job) != 9 or not isinstance(job[5], str) or not isinstance(job[6], GameType):
+        raise TypeError(
+            "a game's job is (entrants, index, seed, action_cap, antithetic, trade_mode, "
+            f"game_type, turn_cap, board_mode), not {tuple(type(part).__name__ for part in job)}"
+        )
+    (entrants, index, seed, action_cap, antithetic, trade_mode,
+     game_type, turn_cap, board_mode) = job
     seats = len(entrants)
     complement = half_turn(seats) if antithetic is True else (antithetic or None)
     board_index, seating, first = deal_seats(entrants, index, complement)
@@ -913,32 +887,18 @@ def _play_one(
             entrant, board, random.Random(f"{seed}:{board_index}:{e}")
         )
 
-    record = None
-    cleared: tuple[ClearedTrade, ...] = ()
-    if records:
-        game, record, cleared = _play_and_record(
-            lineup, board, seed, board_index, action_cap,
-            trade_mode=trade_mode, game_type=game_type, locked=retired,
-            turn_cap=turn_cap, first=first, no_trade=closed,
-        )
-    else:
-        game = play_game(
-            deal_game(
-                seed, board_index, seats, board=board,
-                game_type=game_type, locked=retired, turn_cap=turn_cap, first=first,
-            ),
-            lineup,
-            action_cap=action_cap,
-            trade_mode=trade_mode,
-            no_trade=closed,
-        )
+    game, record, cleared = _play_and_record(
+        lineup, board, seed, board_index, action_cap,
+        trade_mode=trade_mode, game_type=game_type, locked=retired,
+        turn_cap=turn_cap, first=first, no_trade=closed,
+    )
     searches = tuple(_search_log(lineup[seats_taken[e]]) for e in range(seats))
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score and the build census are
     # both read off the truth rather than off one seat's view of it.
     states = [game.state(seats_taken[e], hidden=False) for e in range(seats)]
     won = None if game.won_by is None else seats_taken.index(game.won_by)
-    return Outcome(
+    outcome = Outcome(
         winner=won,
         seat=None if won is None else game.won_by,
         turns=game.turns,
@@ -955,6 +915,44 @@ def _play_one(
         board_index=board_index,
         deals=tuple(game.deal_log),
         searches=searches if any(searches) else (),
+    )
+    line = {**_journal_entry(outcome, exhausted=outcome.winner is None and outcome.turns >= turn_cap),
+            **(extra or {})}
+    if header is None:
+        gamelog.append(journal, line)
+    else:
+        gamelog.append_after_header(journal, header, line)
+    return outcome
+
+
+
+def _play_one(
+    job: Job, journal: str | os.PathLike, *, seed_bypass: str | None = None,
+    registration: str | os.PathLike | None = None, seed_use: str = "eval",
+) -> Outcome:
+    """Play game `index` of the job, write it to `journal` and return its
+    `Outcome`.
+
+    The line is written and fsynced before this returns: the game's outcome,
+    its `Record`, every seat's search decisions (`search_logs`), the entrants,
+    the seed and how the seed passed the seed policy (`hexset.seeds`), as one
+    `compete_lanes` line keyed by the game's index. Several processes may
+    write one journal; the first line in it is a header naming the engine and
+    the code (`read_game_journal` reads it). `seed_bypass`, `registration`
+    and `seed_use` are `compete`'s.
+    """
+    entrants, index, seed, *_ = job
+    from . import __version__
+
+    note = seed_policy.check(
+        seed, use=seed_use, seats=sum(1 for e in entrants if e.kind != RETIRED),
+        bypass=seed_bypass, registration=registration,
+    )
+    return _play_dealt(
+        job, journal,
+        header={"kind": "header", "journal": gamelog.JOURNAL_VERSION, "hexset": __version__,
+                "games": "one at a time", "source": _source_line(0)},
+        extra={"key": index, "entrants": [e.name for e in entrants], "seed": seed, "seeds": note},
     )
 
 
@@ -1099,9 +1097,9 @@ def _play_and_record(
     first: int = 0,
     no_trade: Iterable[int] = (),
 ) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
-    """`play_game`'s own loop (`run_seated`) with a `hexset.record.Tape` and the
-    `ClearedTrade` census attached as hooks, so a record is exactly the game
-    `play` would have played."""
+    """The engine's loop (`run_seated`) over a game dealt with
+    `hexset.record.recording`, with its `Tape` and the `ClearedTrade` census
+    attached: the game, its record and its cleared trades."""
     from .record import Tape, recording
 
     game = deal_game(
@@ -1120,12 +1118,11 @@ def compete(
     entrants: Sequence[Entrant],
     games: int,
     *,
-    seed: int = 0,
+    seed: int | None = None,
     action_cap: int = MAX_ACTIONS,
     workers: int = 1,
     antithetic: bool = True,
     complement: Sequence[int] | None = None,
-    records: bool = False,
     worker_initializer: Callable | None = None,
     worker_initargs: tuple = (),
     start_method: str | None = None,
@@ -1134,8 +1131,11 @@ def compete(
     turn_cap: int = MAX_TURNS,
     board_mode: str = "random",
     progress: Callable[[int, int, Outcome], None] | None = None,
-    journal: str | os.PathLike | None = None,
+    journal: str | os.PathLike,
     resume: bool = False,
+    seed_bypass: str | None = None,
+    registration: str | os.PathLike | None = None,
+    seed_use: str = "eval",
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every
     seat.
@@ -1180,9 +1180,8 @@ def compete(
 
     `board_mode` is how every board is dealt (`deal_board`).
 
-    `records=True` has every job build a `hexset.record.Record` alongside
-    the verdict, returned as `Tournament.records` in the same order as
-    `winners`/`points`/`turns`; off by default, and then skipped entirely.
+    Every game is recorded: its `hexset.record.Record` is in the journal and
+    in `Tournament.records`, in the same order as `winners`/`points`/`turns`.
 
     `progress(done, games, outcome)` is called in the calling process as each
     game's outcome arrives, in game order -- so `done` counts finished games
@@ -1191,16 +1190,25 @@ def compete(
     is for reporting, not keeping: a game resumed from a journal is delivered
     to it again.
 
-    `journal` is where a run keeps its games (`hexset.gamelog`): a header
-    line with the run's settings, then one line per game -- its outcome and,
-    under `records=True`, its record -- written and fsynced the moment the
-    game finishes, in whatever order the workers finish them. A run that
+    `journal` is where a run keeps its games (`hexset.gamelog`), and every
+    run has one: a header line with the run's settings, then one line per
+    game -- its outcome, its record and every seat's search decisions --
+    written and fsynced the moment the game finishes, in whatever order the workers finish them. A run that
     dies, is killed or raises keeps every game it finished, games still
     running included where it can wait for them; `read_journal` and
     `journal_tournament` read it part-way. A journal that already holds a
     run is refused unless `resume=True`, which checks its header against
     this run's settings and plays only the games it lacks: every game is a
     function of `seed` and its index, so the result is the run's own.
+
+    `seed` is held to the project's seed policy, if it has one
+    (`hexset.seeds`): a run naming no seed takes the policy's default for its
+    playing seats (0 with no policy), a confirmation seed needs the
+    `registration` its test was frozen in, and any seed the policy does not
+    allow is refused unless `seed_bypass` names a reason. A run whose games
+    are played to train or fit on names that kind of training as its
+    `seed_use` and is held to the policy's training seeds for it instead.
+    How the seed passed is kept on the journal's source line.
     """
     seats = len(entrants)
     if seats < 2:
@@ -1222,28 +1230,32 @@ def compete(
     # Checked once here as well as per game, so a lineup that can never be
     # dealt fails before any worker starts rather than `games` times over.
     game_type.check(playing, dealt=seats)
+    if seed is None:
+        seed = seed_policy.default_seed(seed_use, playing)
+    note = seed_policy.check(seed, use=seed_use, seats=playing, bypass=seed_bypass,
+                             registration=registration)
     lineup = tuple(entrants)
     pairing = _complement(lineup, complement) if antithetic else False
     if not antithetic and complement is not None:
         raise ValueError("a complement is the antithetic pair's second seating; "
                          "it needs antithetic=True")
+    if not journal:
+        raise ValueError("a run keeps its games in a journal: name one")
     jobs = {
-        i: (lineup, i, seed, action_cap, pairing, records, trade_mode, game_type,
+        i: (lineup, i, seed, action_cap, pairing, trade_mode, game_type,
             turn_cap, board_mode)
         for i in range(games)
     }
     header = _journal_header(
         lineup, games, seed=seed, action_cap=action_cap, antithetic=antithetic,
-        records=records, trade_mode=trade_mode, game_type=game_type, turn_cap=turn_cap,
+        records=True, trade_mode=trade_mode, game_type=game_type, turn_cap=turn_cap,
         # Only a complement other than the default is a setting of its own.
         complement=None if not pairing or pairing == half_turn(seats) else list(pairing),
         # Likewise a board mode other than the default, so journals written
         # before there was a choice still resume.
         **({} if board_mode == "random" else {"board_mode": board_mode}),
     )
-    if resume and journal is None:
-        raise ValueError("resume=True needs the journal to resume from")
-    finished = {} if journal is None else _open_journal(journal, header, resume)
+    finished = _open_journal(journal, header, resume, seeds=note)
     started = time.perf_counter()
     outcomes: list[Outcome] = []
     ready: dict[int, Outcome] = dict(finished)
@@ -1254,10 +1266,9 @@ def compete(
         return outcome.winner is None and outcome.turns >= turn_cap
 
     def keep(index: int, outcome: Outcome) -> None:
-        # Written the moment a game finishes, whatever its place in the order.
-        if journal is not None and index not in kept:
-            gamelog.append(journal, _journal_entry(outcome, exhausted=exhausted(outcome)))
-            kept.add(index)
+        # `_play_dealt` wrote the game the moment it finished, in whichever
+        # process played it; this only marks it held.
+        kept.add(index)
 
     def release() -> None:
         # `progress` and the verdict read games in game order.
@@ -1285,7 +1296,7 @@ def compete(
             max_workers=workers, mp_context=get_context(start_method),
             initializer=worker_initializer, initargs=worker_initargs,
         ) as pool:
-            futures = {pool.submit(_play_one, jobs[i]): i for i in pending}
+            futures = {pool.submit(_play_dealt, jobs[i], journal): i for i in pending}
             try:
                 for future in as_completed(futures):
                     arrive(futures[future], future.result())
@@ -1309,9 +1320,9 @@ def compete(
         if worker_initializer is not None:
             worker_initializer(*worker_initargs)
         for index in pending:
-            arrive(index, _play_one(jobs[index]))
+            arrive(index, _play_dealt(jobs[index], journal))
     elapsed = time.perf_counter() - started
-    return _tournament([entrant.name for entrant in lineup], outcomes, records, seconds=elapsed)
+    return _tournament([entrant.name for entrant in lineup], outcomes, True, seconds=elapsed)
 
 
 def compete_lanes(
@@ -1322,7 +1333,6 @@ def compete_lanes(
     workers: int = 1,
     antithetic: bool = True,
     complement: Sequence[int] | None = None,
-    records: bool = False,
     action_cap: int = MAX_ACTIONS,
     trade_mode: str = "round",
     game_type: GameType = STANDARD_GAME,
@@ -1335,6 +1345,9 @@ def compete_lanes(
     pin: bool = True,
     resume: bool = False,
     progress: Callable[[int, int, object, Outcome], None] | None = None,
+    seed_bypass: str | None = None,
+    registration: str | os.PathLike | None = None,
+    seed_use: str = "eval",
 ) -> dict[object, Outcome]:
     """Play every game in `jobs`, `lanes` at a time in each of `workers`
     processes, their network forwards batched across the games in flight
@@ -1342,7 +1355,7 @@ def compete_lanes(
 
     `jobs[key] = (entrants, seed, index)` is the game `compete(entrants,
     seed=seed, ...)` plays as its `index`-th, played by the same code
-    (`_play_one`): the same board, dice and seating (`deal_seats`, with the
+    (`_play_dealt`): the same board, dice and seating (`deal_seats`, with the
     antithetic `complement` as in `compete`), each seat built by `spawn`
     exactly as `compete` builds it, a served file with the trader, veto and
     deals its metadata names. So two jobs with one `seed` and `index` and
@@ -1365,7 +1378,9 @@ def compete_lanes(
     Unlike `compete`, a game that reaches `turn_cap` with no winner does not
     raise: it is kept with `winner` `None`, which a comparison across many
     lineups counts as nobody's win. `progress(done, total, key, outcome)` is
-    called here as each game arrives, held games first.
+    called here as each game arrives, held games first. Every seed in `jobs`
+    is held to the seed policy as `compete` holds its one (`seed_bypass`,
+    `registration`, `seed_use`).
     ``worker_initializer(*worker_initargs)`` runs once in each worker (here,
     for `workers=1`), as for `compete`. `backend` and `pin` are
     `hexset.lockstep.pool_lanes`'s: lanes are greenlets where `greenlet` is
@@ -1393,14 +1408,21 @@ def compete_lanes(
         if key in planned:
             raise ValueError(f"two jobs are keyed {key!r}")
         planned[key] = (lineup, int(seed), int(index))
+    notes: dict[str, dict] = {}
+    for lineup, seed, _ in planned.values():
+        playing = sum(1 for e in lineup if e.kind != RETIRED)
+        if f"{seed}/{playing}" not in notes:
+            notes[f"{seed}/{playing}"] = seed_policy.check(
+                seed, use=seed_use, seats=playing, bypass=seed_bypass, registration=registration,
+            )
     header = {
         "kind": "header", "journal": gamelog.JOURNAL_VERSION, "lanes": True,
         "antithetic": antithetic, "complement": None if complement is None else list(complement),
-        "records": records, "action_cap": action_cap, "trade_mode": trade_mode,
+        "records": True, "action_cap": action_cap, "trade_mode": trade_mode,
         "game_type": repr(game_type), "turn_cap": turn_cap,
         **({} if board_mode == "random" else {"board_mode": board_mode}),
     }
-    held = _open_lane_journal(journal, header, resume)
+    held = _open_lane_journal(journal, header, resume, seeds=notes)
     for key, (entrants, seed, index, _) in held.items():
         if key not in planned:
             continue
@@ -1419,29 +1441,38 @@ def compete_lanes(
             if progress is not None:
                 progress(len(outcomes), total, key, outcome)
     todo = [
-        (key, (lineup, index, seed, action_cap, pairings[repr(lineup)], records, trade_mode,
-               game_type, turn_cap, board_mode))
+        (key, (lineup, index, seed, action_cap, pairings[repr(lineup)], trade_mode,
+               game_type, turn_cap, board_mode), os.fspath(journal))
         for key, (lineup, seed, index) in planned.items() if key not in held
     ]
-    for (key, job), outcome in lockstep.pool_lanes(
+    for (key, _job, _journal), outcome in lockstep.pool_lanes(
         _play_lane_job, todo, workers=workers, lanes=lanes,
         initializer=worker_initializer, initargs=worker_initargs, start_method=start_method,
         backend=backend, pin=pin,
     ):
-        lineup, index, seed = job[0], job[1], job[2]
-        exhausted = outcome.winner is None and outcome.turns >= turn_cap
-        gamelog.append(journal, {
-            **_journal_entry(outcome, exhausted=exhausted),
-            "key": key, "entrants": [e.name for e in lineup], "seed": seed,
-        })
         outcomes[key] = outcome
         if progress is not None:
             progress(len(outcomes), total, key, outcome)
     return outcomes
 
 
-def _play_lane_job(job: tuple[object, tuple]) -> Outcome:
-    return _play_one(job[1])
+def _play_lane_job(task: tuple[object, tuple, str]) -> Outcome:
+    """One `compete_lanes` game, written to the run's journal as it finishes
+    (compete's game line, plus its `key`, `entrants` and `seed`)."""
+    key, job, journal = task
+    return _play_dealt(job, journal, extra={"key": key, "entrants": [e.name for e in job[0]], "seed": job[2]})
+
+
+def read_game_journal(path: str | os.PathLike) -> tuple[dict, list[tuple[dict, Outcome]]]:
+    """Any game journal -- `compete`'s, `compete_lanes`' or one `_play_one`
+    writes -- as its header and every game in it so far, in file order: each
+    game's line beside its `Outcome`. A game that exhausted the turn cap is
+    among them, its line's `kind` "exhausted"."""
+    entries = gamelog.read_lines(path)
+    if not entries or entries[0].get("kind") != "header":
+        raise ValueError(f"{path} is not a game journal: no header line")
+    return entries[0], [(e, _outcome_from_entry(e)) for e in entries[1:]
+                        if e.get("kind") in ("game", "exhausted")]
 
 
 def _lane_key(key: object) -> object:
@@ -1469,13 +1500,13 @@ def read_lane_journal(
 
 
 def _open_lane_journal(
-    path: str | os.PathLike, header: dict, resume: bool,
+    path: str | os.PathLike, header: dict, resume: bool, seeds: dict | None = None,
 ) -> dict[object, tuple[list[str], int, int, Outcome]]:
     """`_open_journal` for a `compete_lanes` journal: the games it holds, by key."""
     if not (os.path.exists(path) and os.path.getsize(path) > 0):
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         gamelog.append(path, header)
-        gamelog.append(path, _source_line(0))
+        gamelog.append(path, _source_line(0, seeds))
         return {}
     if not resume:
         raise FileExistsError(
@@ -1490,7 +1521,7 @@ def _open_lane_journal(
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
-    gamelog.append(path, _source_line(len(games)))
+    gamelog.append(path, _source_line(len(games), seeds))
     return games
 
 
@@ -1526,14 +1557,16 @@ def _journal_header(lineup: Sequence[Entrant], games: int, **settings) -> dict:
     }
 
 
-def _open_journal(path: str | os.PathLike, header: dict, resume: bool) -> dict[int, Outcome]:
+def _open_journal(
+    path: str | os.PathLike, header: dict, resume: bool, seeds: dict | None = None,
+) -> dict[int, Outcome]:
     """Start a journal at `path`, or pick up the one there: the games it
     already holds, by index."""
     held = os.path.exists(path) and os.path.getsize(path) > 0
     if not held:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         gamelog.append(path, header)
-        gamelog.append(path, _source_line(0))
+        gamelog.append(path, _source_line(0, seeds))
         return {}
     if not resume:
         raise FileExistsError(
@@ -1548,19 +1581,22 @@ def _open_journal(path: str | os.PathLike, header: dict, resume: bool) -> dict[i
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
-    gamelog.append(path, _source_line(len(games)))
+    gamelog.append(path, _source_line(len(games), seeds))
     return games
 
 
-def _source_line(games: int) -> dict:
+def _source_line(games: int, seeds: dict | None = None) -> dict:
     """The code that plays the games written after this line: the engine's
     version, and the commit of the checkout it runs from with whether tracked
-    files differ from it (both None for an installed package). Not part of the
-    header, which a resumed run must match: a run resumed on other code adds
-    a second line, after the `games` already held."""
+    files differ from it (both None for an installed package), and how the
+    run's seeds passed the seed policy (`hexset.seeds.check_eval`). Not part
+    of the header, which a resumed run must match: a run resumed on other
+    code, or under another bypass, adds a second line, after the `games`
+    already held."""
     from . import __version__
 
-    return {"kind": "source", "games": games, "hexset": __version__, **_source(__file__)}
+    line = {"kind": "source", "games": games, "hexset": __version__, **_source(__file__)}
+    return line if seeds is None else {**line, "seeds": seeds}
 
 
 # A checkpoint cannot be a preset, its path being known only at the command
@@ -1929,8 +1965,9 @@ __all__ = [
     "MAX_ACTIONS", "board_key", "game_key", "deal_board", "deal_game", "deal_seats",
     "half_turn", "seat_of",
     # playing
-    "play", "play_game", "seat_bots", "run_seated", "compete", "compete_lanes", "Exhausted",
+    "seat_bots", "run_seated", "compete", "compete_lanes", "Exhausted",
     # results
     "Tournament", "Standing", "Outcome", "ClearedTrade", "Estimate", "wilson",
     "mean_interval", "pooled", "read_journal", "journal_tournament", "read_lane_journal",
+    "read_game_journal",
 ]

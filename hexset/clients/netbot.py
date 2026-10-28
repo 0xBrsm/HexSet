@@ -642,12 +642,22 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
     """Paired rollouts of the checkpoint's own policy (`hexset.rollout`) with
     its own trade gate (`_Gated`)."""
 
-    def __init__(self, policy: Policy, gate: NetworkBot, **kwargs) -> None:
+    def __init__(self, policy: Policy, gate: NetworkBot, *, opponents=None, **kwargs) -> None:
         super().__init__(policy, **kwargs)
         self._seat_gate(gate)
+        #: The model of the other seats its playouts play them by
+        #: (`hexset.clients.conditioned.Opponents`), or `None`: its own policy.
+        self.opponents = opponents
+
+    def seen(self, game: Game, actor: int, action: Action, viewer: int) -> None:
+        """Each move the table makes, for `opponents` to read (`hexset.bots.watch`)."""
+        if self.opponents is not None:
+            self.opponents.seen(game, actor, action, viewer)
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
+        if self.opponents is not None:
+            self.policy.seat = to_move(game)      # this seat's rows stay its own in every playout
         decision = self.decide(game)
         picked = decision.chosen
         tip = self.gate.robber_tip
@@ -761,6 +771,7 @@ def rollouts_for(
     full_setup: bool = False,
     pool: RolloutPool | None = None,
     own_calibration: tuple[float, float] | None = None,
+    opponents=None,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
@@ -768,10 +779,13 @@ def rollouts_for(
     sampling stream, so one seed reproduces the entrant. `pool` plays the
     worlds out in worker processes (`hexset.rollout.RolloutPool`).
     `own_calibration` reaches the gate alone (`bot_for`): the playouts read
-    the value head as it is."""
+    the value head as it is. `opponents`
+    (`hexset.clients.conditioned.Opponents`) plays every other seat of a
+    playout in place of the checkpoint, read from the moves the table makes;
+    its `pool` must load the same pair."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedRollouts(
-        checkpoint.policy,
+        checkpoint.policy if opponents is None else opponents.playouts(checkpoint.policy),
         bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration),
         worlds=worlds,
         top=top,
@@ -780,6 +794,7 @@ def rollouts_for(
         horizon=horizon,
         rng=rng,
         pool=pool,
+        opponents=opponents,
     )
 
 

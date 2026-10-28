@@ -305,7 +305,8 @@ def _opponent_hand(obs, players: int = 4):
 
 def test_the_widths_are_pinned():
     """Pinned so a layout change has to own the new width."""
-    assert global_features(4) == 90
+    assert global_features(4) == 75
+    assert global_features(4, "8.1") == 90
     assert HEX_FEATURES == 7
     assert vertex_features(4) == 14
     assert edge_features(4) == 4
@@ -319,8 +320,19 @@ def test_the_blocks_are_in_contract_order():
         "own_hand", "own_dev", "own_dev_playable", "opponent_hand",
         "opponent_dev_count", "opponent_dev_ages", "seat_points", "seat_longest_road", "seat_largest_army",
         "opponent_to_move", "bank", "deck", "dev_odds", "phase",
-        "free_roads", "turn", "rules", "roll_odds",
+        "free_roads", "turn",
     ]
+    assert list(global_columns(4, "8.1"))[-2:] == ["rules", "roll_odds"]
+
+
+def test_contract_8_is_the_default_and_others_are_refused():
+    game = a_game()
+    assert encode(game, 0).globals.shape == (global_features(4),)
+    assert encode(game, 0, "8.1").globals.shape == (global_features(4, "8.1"),)
+    with pytest.raises(ValueError):
+        encode(game, 0, "9")
+    with pytest.raises(ValueError):
+        global_features(4, "8.2")
 
 
 def _roads_position(seed: int = 5):
@@ -751,36 +763,60 @@ def a_duel(seed: int = 0, steps: int = 400):
 
 
 def test_contract_8_1_appends_its_blocks_after_every_contract_8_column():
-    columns = global_columns(4)
+    columns = global_columns(4, "8.1")
     assert list(columns)[-len(RULE_BLOCKS):] == list(RULE_BLOCKS)
-    assert columns[RULE_BLOCKS[-1]].stop == global_features(4)
+    assert columns[RULE_BLOCKS[-1]].stop == global_features(4, "8.1")
+    plain = global_columns(4)
+    assert all(columns[name] == span for name, span in plain.items())
+    assert columns[RULE_BLOCKS[0]].start == global_features(4)
+
+
+def test_contract_8_1_keeps_every_contract_8_value_in_a_standard_game():
+    for seed in range(3):
+        game = a_game(seed=seed)
+        for seat in range(4):
+            plain, rules = encode(game, seat), encode(game, seat, "8.1")
+            assert np.array_equal(rules.globals[: global_features(4)], plain.globals)
+            assert np.array_equal(rules.vertices, plain.vertices)
+
+
+def test_the_batched_encoder_writes_contract_8_1_as_the_plain_one_does():
+    games = [a_game(seed=seed) for seed in range(3)] + [a_duel(seed) for seed in range(2)]
+    for game in games:
+        players = game._state.num_players
+        seats = list(range(players))
+        for fast, seat in zip(encode_batch([game] * players, seats, "8.1"), seats):
+            assert np.array_equal(fast.globals, encode(game, seat, "8.1").globals)
 
 
 def test_the_rules_block_states_the_tables_rules():
-    standard = encode(a_game(steps=0))
-    assert standard.globals[global_columns(4)["rules"]].tolist() == pytest.approx([1.0, 0.7, 0.0, 0.0])
-    duel = encode(a_duel(steps=0))
-    assert duel.globals[global_columns(2)["rules"]].tolist() == pytest.approx(
+    standard = encode(a_game(steps=0), contract="8.1")
+    assert standard.globals[global_columns(4, "8.1")["rules"]].tolist() == pytest.approx([1.0, 0.7, 0.0, 0.0])
+    duel = encode(a_duel(steps=0), contract="8.1")
+    assert duel.globals[global_columns(2, "8.1")["rules"]].tolist() == pytest.approx(
         [DUEL_VARIANT.winning_points / POINTS_SCALE, DUEL_VARIANT.discard_limit / HAND_SCALE, 1.0, 1.0]
     )
 
 
 def test_points_are_read_against_the_points_the_game_is_played_to():
+    """Under 8.1 against the game's target; under contract 8 against 10."""
     for game, players in ((a_game(), 4), (a_duel(), 2)):
         state = game._state
-        obs = encode(game, 0)
+        obs = encode(game, 0, "8.1")
         expected = [public_victory_points(state, s) / state.rules.winning_points for s in range(players)]
-        assert obs.globals[global_columns(players)["seat_points"]].tolist() == pytest.approx(expected)
+        assert obs.globals[global_columns(players, "8.1")["seat_points"]].tolist() == pytest.approx(expected)
+        plain = encode(game, 0).globals[global_columns(players)["seat_points"]]
+        assert plain.tolist() == pytest.approx([public_victory_points(state, s) / POINTS_SCALE for s in range(players)])
 
 
 def test_the_roll_odds_are_the_next_rolls():
-    plain = encode(a_game()).globals[global_columns(4)["roll_odds"]]
+    plain = encode(a_game(), contract="8.1").globals[global_columns(4, "8.1")["roll_odds"]]
     assert plain.tolist() == pytest.approx([chance for _, chance in ROLL_ODDS])
     moved = False
     for seed in range(4):
         game = a_duel(seed)
         odds = dict(roll_odds(game))
-        block = encode(game).globals[global_columns(2)["roll_odds"]]
+        block = encode(game, contract="8.1").globals[global_columns(2, "8.1")["roll_odds"]]
         assert block.tolist() == pytest.approx([odds.get(total, 0.0) for total in range(2, 13)])
         assert block.sum() == pytest.approx(1.0)
         moved |= not np.allclose(block, plain)

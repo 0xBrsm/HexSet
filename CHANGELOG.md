@@ -5,6 +5,125 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.23.0
+
+### Breaking
+
+- **Contract 8 is the default observation again; contract 8.1 is asked for
+  by name.** `encode`, `encode_batch`, `global_features` and
+  `global_columns` take `contract="8"` (`OBSERVATION_CONTRACTS`): 75 globals
+  at four seats, each seat's points read against 10. `contract="8.1"` appends
+  `RULE_BLOCKS` (the table's rules and the next roll's odds, 90 globals at
+  four seats) and reads points against the game's target, for a net trained
+  across rule sets. The gym's observation space follows the default. Record
+  files and served graphs are unchanged: a graph still reads only the record
+  fields it declares.
+
+- **Every game the engine plays is recorded and kept; nothing plays a game
+  without a journal.**
+  - `hexset.arena.compete` takes a required `journal` and no `records`
+    argument: every game's line in the journal carries its
+    `hexset.record.Record` and every seat's search decisions, and
+    `Tournament.records` is always filled.
+  - `compete_lanes` loses `records` the same way.
+  - `hexset.arena.play` and `play_game` are gone.
+  - `run_seated` requires a `tape` (`hexset.record.Tape`).
+  - `hexset.record.record_game` and `hexset.play.play_random_game` take a
+    required `journal` and append each game's record to it before returning.
+  - `hexset.bench.versus.compete_batched` takes a required `journal`, loses
+    `records`, and writes every game as it finishes
+    (`hexset.gym.lanes.episode_entry`).
+  - `hexset.bench.trade_census.run_census` takes a required `journal` and
+    loses `records`.
+  - `hexset.bench.throughput.run` takes a required `journal`.
+  - `LaneEnv` loses `records`: every lane game records its chance and hands
+    back its `Record`.
+  - The web server journals every game: an empty games directory falls back
+    to the default one rather than turning journalling off.
+  - A game job (`hexset.arena.Job`) is `(entrants, index, seed, action_cap,
+    antithetic, trade_mode, game_type, turn_cap, board_mode)`. `_play_one`
+    takes the job and a journal, and writes the game's line before it
+    returns.
+
+### Added
+
+- **A rollout can play the other seats by a model of how each of them
+  plays.** A `search = rollout` file may name a pair beside it, metadata
+  `opponents` (a record-contract graph that also reads a per-row
+  `condition` vector) and `opponent_encoder` (a sequence graph: the record
+  from the moving seat, the move's `action` and the seat's `state` in;
+  `condition` and `next_state` out). The searching seat still plays its own
+  seat in every playout and reads every value; every other seat's move is
+  sampled from the pair's prior at temperature 1, the copies of one world
+  drawing alike (`hexset.rollout.paired_copy` keeps its `paired_seed`). Each
+  seat's condition is read on its own moves as the table makes them, in a
+  world drawn from the searching seat's view. New module
+  `hexset.clients.conditioned` (`ConditionedPolicy`, `SeatEncoder`,
+  `Opponents`, `SeatRouted`); `RolloutPool` sends a policy's `context()`
+  with each share of worlds.
+
+- **`hexset.bots.watch`**: each move a table makes, before it is applied,
+  reaches every part of a seat's bot that has `seen(game, actor, action,
+  viewer)`, walked as `seat_at` walks a seat. `hexset.seat.Seat.play` and
+  the arena's game loop call it; `hexset.bots.base.watches` says whether a
+  bot has any.
+
+- **`hexset.seeds` covers seeds that play no game, and tools that play
+  outside the arena.** A policy's `analysis` list holds the seeds of
+  resampling, record sampling, statistical nulls and data splits
+  (`use="analysis"`, never an evaluation seed). `hold(args, seats, use=)`
+  fills a tool's seed from the policy and checks it in one call, for a tool
+  whose games `compete` does not hold.
+
+- **`hexset.seeds`: a project's seed policy.** A `seed-policy.json` above the
+  package (or named by `HEXSET_SEED_POLICY`) lists the seeds runs may play:
+  screen seeds, confirmation seeds that need the run's registration (a file
+  naming the seed), and training seeds by kind, never evaluation seeds.
+  `compete`, `compete_lanes` and `_play_one` hold every seed to it and take
+  `seed_bypass` (a reason, also `HEXSET_SEED_BYPASS`), `registration` and
+  `seed_use` (`"eval"` or a training kind); a refused seed raises
+  `SeedRefused` before the journal is created, and how each seed passed is
+  kept on the journal's source line (`seeds`). A host package can `require`
+  a policy, so a tree staged without its file refuses to play; `suspend`
+  turns it off for test suites. With no policy nothing changes.
+
+- **A robber deal ask can be named to one seat.** `hexset.deals.Ask` takes
+  `to`, the seat the mover named, when it named one (`None`, the default, is an ask to
+  the table). A named ask targets that seat and no other (`targeted`), and
+  the named seat prices its silence as the mover going for it
+  (`hexset.deals.toward`: the open hexes that hit it), in both
+  `promise_value` and `ValueDealer.promise_worth`. `Seat.deal_answer` and
+  `Seat.deal_targeted` take `to`; `Seat.deal_withdraw` takes back a promise
+  the client never said.
+
+- **`hexset.arena.read_game_journal`** reads any game journal (`compete`'s,
+  `compete_lanes`' or one `_play_one` writes) as its header and every game.
+
+- **`hexset.gym.lanes.episode_entry`** is a lane episode as one journal line.
+
+- **`hexset.gamelog.append_after_header`**, and journals shared by several
+  writing processes: every append holds an exclusive lock on the file.
+
+### Changed
+
+- **The arena's runs default their seed from a seed policy when there is one.**
+  `compete(seed=)` defaults to `None`: the policy's default for the table
+  (`hexset.seeds`), else 0 as before. The bench tools (`bench.duel
+  --duel-seed`, and `--seed` in `baselines`, `generate`, `throughput`,
+  `trade_census`) default the same way, else to their old defaults, and take
+  `--bypass-seed-policy REASON` and `--registration PATH`. `bench.generate`
+  plays a dataset to fit on, so its seed is a training seed (`--seed-use`,
+  default `rl`).
+
+- **The arena's player writes every game it plays.** The one function that
+  plays a dealt game takes the journal and writes the game's line, fsynced,
+  before it returns, in whichever process played it; it refuses to run
+  without a journal. `compete` and `compete_lanes` games are now written by
+  the worker that played them rather than when the parent receives them, so
+  a game finished just before a run stops is kept. The journals' contents
+  are unchanged.
+
+
 ## 1.22.0
 
 ### Breaking

@@ -21,6 +21,7 @@ from hexset.bench.duel import (
 from hexset.arena import Standing, Tournament, base_name, lineup_from_names, pooled
 from hexset.rules import STANDARD_GAME
 from hexset.game import MAX_TURNS
+from journals import fresh
 
 
 def test_naming_the_sides_separates_two_checkpoints():
@@ -74,12 +75,13 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
     `turns`/`winners` default to ordinary finishes.
     """
 
-    def compete(lineup, games, *, seed, workers, records=False,
+    def compete(lineup, games, *, seed, workers,
                 worker_initializer=None, worker_initargs=(),
                 trade_mode="round", game_type=STANDARD_GAME,
                 turn_cap=MAX_TURNS, board_mode="random", complement=None, progress=None,
-                journal=None, resume=False):
+                journal, resume=False, seed_bypass=None, registration=None):
         seen["progress"] = progress
+        seen["seed_bypass"] = seed_bypass
         seen["board_mode"] = board_mode
         seen["complement"] = complement
         seen["game_type"] = game_type
@@ -88,7 +90,7 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
         seen["trade_mode"] = trade_mode
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
-        seen["records"] = records
+        seen["journal"] = journal
         seen["workers"] = workers
         game_turns = tuple(turns) if turns is not None else tuple(80 for _ in range(games))
         game_winners = (
@@ -119,7 +121,7 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
 
 
 def _arena_args(**overrides):
-    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None, runtime=None,
+    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None, runtime=None, journal=fresh(),
                 trade_mode="round", game_type="standard", turn_cap=MAX_TURNS)
     base.update(overrides)
     return SimpleNamespace(**base)

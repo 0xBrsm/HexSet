@@ -18,13 +18,13 @@ process (`hexset.arena.register_entrant_kind`, `register_preset`,
 HTTP API (`hexset.clients.botclient` is an example).
 """
 from .base import (
-    Bot, Closes, Handoff, PlaysAgainst, RandomBot, TradeGate, TradesBy, Vetoed, handed_off, play_against, seat_at,
+    Bot, Closes, Handoff, PlaysAgainst, RandomBot, TradeGate, TradesBy, Vetoed, handed_off, play_against, seat_at, watch,
 )
 from .coalition import Coalition, targets_at
 from .stances import STANCES, own, paranoid, relative
 
 __all__ = [
-    "Bot", "RandomBot", "TradeGate", "TradesBy", "Vetoed", "Handoff", "handed_off", "Closes", "seat_at",
+    "Bot", "RandomBot", "TradeGate", "TradesBy", "Vetoed", "Handoff", "handed_off", "Closes", "seat_at", "watch",
     "PlaysAgainst", "play_against", "Coalition", "targets_at",
     "STANCES", "own", "paranoid", "relative",
 ]

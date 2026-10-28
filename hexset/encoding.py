@@ -10,9 +10,10 @@ the steals the perspective saw), and its development cards a count, their
 ages, and the odds of each kind among the cards the perspective has not seen.
 Nothing of trading or robber deals is read: those stay with the trade gate.
 
-Record contract 8.1: contract 8 with the table's rules and the next roll's
-odds appended to the globals, and each seat's points read against the
-points the game is played to. Closeness reads (`1 / (1 + n)`: a seat's distance to a
+Record contract 8 by default. Contract 8.1, asked for by name
+(`contract="8.1"`), is contract 8 with the table's rules and the next roll's
+odds appended to the globals and each seat's points read against the points
+the game is played to; a net trained across rule sets reads it. Closeness reads (`1 / (1 + n)`: a seat's distance to a
 vertex, to Longest Road, to Largest Army) read 1 at the goal and 0 where it is
 out of reach, so 0 is the far end of the scale, never a stand-in.
 """
@@ -51,6 +52,7 @@ __all__ = [
     "PLAYABLE_KINDS",
     "ENCODED_PHASES",
     "RULE_BLOCKS",
+    "OBSERVATION_CONTRACTS",
     "dev_age_rows",
     "knights_needed_all",
     "expected_hands",
@@ -189,12 +191,23 @@ def _reach_base(players: int) -> int:
     return players + 1 + NUM_RESOURCES
 
 
-def _global_blocks(players: int) -> list[tuple[str, int]]:
+#: The observation contracts `encode` writes: contract 8, the default, and
+#: contract 8.1, which appends `RULE_BLOCKS` to its globals.
+OBSERVATION_CONTRACTS: tuple[str, ...] = ("8", "8.1")
+
+
+def _contract(contract: str) -> str:
+    if contract not in OBSERVATION_CONTRACTS:
+        raise ValueError(f"unknown observation contract {contract!r}: {OBSERVATION_CONTRACTS}")
+    return contract
+
+
+def _global_blocks(players: int, contract: str = "8") -> list[tuple[str, int]]:
     """Every block `_encode_globals` writes, in write order, named and sized.
     `own_` is the perspective, `opponent_` each other seat in seat-relative
     order, `seat_` every seat with the perspective first, no prefix the table."""
     opponents = players - 1
-    return [
+    blocks = [
         ("own_hand", NUM_RESOURCES),
         ("own_dev", NUM_DEV_CARDS),
         ("own_dev_playable", len(PLAYABLE_KINDS)),
@@ -211,29 +224,31 @@ def _global_blocks(players: int) -> list[tuple[str, int]]:
         ("phase", ENCODED_PHASES),
         ("free_roads", 1),
         ("turn", 1),
-        # Contract 8.1, appended so every contract-8 column keeps its place.
-        ("rules", 4),
-        ("roll_odds", MAX_ROLL - MIN_ROLL + 1),
     ]
+    if _contract(contract) == "8.1":
+        # Appended so every contract-8 column keeps its place.
+        blocks += [("rules", 4), ("roll_odds", MAX_ROLL - MIN_ROLL + 1)]
+    return blocks
 
 
-#: The blocks contract 8.1 appends to contract 8's globals, in order: a
-#: contract-8 net reads exactly the columns before them.
+#: The blocks contract 8.1 appends to contract 8's globals, in order: they
+#: follow every contract-8 column.
 RULE_BLOCKS: tuple[str, ...] = ("rules", "roll_odds")
 
 
-def global_features(players: int) -> int:
-    """Width of `Observation.globals` for `players` seats; `global_columns`
-    names its blocks."""
-    return sum(width for _, width in _global_blocks(players))
+def global_features(players: int, contract: str = "8") -> int:
+    """Width of `Observation.globals` for `players` seats under `contract`;
+    `global_columns` names its blocks."""
+    return sum(width for _, width in _global_blocks(players, contract))
 
 
-def global_columns(players: int) -> dict[str, slice]:
-    """Name every block of `global_features(players)` as a `slice` into
-    `Observation.globals`, tiling it exactly: contiguous and non-overlapping."""
+def global_columns(players: int, contract: str = "8") -> dict[str, slice]:
+    """Name every block of `global_features(players, contract)` as a `slice`
+    into `Observation.globals`, tiling it exactly: contiguous and
+    non-overlapping. A contract-8 column sits at the same place under 8.1."""
     columns: dict[str, slice] = {}
     offset = 0
-    for name, width in _global_blocks(players):
+    for name, width in _global_blocks(players, contract):
         columns[name] = slice(offset, offset + width)
         offset += width
     return columns
@@ -474,7 +489,9 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
 # --- globals ------------------------------------------------------------------
 
 
-def _global_parts(game: Game, perspective: int, building_points: Sequence[float]) -> list[float]:
+def _global_parts(
+    game: Game, perspective: int, building_points: Sequence[float], contract: str = "8"
+) -> list[float]:
     """Every global block but the ones `encode_batch` writes as arrays, in
     `_global_blocks` order: the single source of their semantics, so the
     batched path stays byte-identical to `encode` by construction."""
@@ -507,8 +524,11 @@ def _global_parts(game: Game, perspective: int, building_points: Sequence[float]
             np.where(ages[s] < 0, np.float32(0.0), (ages[s] + np.float32(1.0)) / np.float32(AGE_SCALE))
         )
 
+    # Contract 8 reads points against 10; 8.1 against the points the game is
+    # played to, the same number in a 10-point game.
+    target = rules.winning_points if contract == "8.1" else POINTS_SCALE
     parts.extend(
-        (building_points[i] + award_points(state, s)) / rules.winning_points
+        (building_points[i] + award_points(state, s)) / target
         for i, s in enumerate(seats)
     )
     roads = roads_to_take_all(state)
@@ -526,8 +546,10 @@ def _global_parts(game: Game, perspective: int, building_points: Sequence[float]
     parts.extend(1.0 if phase == i else 0.0 for i in range(ENCODED_PHASES))
     parts.append(game.free_roads / FREE_ROADS_SCALE)
     parts.append(min(game.turns / TURN_SCALE, 1.0))
+    if contract != "8.1":
+        return parts
 
-    # The table's rules, which every seat is told: the points the game is
+    # Contract 8.1: the table's rules, which every seat is told: the points the game is
     # played to (10 reads 1), the hand size above which a seven discards, the
     # friendly robber and the balanced dice.
     parts.append(rules.winning_points / POINTS_SCALE)
@@ -550,10 +572,11 @@ def _building_points(vertices: np.ndarray, players: int) -> np.ndarray:
 
 
 def encode_batch(
-    games: Sequence[Game], perspectives: Sequence[int]
+    games: Sequence[Game], perspectives: Sequence[int], contract: str = "8"
 ) -> list[Observation]:
     """Encode a collector tick with one set of vector operations, pinned to the
     plain single-position `encode` as its oracle."""
+    _contract(contract)
     if len(games) != len(perspectives):
         raise ValueError("one perspective is required per game")
     if not games:
@@ -576,7 +599,7 @@ def encode_batch(
         (states[0].board.num_hexes, HEX_FEATURES),
         (states[0].board.topology.num_vertices, vertex_features(players)),
         (states[0].board.topology.num_edges, edge_features(players)),
-        (global_features(players),),
+        (global_features(players, contract),),
     )
     packed = np.empty(
         (batch, sum(int(np.prod(shape)) for shape in shapes)), dtype=np.float32
@@ -613,7 +636,7 @@ def encode_batch(
 
     building_points = _building_points(vertices, players)
     for i, (game, p) in enumerate(zip(games, perspective)):
-        globals_[i] = np.asarray(_global_parts(game, int(p), building_points[i]), dtype=np.float32)
+        globals_[i] = np.asarray(_global_parts(game, int(p), building_points[i], contract), dtype=np.float32)
 
     graph = static_graph(states[0].board.topology)
     return [
@@ -622,8 +645,10 @@ def encode_batch(
     ]
 
 
-def encode(game: Game, perspective: int | None = None) -> Observation:
-    """Encode the position as seen by `perspective`, defaulting to the mover."""
+def encode(game: Game, perspective: int | None = None, contract: str = "8") -> Observation:
+    """Encode the position as seen by `perspective`, defaulting to the mover,
+    under observation `contract` (`OBSERVATION_CONTRACTS`)."""
+    _contract(contract)
     state = game._state
     if perspective is None:
         perspective = to_move(game)
@@ -638,6 +663,6 @@ def encode(game: Game, perspective: int | None = None) -> Observation:
         hexes=_encode_hexes(state, template),
         vertices=vertices,
         edges=_encode_edges(state, perspective),
-        globals=np.asarray(_global_parts(game, perspective, building_points), dtype=np.float32),
+        globals=np.asarray(_global_parts(game, perspective, building_points, contract), dtype=np.float32),
         graph=static_graph(state.board.topology),
     )

@@ -59,11 +59,10 @@ def board_fields(board: Board) -> dict[str, tuple]:
     }
 
 
-def configured_dir() -> str | None:
-    """Where games are journalled, or `None` when journalling is off. On by
-    default; setting `HEXSET_UI_GAMES_DIR` to the empty string turns it off."""
-    value = os.environ.get(ENV_DIR, DEFAULT_DIR).strip()
-    return value or None
+def configured_dir() -> str:
+    """Where games are journalled: `HEXSET_UI_GAMES_DIR`, else `DEFAULT_DIR`.
+    Every game is journalled; there is no setting that turns it off."""
+    return os.environ.get(ENV_DIR, "").strip() or DEFAULT_DIR
 
 
 def new_game_id(seed: int | None) -> str:
@@ -419,13 +418,10 @@ def game_type_of(name: str | None, rules: Rules, num_players: int) -> GameType:
     return shipped or GameType(name or "recorded", rules, (num_players,))
 
 
-def open_journal(seed: int, directory: str | None = None) -> Journal | None:
-    """A journal for a game about to be dealt, or `None` when journalling is
-    off. `directory` overrides the environment."""
-    where = directory if directory is not None else configured_dir()
-    if not where:
-        return None
-    return Journal(directory=where, game_id=new_game_id(seed))
+def open_journal(seed: int, directory: str | None = None) -> Journal:
+    """A journal for a game about to be dealt. `directory` overrides the
+    environment (`configured_dir`)."""
+    return Journal(directory=directory or configured_dir(), game_id=new_game_id(seed))
 
 
 def journal_of(

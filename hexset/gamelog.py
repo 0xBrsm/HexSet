@@ -12,17 +12,28 @@ the file was edited or corrupted, and is refused.
 `hexset.arena.compete(journal=...)` writes one of these per game. Anything
 else that runs a batch -- replays, fits, sweeps -- can use `append` and
 `read_lines` the same way.
+
+Writers in several processes may share one journal: each append holds an
+exclusive lock on the file while it writes, so lines never interleave however
+long they are.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+try:
+    import fcntl
+except ImportError:  # no advisory locks on this platform: one writer per journal
+    fcntl = None
 
 __all__ = [
     "JOURNAL_VERSION",
     "append",
+    "append_after_header",
     "read_lines",
     "cut_torn_tail",
 ]
@@ -32,14 +43,38 @@ __all__ = [
 JOURNAL_VERSION = 1
 
 
+@contextmanager
+def _locked(path: str | os.PathLike) -> Iterator[Any]:
+    """`path` open for appending under an exclusive lock, released on close."""
+    with open(path, "a", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield handle
+
+
+def _write(handle: Any, entry: dict[str, Any]) -> None:
+    handle.write(json.dumps(entry, separators=(",", ":"), allow_nan=False) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
 def append(path: str | os.PathLike, entry: dict[str, Any]) -> None:
     """Append `entry` as one JSON line, durably: written, flushed and fsynced
     before this returns."""
-    line = json.dumps(entry, separators=(",", ":"), allow_nan=False) + "\n"
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(line)
-        handle.flush()
-        os.fsync(handle.fileno())
+    with _locked(path) as handle:
+        _write(handle, entry)
+
+
+def append_after_header(path: str | os.PathLike, header: dict[str, Any], entry: dict[str, Any]) -> None:
+    """Append `entry`, writing `header` first if the journal is still empty:
+    the first of several writers starting one journal heads it, and only
+    that one."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with _locked(path) as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            _write(handle, header)
+        _write(handle, entry)
 
 
 def read_lines(path: str | os.PathLike) -> list[dict[str, Any]]:

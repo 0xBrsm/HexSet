@@ -4,6 +4,7 @@ run that stopped part-way resumes to the result it would have had."""
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import random
 from pathlib import Path
@@ -17,6 +18,7 @@ from hexset.arena import (
 from hexset.board.board import spiral_base_board
 from hexset.game import UNSTRUCTURED_TURN_CAP
 from hexset.record import read, to_json
+from journals import fresh
 
 LINEUP = ["random"] * 2
 QUICK = dict(action_cap=40)
@@ -28,7 +30,7 @@ def lines(path):
 
 def test_every_game_is_in_the_journal_with_its_record(tmp_path):
     journal = tmp_path / "run.games.jsonl"
-    tournament = compete(lineup_from_names(LINEUP), 6, workers=1, records=True,
+    tournament = compete(lineup_from_names(LINEUP), 6, workers=1,
                          journal=journal, **QUICK)
     entries = lines(journal)
     assert entries[0]["kind"] == "header" and entries[0]["games"] == 6
@@ -50,9 +52,9 @@ def test_a_parallel_run_writes_every_game_as_it_finishes(tmp_path):
 
 def test_a_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     lineup = lineup_from_names(LINEUP)
-    whole = compete(lineup, 8, workers=1, records=True, **QUICK)
+    whole = compete(lineup, 8, workers=1, **QUICK, journal=fresh())
     journal = tmp_path / "run.games.jsonl"
-    compete(lineup, 8, workers=1, records=True, journal=journal, **QUICK)
+    compete(lineup, 8, workers=1, journal=journal, **QUICK)
     # Keep the header, the source line and three games, and tear the fourth as
     # a dying writer would.
     kept = journal.read_text().splitlines(keepends=True)
@@ -60,7 +62,7 @@ def test_a_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     journal.write_text("".join(kept[:5]) + kept[5][: len(kept[5]) // 2])
     assert journal_tournament(journal).games == 3
     played = []
-    resumed = compete(lineup, 8, workers=1, records=True, journal=journal, resume=True,
+    resumed = compete(lineup, 8, workers=1, journal=journal, resume=True,
                       progress=lambda done, games, outcome: played.append(done), **QUICK)
     assert played == list(range(1, 9))
     for field in ("winners", "points", "turns", "seating"):
@@ -99,8 +101,10 @@ def test_a_journal_that_holds_a_run_is_not_overwritten(tmp_path):
         compete(lineup, 2, workers=1, journal=journal, **QUICK)
     with pytest.raises(ValueError, match="different run"):
         compete(lineup, 2, workers=1, seed=1, journal=journal, resume=True, **QUICK)
+    with pytest.raises(TypeError, match="journal"):
+        compete(lineup, 2, workers=1, **QUICK)
     with pytest.raises(ValueError, match="journal"):
-        compete(lineup, 2, workers=1, resume=True, **QUICK)
+        compete(lineup, 2, workers=1, journal="", **QUICK)
 
 
 def test_a_stuck_game_is_kept_before_the_run_stops(tmp_path):
@@ -123,7 +127,7 @@ def test_a_torn_last_line_is_dropped_and_anything_else_refused(tmp_path):
 
 
 def test_records_read_past_a_torn_last_record(tmp_path):
-    tournament = compete(lineup_from_names(LINEUP), 2, workers=1, records=True, **QUICK)
+    tournament = compete(lineup_from_names(LINEUP), 2, workers=1, **QUICK, journal=fresh())
     path = tmp_path / "records.jsonl"
     body = "".join(to_json(r) + "\n" for r in tournament.records)
     path.write_text(body + to_json(tournament.records[0])[:50])
@@ -132,31 +136,88 @@ def test_records_read_past_a_torn_last_record(tmp_path):
 
 # Runs short enough to lose nothing by: throughput is a timing benchmark of
 # random bots, measured in seconds.
-UNJOURNALED = {"hexset/bench/throughput.py"}
+def _required(function, name: str) -> bool:
+    """Whether `function` takes `name` with no default."""
+    parameter = inspect.signature(function).parameters.get(name)
+    return parameter is not None and parameter.default is inspect.Parameter.empty
 
 
-def test_every_run_in_the_package_keeps_its_games():
-    """Every `compete` call in the package passes a journal: a long run that
-    holds its games until it returns loses all of them to one crash."""
+def test_no_game_is_played_without_being_kept():
+    """Every way the package plays whole games writes each one, record
+    included, to a journal it requires: none takes a default that keeps
+    nothing, none has a switch that skips the record, and the engine's loop
+    files every step on a tape."""
+    from hexset import arena, play, record
+    from hexset.bench import throughput, trade_census, versus
+    from hexset.gym.lanes import LaneEnv
+
+    for function in (arena.compete, arena.compete_lanes, versus.compete_batched,
+                     trade_census.run_census, throughput.run, record.record_game, play.play_random_game,
+                     arena._play_one, arena._play_dealt):
+        assert _required(function, "journal"), f"{function.__qualname__} plays games without a journal"
+        assert "records" not in inspect.signature(function).parameters, function.__qualname__
+    assert _required(arena.run_seated, "tape"), "the engine's loop runs without recording"
+    assert "records" not in inspect.signature(LaneEnv).parameters
+    assert not hasattr(arena, "play") and not hasattr(arena, "play_game")
+
+
+def test_only_the_arena_reaches_its_dealt_player():
+    """`arena._play_dealt` is the arena's one player of a dealt game, and it
+    writes every game it plays; outside the arena a game is played through
+    `compete`, `compete_lanes` or `_play_one`."""
     src = Path(__file__).resolve().parents[1]
     offenders = []
     for path in sorted((src / "hexset").rglob("*.py")):
         rel = str(path.relative_to(src))
-        if rel in UNJOURNALED or rel == "hexset/arena.py":
-            continue
         for node in ast.walk(ast.parse(path.read_text())):
-            if (isinstance(node, ast.Call)
-                    and getattr(node.func, "id", getattr(node.func, "attr", None)) == "compete"
-                    and not any(k.arg == "journal" for k in node.keywords)):
+            name = getattr(node, "id", getattr(node, "attr", None))
+            if name == "_play_dealt" and rel != "hexset/arena.py":
                 offenders.append(f"{rel}:{node.lineno}")
-    assert not offenders, f"compete() without journal=: {offenders}"
+    assert not offenders, f"_play_dealt outside the arena: {offenders}"
+
+
+def test_the_dealt_player_writes_its_game_and_refuses_no_journal(tmp_path):
+    """There is no way to play a dealt game without naming where it goes: the
+    player refuses an empty journal before dealing anything, and writes the
+    game's line itself before returning."""
+    from hexset.arena import _play_dealt
+    from hexset.rules import STANDARD_GAME
+
+    job = (tuple(lineup_from_names(LINEUP)), 5, 13, 40, True, "round", STANDARD_GAME, 300, "random")
+    for empty in ("", None):
+        with pytest.raises(ValueError, match="journal"):
+            _play_dealt(job, empty)
+    journal = tmp_path / "dealt.games.jsonl"
+    outcome = _play_dealt(job, journal)
+    (line,) = lines(journal)
+    assert line["index"] == 5 and line["record"] == json.loads(json.dumps(line["record"]))
+    assert outcome.index == 5 and outcome.record is not None
+
+
+def test_a_game_played_one_at_a_time_is_kept_whole(tmp_path):
+    """`_play_one` writes its game before it returns: a header naming the
+    engine, then the game's line with its record, entrants and seed."""
+    from hexset.arena import _play_one, read_game_journal
+    from hexset.rules import STANDARD_GAME
+
+    journal = tmp_path / "one.games.jsonl"
+    lineup = tuple(lineup_from_names(LINEUP))
+    outcome = _play_one((lineup, 3, 11, 40, True, "round", STANDARD_GAME, 300, "random"), journal)
+    header, games = read_game_journal(journal)
+    assert header["kind"] == "header" and header["hexset"]
+    ((line, read),) = games
+    assert line["key"] == 3 and line["seed"] == 11 and line["entrants"] == [e.name for e in lineup]
+    assert read.record == outcome.record and read.record is not None
+    _play_one((lineup, 4, 11, 40, True, "round", STANDARD_GAME, 300, "random"), journal)
+    header_again, games = read_game_journal(journal)
+    assert header_again == header and [line["key"] for line, _ in games] == [3, 4]
 
 
 def test_a_spiral_run_deals_spiral_boards_and_says_so_in_its_header(tmp_path):
     random_journal, spiral_journal = tmp_path / "random.games.jsonl", tmp_path / "spiral.games.jsonl"
-    compete(lineup_from_names(LINEUP), 2, workers=1, records=True, journal=random_journal, **QUICK)
+    compete(lineup_from_names(LINEUP), 2, workers=1, journal=random_journal, **QUICK)
     # Not antithetic, so game `index` is dealt board `index`.
-    tournament = compete(lineup_from_names(LINEUP), 2, workers=1, records=True, antithetic=False,
+    tournament = compete(lineup_from_names(LINEUP), 2, workers=1, antithetic=False,
                          board_mode="spiral", journal=spiral_journal, **QUICK)
     assert "board_mode" not in lines(random_journal)[0]
     assert lines(spiral_journal)[0]["board_mode"] == "spiral"
@@ -165,10 +226,10 @@ def test_a_spiral_run_deals_spiral_boards_and_says_so_in_its_header(tmp_path):
         assert deal_board(0, index, "spiral") == dealt
         assert tuple(record.tokens) == dealt.tokens
     with pytest.raises(ValueError, match=r"\(board_mode differ\)"):
-        compete(lineup_from_names(LINEUP), 2, workers=1, records=True, antithetic=False, journal=spiral_journal,
+        compete(lineup_from_names(LINEUP), 2, workers=1, antithetic=False, journal=spiral_journal,
                 resume=True, **QUICK)
 
 
 def test_an_unknown_board_mode_is_refused_before_any_game():
     with pytest.raises(ValueError, match="unknown board mode"):
-        compete(lineup_from_names(LINEUP), 2, board_mode="hexagonal", **QUICK)
+        compete(lineup_from_names(LINEUP), 2, board_mode="hexagonal", **QUICK, journal=fresh())

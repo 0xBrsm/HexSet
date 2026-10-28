@@ -11,6 +11,7 @@ import pytest
 from hexset.arena import Entrant, compete, lineup_from_names
 from hexset.experiment import provenance, result_document
 from hexset.record import replay
+from journals import fresh
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ def make_test_bot(entrant, board, rng):
 @pytest.fixture
 def result():
     entrants = lineup_from_names(["random", "random"])
-    return entrants, compete(entrants, 2, seed=9, action_cap=16, records=True)
+    return entrants, compete(entrants, 2, seed=9, action_cap=16, journal=fresh())
 
 
 def test_result_round_trip_keeps_settings_raw_outcomes_and_replay(tmp_path, result):
@@ -94,8 +95,8 @@ def test_result_refuses_incomplete_rows_and_nonserializable_settings(result):
 def test_odd_seat_pairing_requires_and_completes_two_rotations():
     entrants = lineup_from_names(["random"] * 3)
     with pytest.raises(ValueError, match="twice the seat"):
-        compete(entrants, 3, action_cap=1)
-    tournament = compete(entrants, 6, action_cap=1)
+        compete(entrants, 3, action_cap=1, journal=fresh())
+    tournament = compete(entrants, 6, action_cap=1, journal=fresh())
     for e in range(3):
         seats = [row[e] for row in tournament.seating]
         assert [seats.count(s) for s in range(3)] == [2, 2, 2]
@@ -108,8 +109,8 @@ def test_runtime_initializer_works_with_spawned_workers():
                    worker_initargs=("test-portable",))
     from hexset import arena
     try:
-        serial = compete(entrants, workers=1, **options)
-        spawned = compete(entrants, workers=2, start_method="spawn", **options)
+        serial = compete(entrants, workers=1, **options, journal=fresh())
+        spawned = compete(entrants, workers=2, start_method="spawn", **options, journal=fresh())
         assert (serial.winners, serial.points, serial.seating) == (spawned.winners, spawned.points, spawned.seating)
     finally:
         arena.unregister_entrant_kind("test-portable")

@@ -16,6 +16,7 @@ from hexset.bench.versus import BotPolicy, compete_batched
 from hexset.actions import options_for
 from hexset.record import replay
 from hexset.trading import TradeParams
+from journals import fresh
 
 SEED = 11
 # These bots always take the first legal action -- roll, then end the turn --
@@ -88,13 +89,13 @@ def tournament_boards(tournament):
 def batched(**overrides):
     options = dict(players=4, turn_cap=NO_TURN_CAP, seed=SEED, lanes=2, action_cap=CAP)
     options.update(overrides)
-    return compete_batched(two_policies(), GAMES, **options)
+    return compete_batched(two_policies(), GAMES, **options, journal=fresh())
 
 
 @pytest.fixture(scope="module")
 def verdict():
     """One small duel, shared: every test below reads it rather than replaying it."""
-    return batched(episodes=True, records=True)
+    return batched(episodes=True)
 
 
 def test_the_pairing_law_is_the_tournaments_own(scripted_kind, verdict):
@@ -102,6 +103,7 @@ def test_the_pairing_law_is_the_tournaments_own(scripted_kind, verdict):
     tournament = compete(
         [scripted_kind] * 4, GAMES, seed=SEED, action_cap=CAP, antithetic=True,
         turn_cap=NO_TURN_CAP,
+        journal=fresh(),
     )
 
     played = {
@@ -175,20 +177,20 @@ def test_records_ride_along_with_the_episodes(verdict):
             episode.outcome.turns,
         )
 
-    quiet = batched(records=True, action_cap=20)
+    quiet = batched(action_cap=20)
     assert quiet.episodes == ()
     assert quiet.metrics()["seconds"] == quiet.seconds
 
 
 def test_an_odd_antithetic_collection_is_rejected():
     with pytest.raises(ValueError, match="even number"):
-        compete_batched(two_policies(), 3)
+        compete_batched(two_policies(), 3, journal=fresh())
 
 
 def test_one_board_batched_metrics_are_strict_json():
     import json
 
-    verdict = compete_batched(two_policies(), 2, lanes=1, action_cap=2)
+    verdict = compete_batched(two_policies(), 2, lanes=1, action_cap=2, journal=fresh())
     metrics = verdict.metrics()
     assert metrics["paired_vp_low"] is None
     assert metrics["paired_vp_high"] is None

@@ -7,6 +7,7 @@ stream, so a record re-encodes freely and replays without a seed.
 from __future__ import annotations
 
 import json
+import os
 import random
 from dataclasses import asdict, dataclass, field
 from typing import Iterable, Iterator, Sequence
@@ -243,15 +244,29 @@ def record_game(
     trade_mode: str = "round",
     turn_cap: int = MAX_TURNS,
     game_type: GameType = STANDARD_GAME,
+    journal: str | os.PathLike,
 ) -> Record:
-    """Play one game and record it. Each bot is seated at its own index."""
+    """Play one game, record it and keep it: the record is appended to
+    `journal` (`hexset.gamelog`, headed on first use) before it is returned.
+    Each bot is seated at its own index."""
+    from . import __version__, gamelog
+
+    if not journal:
+        raise ValueError("a game is played into a journal: name one")
     rng = random.Random(seed)
     game = start(board, len(bots), rng, chance=recording(rng, game_type.rules), turn_cap=turn_cap,
                  game_type=game_type)
     _seat(game, bots, trade_mode)
     tape = Tape()
     _run(game, bots, action_cap, tape=tape)
-    return tape.sealed(game, seed=seed)
+    record = tape.sealed(game, seed=seed)
+    gamelog.append_after_header(
+        journal,
+        {"kind": "header", "journal": gamelog.JOURNAL_VERSION, "hexset": __version__, "games": "recorded"},
+        {"kind": "game", "seed": seed, "winner": game.won_by, "turns": game.turns,
+         "record": json.loads(to_json(record))},
+    )
+    return record
 
 
 def actions_of(record: Record) -> Iterator[Action]:

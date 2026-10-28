@@ -156,6 +156,9 @@ def paired_copy(world: Game, seed: int, seat: int) -> Game:
     copy = imagine(world, rng, randomize_deck=False, seat=seat)
     dice = copy._state.dice
     copy.chance = Live(rng, split=True) if dice is None else Balanced.from_deck(rng, dice, split=True)
+    # A policy that samples its moves keys its draws by this, so the copies
+    # of one world draw alike (`hexset.clients.conditioned.ConditionedPolicy`).
+    copy.paired_seed = seed
     return copy
 
 
@@ -594,7 +597,9 @@ def _ready(seconds: float) -> int:
     return os.getpid()
 
 
-def _play_share(tasks, moves, seat, start, horizon, marks) -> Lanes:
+def _play_share(tasks, moves, seat, start, horizon, marks, context=None) -> Lanes:
+    if context is not None:
+        _worker_policy.set_context(context)
     return play_lanes(_worker_policy, tasks, moves, seat, start, horizon, marks)
 
 
@@ -650,10 +655,14 @@ class RolloutPool:
         if self.broken:
             return play_lanes(policy, tasks, moves, seat, start, horizon, marks)
         runs = _shares(tasks, self.workers + 1)
+        # A policy that plays by state its searcher holds (`context`, as
+        # `hexset.clients.conditioned.SeatRouted` holds each seat's condition)
+        # sends it with every share; each worker's copy takes it first.
+        context = policy.context() if hasattr(policy, "context") else None
         futures = []
         try:
             for run in runs[1:]:
-                futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks))
+                futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks, context))
         except BrokenProcessPool:
             self.broken = True
         here = play_lanes(policy, runs[0], moves, seat, start, horizon, marks)

@@ -19,6 +19,7 @@ from hexset.game import is_over, to_move
 from hexset.robber import occupants
 from hexset.trading import RESPONSE_ACCEPT, RESPONSE_PASS, Offer, Response
 from traders import ScarcityTrader
+from journals import fresh
 
 TARGET = 0
 
@@ -238,7 +239,7 @@ def test_the_spec_names_any_entrant_and_plays_the_arena_rotation():
 
     entrants = lineup_from_names(["test-trader", "coalition:test-trader", "coalition:test-trader",
                                   "coalition:random"])
-    t = compete(entrants, 4, seed=404, records=True, action_cap=1500, turn_cap=1000)
+    t = compete(entrants, 4, seed=404, action_cap=1500, turn_cap=1000, journal=fresh())
     assert len({seating[0] for seating in t.seating}) > 1
     assert any(t.cleared)
     for seating, cleared in zip(t.seating, t.cleared):

@@ -18,6 +18,7 @@ from hexset.bench.duel import add_table_options
 from hexset.game import MAX_TURNS
 from hexset.record import Record
 from hexset.rules import STANDARD_GAME, GameType, game_type as game_type_named
+from hexset.seeds import add_arguments as add_seed_arguments, resolve as resolve_seed
 
 __all__ = [
     "LARGE_HAND_THRESHOLD",
@@ -70,8 +71,7 @@ def _resource_split(received: Sequence[int]) -> tuple[tuple[int, ...], tuple[int
 @dataclass
 class CensusResult:
     """What `run_census` collected: every executed trade (`TradeRecord`),
-    and per game the winner, turns, terminal points and, with `records=True`,
-    the `Record`."""
+    and per game the winner, turns, terminal points and the `Record`."""
 
     games: int
     entrant_names: tuple[str, ...] = ()
@@ -80,7 +80,7 @@ class CensusResult:
     turns: list[int] = field(default_factory=list)
     # Terminal victory points per game, in entrant order, as `Tournament.points`.
     points: list[tuple[int, ...]] = field(default_factory=list)
-    # One `Record` per game, ordered with `winners`; only under `records=True`.
+    # One `Record` per game, ordered with `winners`.
     records: list[Record] = field(default_factory=list)
 
     def to_json(self) -> dict:
@@ -99,23 +99,25 @@ def run_census(
     entrants: Sequence[Entrant],
     games: int,
     *,
-    seed: int = 0,
+    seed: int | None = None,
     workers: int = 1,
     action_cap: int = MAX_ACTIONS,
-    records: bool = False,
-    journal: str | Path | None = None,
+    journal: str | Path,
     resume: bool = False,
     runtimes: Sequence[str] = (),
     game_type: GameType = STANDARD_GAME,
     turn_cap: int = MAX_TURNS,
     trade_mode: str = "round",
     board_mode: str = "random",
+    seed_bypass: str | None = None,
+    registration: str | Path | None = None,
 ) -> CensusResult:
     """Play `games` games (a multiple of the lineup) and roll `compete`'s
-    `ClearedTrade` census up into `TradeRecord` rows; `records=True` also keeps
-    each game's `Record` in `CensusResult.records`. `runtimes` are loaded in
+    `ClearedTrade` census up into `TradeRecord` rows, each game's `Record` in
+    `CensusResult.records` and, as every game is kept, in `journal`. `runtimes` are loaded in
     every worker (`hexset.arena.load_runtime`); `game_type`, `turn_cap`,
-    `trade_mode` and `board_mode` are `compete`'s.
+    `trade_mode`, `board_mode`, `seed`, `seed_bypass` and `registration` are
+    `compete`'s.
     """
     tournament = compete(
         list(entrants),
@@ -123,13 +125,14 @@ def run_census(
         seed=seed,
         action_cap=action_cap,
         workers=workers,
-        records=True,
         worker_initializer=load_runtime if runtimes else None,
         worker_initargs=tuple(runtimes),
         game_type=game_type,
         turn_cap=turn_cap,
         trade_mode=trade_mode,
         board_mode=board_mode,
+        seed_bypass=seed_bypass,
+        registration=registration,
         journal=journal,
         resume=resume,
     )
@@ -138,8 +141,7 @@ def run_census(
     result.winners = list(tournament.winners)
     result.turns = list(tournament.turns)
     result.points = list(tournament.points)
-    if records:
-        result.records = list(tournament.records)
+    result.records = list(tournament.records)
 
     for index, (cleared, seating) in enumerate(
         zip(tournament.cleared, tournament.seating)
@@ -287,7 +289,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("bots", nargs="*", help="one entrant name per seat")
     parser.add_argument("--runtime", action="append", default=[], help=RUNTIME_HELP)
     parser.add_argument("--games", type=int, default=96)
-    parser.add_argument("--seed", type=int, default=0)
+    add_seed_arguments(parser)
     parser.add_argument("--workers", type=int, default=1)
     add_table_options(parser)
     parser.add_argument("--out", type=Path, default=None)
@@ -299,8 +301,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--records",
         default=None,
-        help="append every game played as a v2 record (hexset.record.Record) "
-        "here.",
+        help="also append every game's v2 record (hexset.record.Record) to this flat "
+        "file (the journal keeps them either way).",
     )
     args = parser.parse_args(argv)
 
@@ -308,18 +310,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.error("provide one entrant name per seat")
     if args.workers < 1:
         parser.error("--workers must be positive")
-    from hexset.arena import lineup_from_names
+    from hexset.arena import RETIRED, lineup_from_names
 
     load_runtime(*args.runtime)
     entrants = lineup_from_names(args.bots)
+    resolve_seed(args, sum(1 for e in entrants if e.kind != RETIRED))
     journal = args.journal or (
         args.out.with_name(f"{args.out.stem}.s{args.seed}.g{args.games}.games.jsonl")
         if args.out else Path("runs/census") / f"{'-'.join(args.bots)}.s{args.seed}.g{args.games}.games.jsonl")
     result = run_census(
         entrants, args.games, seed=args.seed, workers=args.workers,
-        records=bool(args.records), journal=journal, resume=args.resume,
+        journal=journal, resume=args.resume,
         runtimes=args.runtime, game_type=game_type_named(args.game_type),
         turn_cap=args.turn_cap, trade_mode=args.trade_mode, board_mode=args.board,
+        seed_bypass=args.bypass_seed_policy, registration=args.registration,
     )
     summaries = summarize(result)
 

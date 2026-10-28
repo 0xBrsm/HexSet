@@ -5,7 +5,16 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+import shutil
+import tempfile
+
 import pytest
+
+from hexset import seeds
+
+# A suite's games are fixtures, not runs: no seed policy holds them
+# (`hexset.seeds`), here or in any process a test starts.
+seeds.suspend()
 
 from hexset.bots import RandomBot
 from hexset.play import step_randomly
@@ -25,14 +34,19 @@ def track(tables: Tables) -> Tables:
     return tables
 
 
+# The temporary games directories those tables journal into, removed at teardown.
+_GAMES_DIRS: list[str] = []
+
+
 def new_tables(**config) -> Tables:
-    """`games_dir=""` rather than the default `None` ("wherever
-    `HEXSET_UI_GAMES_DIR` points"): tests must not journal into a real
-    games directory.
-    """
+    """A `Tables` journalling into a fresh temporary directory unless the test
+    names one: every game is journalled, and tests must not journal into a real
+    games directory."""
     from hexset.server.api import Config, Tables
 
-    config.setdefault("games_dir", "")
+    if not config.get("games_dir"):
+        config["games_dir"] = tempfile.mkdtemp(prefix="hexset-test-games-")
+        _GAMES_DIRS.append(config["games_dir"])
     return track(Tables(Config(**config)))
 
 
@@ -43,5 +57,7 @@ def stop_bot_runners():
     yield
     while _TRACKED:
         _TRACKED.pop().close()
+    while _GAMES_DIRS:
+        shutil.rmtree(_GAMES_DIRS.pop(), ignore_errors=True)
     live = [t.name for t in threading.enumerate() if t.name.startswith("bot-")]
     assert not live, f"bot runner threads still alive after this test: {live}"

@@ -23,6 +23,7 @@ from hexset.record import (
     to_json,
     write,
 )
+from journals import fresh
 
 SEED = 4  # the shortest finished game among the first dozen seeds
 # `RandomBot` declines every offer, so under `"round"` its trade rounds are
@@ -35,7 +36,7 @@ def a_record(seed: int = SEED, **options) -> Record:
     board = random_base_board(random.Random(seed))
     bots = [RandomBot(random.Random(seed * 10 + s)) for s in range(4)]
     return record_game(bots, board, seed, turn_cap=UNSTRUCTURED_TURN_CAP,
-                       trade_mode=NO_ROUNDS, **options)
+                       trade_mode=NO_ROUNDS, **options, journal=fresh())
 
 
 @pytest.fixture(scope="module")
@@ -248,7 +249,8 @@ def test_a_game_with_retired_seats_replays_through_its_record():
 
     tournament = compete(
         lineup_from_names(["random", "random", "retired", "retired"]), 4, seed=3,
-        records=True, antithetic=False, trade_mode=NO_ROUNDS, turn_cap=UNSTRUCTURED_TURN_CAP,
+        antithetic=False, trade_mode=NO_ROUNDS, turn_cap=UNSTRUCTURED_TURN_CAP,
+        journal=fresh(),
     )
     assert len(tournament.records) == 4
     for record in tournament.records:
@@ -339,14 +341,14 @@ def test_a_record_carries_the_ruleset_it_was_played_under():
 
     board = random_base_board(random.Random(7))
     bots = [RandomBot(random.Random(i)) for i in range(2)]
-    record = record_game(bots, board, seed=7, game_type=DUEL_VARIANT_GAME, action_cap=60)
+    record = record_game(bots, board, seed=7, game_type=DUEL_VARIANT_GAME, action_cap=60, journal=fresh())
 
     assert record.rules == DUEL_VARIANT
     assert from_json(to_json(record)).rules == DUEL_VARIANT
     # The replay is dealt under the recorded rules, not the default ones.
     assert replay(record).state(0, hidden=False).rules == DUEL_VARIANT
 
-    standard = record_game(bots, board, seed=7, action_cap=60)
+    standard = record_game(bots, board, seed=7, action_cap=60, journal=fresh())
     assert standard.rules == STANDARD
     assert replay(standard).state(0, hidden=False).rules == STANDARD
 
@@ -358,7 +360,7 @@ def test_a_record_written_before_rules_existed_reads_as_standard():
 
     board = random_base_board(random.Random(3))
     bots = [RandomBot(random.Random(i)) for i in range(2)]
-    record = record_game(bots, board, seed=3, action_cap=60)
+    record = record_game(bots, board, seed=3, action_cap=60, journal=fresh())
 
     raw = json.loads(to_json(record))
     del raw["rules"]

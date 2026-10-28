@@ -29,6 +29,7 @@ from hexset.game import (
 from hexset.play import play_random_game, step_randomly
 from hexset.state import MAX_ROADS, NO_OWNER, road_count
 from hexset.victory import WINNING_POINTS, victory_points
+from journals import fresh
 
 
 def a_game(players: int = 4, seed: int = 0):
@@ -65,20 +66,20 @@ def test_the_mask_agrees_with_the_action_list():
 
 
 def test_a_finished_game_offers_nothing():
-    game = play_random_game(num_players=3, rng=random.Random(5))
+    game = play_random_game(num_players=3, rng=random.Random(5), journal=fresh())
     assert is_over(game)
     assert legal_actions(game) == []
 
 
 def test_a_random_game_finishes_with_a_legal_winner():
-    game = play_random_game(num_players=4, rng=random.Random(0))
+    game = play_random_game(num_players=4, rng=random.Random(0), journal=fresh())
 
     assert game.won_by is not None
     assert victory_points(game._state, game.won_by) >= WINNING_POINTS
 
 
 def test_resources_survive_a_whole_game():
-    game = play_random_game(num_players=4, rng=random.Random(1))
+    game = play_random_game(num_players=4, rng=random.Random(1), journal=fresh())
     assert total_in_play(game._state) == expected_total()
     assert all(n >= 0 for n in game._state.bank)
     assert all(n >= 0 for hand in game._state.hands for n in hand)

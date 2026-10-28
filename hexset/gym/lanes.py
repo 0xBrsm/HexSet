@@ -127,8 +127,7 @@ class Outcome:
 @dataclass(frozen=True)
 class Episode:
     """One finished game: per-seat decisions plus how it ended. `seed`/`index`
-    identify the default deal only, so use `records=True` for a self-contained
-    replay. `trades` is every cleared exchange as `(step, a, b, received)`,
+    identify the default deal only; `record` is the self-contained replay. `trades` is every cleared exchange as `(step, a, b, received)`,
     carried explicitly because a replay seats no gates."""
 
     index: int
@@ -138,7 +137,8 @@ class Episode:
     decisions: tuple[tuple[Decision, ...], ...]
     outcome: Outcome
     trades: tuple[tuple[int, int, int, tuple[int, ...]], ...] = ()
-    # Replay from this, not by rebuilding from `(seed, index)`.
+    # Replay from this, not by rebuilding from `(seed, index)`. Every game is
+    # recorded.
     record: Record | None = None
 
     def stream(self) -> list[Decision]:
@@ -149,6 +149,22 @@ class Episode:
 
     def __len__(self) -> int:
         return sum(len(seat) for seat in self.decisions)
+
+
+def episode_entry(episode: Episode) -> dict:
+    """`episode` as one journal line (`hexset.gamelog`): its index and seed, the
+    policy id in each seat, how it ended, its cleared trades and its
+    `hexset.record.Record`."""
+    import json
+    from dataclasses import asdict
+
+    from ..record import to_json
+
+    return {
+        "kind": "game", "index": episode.index, "seed": episode.seed, "cast": list(episode.cast),
+        "outcome": asdict(episode.outcome), "trades": [list(trade) for trade in episode.trades],
+        "record": None if episode.record is None else json.loads(to_json(episode.record)),
+    }
 
 
 def _bind_gates(game: Game) -> None:
@@ -252,7 +268,6 @@ class LaneEnv:
         first_game: int = 0,
         stride: int = 1,
         bot_capacity: int = 256,
-        records: bool = False,
         discard_order: str = "seat",
         decisions: Collection[int] = (),
     ) -> None:
@@ -263,7 +278,7 @@ class LaneEnv:
         one geometry, or as a callable is a board law
         `board(index) -> Board | None`, `None` meaning the default deal,
         which `board_mode` names (`hexset.arena.deal_board`).
-        `records` has each `Episode` carry a `hexset.record.Record`.
+        Every game is recorded: each `Episode` carries its `hexset.record.Record`.
         `discard_order` is `DISCARD_ORDERS`' choice (the module docstring).
         `decisions` names the caller's policy ids asked for whole decisions;
         a bot's id cannot be one.
@@ -298,7 +313,6 @@ class LaneEnv:
             for pid, spawn in (bots or {}).items()
         }
         self.stride = stride
-        self.records = records
         self.discard_order = discard_order
         self.decisions = frozenset(decisions)
         self._spaces: dict[tuple[int, ...], ActionSpace] = {}
@@ -353,7 +367,7 @@ class LaneEnv:
             board_mode=drawn.board_mode,
             game_type=drawn.game_type,
             locked=drawn.locked,
-            chance=(lambda rng: recording(rng, drawn.game_type.rules)) if self.records else None,
+            chance=lambda rng: recording(rng, drawn.game_type.rules),
             turn_cap=self.turn_cap,
         )
         game.gates = self._seat_gates(game, cast)
@@ -362,7 +376,7 @@ class LaneEnv:
             game=game,
             cast=cast,
             by_seat=[[] for _ in range(self.players)],
-            tape=Tape() if self.records else None,
+            tape=Tape(),
         )
 
     # --- the tick ---------------------------------------------------------

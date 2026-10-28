@@ -14,6 +14,7 @@ from hexset.bots import RandomBot, TradesBy
 from hexset.rules import STANDARD_GAME
 from hexset.trading import TradeParams, retune
 from traders import ScarcityTrader
+from journals import fresh
 
 
 def test_moves_are_the_movers_and_every_other_name_is_the_traders():
@@ -64,7 +65,7 @@ def test_a_random_mover_trades_through_a_registered_gate_at_a_real_table():
     alone = tuple(lineup_from_names(["random"] + ["test-trader"] * 3))
 
     def own_trades(lineup, index):
-        outcome = _play_one((lineup, index, 7, MAX_ACTIONS, True, True, "round", STANDARD_GAME, 1200))
+        outcome = _play_one((lineup, index, 7, MAX_ACTIONS, True, "round", STANDARD_GAME, 1200, "random"), fresh())
         return sum(1 for t in outcome.cleared if outcome.seating[0] in (t.a, t.b))
 
     assert sum(own_trades(alone, i) for i in range(4)) == 0

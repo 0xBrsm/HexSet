@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from journals import fresh
+
 from hexset.actions import Action, ActionType, legal_actions
 
 from hexset.server import _journal as journal
@@ -284,7 +286,7 @@ def _recorded(num_players: int = 4, seed: int = 4, **options):
     board = random_base_board(random.Random(seed))
     bots = [RandomBot(random.Random(seed * 10 + s)) for s in range(num_players)]
     return record_game(bots, board, seed, turn_cap=UNSTRUCTURED_TURN_CAP,
-                       trade_mode="external", **options)
+                       trade_mode="external", journal=fresh(), **options)
 
 
 def test_a_journalled_record_reads_back_as_the_same_record(tmp_path):

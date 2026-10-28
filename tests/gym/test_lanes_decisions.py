@@ -72,7 +72,7 @@ def watched(env, answer=lambda requests: [None] * len(requests)):
 
 def test_a_random_discard_order_draws_an_owing_seat_and_lets_it_finish():
     env = LaneEnv(4, SEED, 3, deal=6, action_cap=1500, bots={0: lambda board: First()},
-                  records=True, discard_order="random")
+                  discard_order="random")
     asked, episodes = watched(env)
 
     assert asked, "no discard round in these games"
@@ -100,13 +100,13 @@ def test_the_discard_order_is_each_games_own_whatever_the_lanes():
     played = {}
     for lanes in (1, 4):
         env = LaneEnv(4, SEED, lanes, deal=4, action_cap=900, bots={0: lambda board: First()},
-                      records=True, discard_order="random")
+                      discard_order="random")
         played[lanes] = {e.index: e.record for e in env.drain()}
     assert played[1] == played[4]
 
 
 def test_seat_order_names_no_actor():
-    env = LaneEnv(4, SEED, 2, deal=2, action_cap=900, bots={0: lambda board: First()}, records=True)
+    env = LaneEnv(4, SEED, 2, deal=2, action_cap=900, bots={0: lambda board: First()})
     assert all(e.record.actors == () for e in env.drain())
 
 
@@ -117,7 +117,7 @@ def test_an_unknown_discard_order_is_refused():
 
 @pytest.mark.parametrize("order", ["seat", "random"])
 def test_a_decision_lane_plays_the_game_its_moves_play_one_at_a_time(order):
-    env = LaneEnv(4, SEED, 2, deal=3, action_cap=600, records=True, decisions={0}, discard_order=order)
+    env = LaneEnv(4, SEED, 2, deal=3, action_cap=600, decisions={0}, discard_order=order)
     kinds: set = set()
 
     def answer(requests):
@@ -139,7 +139,7 @@ def test_a_decision_lane_plays_the_game_its_moves_play_one_at_a_time(order):
         assert tuple(victory_points(replayed, s) for s in range(4)) == episode.outcome.points
         assert len(record.actions) == episode.outcome.actions == len(episode)
         # The same moves answered one at a time by an atomic lane: the same record.
-        atomic = LaneEnv(4, SEED, 1, deal=1, first_game=episode.index, action_cap=600, records=True,
+        atomic = LaneEnv(4, SEED, 1, deal=1, first_game=episode.index, action_cap=600,
                          discard_order=order)
         stream = [Action(ActionType(t), a, b) for t, a, b in record.actions]
         redone = []
@@ -149,7 +149,7 @@ def test_a_decision_lane_plays_the_game_its_moves_play_one_at_a_time(order):
 
 
 def test_bot_seats_act_a_move_at_a_time_beside_decision_seats():
-    env = LaneEnv(4, SEED, 2, deal=3, action_cap=800, records=True, caster=lambda index: (0, 1, 0, 1),
+    env = LaneEnv(4, SEED, 2, deal=3, action_cap=800, caster=lambda index: (0, 1, 0, 1),
                   bots={1: lambda board: Drawn()}, decisions={0}, discard_order="random")
     asked, episodes = [], []
     while env.running:
@@ -167,7 +167,7 @@ def test_bot_seats_act_a_move_at_a_time_beside_decision_seats():
 
 
 def test_an_answer_outside_the_decision_advances_no_lane():
-    env = LaneEnv(4, SEED, 2, deal=2, records=True, decisions={0})
+    env = LaneEnv(4, SEED, 2, deal=2, decisions={0})
     requests = env.requests()
     good = answers(requests)
     bad = list(good)
@@ -204,7 +204,7 @@ def regrouped(record) -> list[int]:
 
 @pytest.mark.parametrize("order", ["seat", "random"])
 def test_every_move_is_filed_under_its_run_and_the_record_regroups_the_same(order):
-    env = LaneEnv(4, SEED, 2, deal=3, action_cap=700, records=True, caster=lambda index: (0, 1, 0, 0),
+    env = LaneEnv(4, SEED, 2, deal=3, action_cap=700, caster=lambda index: (0, 1, 0, 0),
                   bots={1: lambda board: Drawn()}, decisions={0}, discard_order=order)
     asked, episodes = [], []
     while env.running:

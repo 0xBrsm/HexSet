@@ -142,6 +142,46 @@ def test_the_target_is_the_seat_likeliest_to_be_hit():
         assert D.targeted(game, s, ns, (), model) == (stolen[s] > 0 and stolen[s] >= max(stolen.values()) - 1e-12)
 
 
+def test_an_ask_named_to_a_seat_targets_that_seat_alone():
+    game = a_robber_move()
+    model = D.PlainMover()
+    target = next(s for s in (1, 2, 3) if D.targeted(game, s, ASK, (), model))
+    named = next(s for s in (1, 2, 3) if s != target)
+    ask = D.Ask(0, D.NO_BLOCK, WOOD, to=named)
+    assert [D.targeted(game, s, ask, (), model) for s in (1, 2, 3)] == [s == named for s in (1, 2, 3)]
+    seat = Seat(observe(game, named), named, object(), Gate(), deals=ANSWERS)
+    assert not seat.deal_targeted(0, D.NO_BLOCK, WOOD) or named == target
+    assert seat.deal_targeted(0, D.NO_BLOCK, WOOD, to=named)
+    assert not Seat(observe(game, target), target, object(), Gate(),
+                    deals=ANSWERS).deal_targeted(0, D.NO_BLOCK, WOOD, to=named)
+
+
+def test_a_named_seat_reads_the_robber_coming_for_it_if_silent():
+    game = a_robber_move()
+    state, model = game._state, D.PlainMover()
+    named = next(s for s in (1, 2, 3) if not D.targeted(game, s, ASK, (), model))
+    ask = D.Ask(0, D.NO_BLOCK, WOOD, to=named)
+    hexes = D.toward(state, ask, named, None)
+    assert hexes and all(named in occupants(state, h) for h in hexes)
+    assert D.toward(state, ask, 5 - named if 5 - named in (1, 2, 3) else 1, None) is None
+    assert D.toward(state, ASK, named, None) is None                  # said to the table
+    # silent, it is blocked for sure; so promising is worth more than to an ask said to the table
+    assert block_chance(model, game, named) < 1.0
+    assert D.promise_value(game, named, Gate(), ask, (), model) > D.promise_value(game, named, Gate(), ASK, (), model)
+
+
+def test_a_promise_taken_back_is_not_owed():
+    game = a_robber_move()
+    model = D.PlainMover()
+    target = next(s for s in (1, 2, 3) if D.targeted(game, s, ASK, (), model))
+    seat = Seat(observe(game, target), target, object(), Gate(), deals=ANSWERS)
+    if not seat.deal_answer(0, D.NO_BLOCK, WOOD):
+        pytest.skip("this table's target does not promise")
+    assert seat._promise is not None
+    seat.deal_withdraw()
+    assert seat._promise is None
+
+
 def test_a_promise_already_made_moves_the_target():
     game = a_robber_move()
     model = D.PlainMover()

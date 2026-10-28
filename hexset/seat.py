@@ -57,7 +57,7 @@ from typing import Iterable, Sequence
 from .actions import Action, ActionType, apply, victim_of
 from .board.board import Board
 from .cards import DevCard
-from .bots.base import seat_at
+from .bots.base import seat_at, watch
 from .chance import UNSEEN, ChanceError, Hosted
 from .deals import (
     ANSWERING, NO_BLOCK, Ask, Deal, DealParams, blacklist, closed, deal_params_of, default_accept, default_ask,
@@ -189,6 +189,9 @@ class Seat:
         robbed = victim_of(game, action.b) if action.type is ActionType.MOVE_ROBBER else None
         if action.type is ActionType.END_TURN:
             self._turn_over()
+        # A bot modelling the other seats from their moves reads each one on
+        # the position it was made in (`hexset.bots.watch`).
+        watch(self.bot, game, actor, action, self.seat)
         try:
             apply(game, action, seat=actor)
         except (ValueError, IndexError, ChanceError, HiddenRead) as exc:
@@ -520,10 +523,12 @@ class Seat:
         client may ask `answer` of an offer nobody made."""
         trading.show(self.game, seat, received)
 
-    def deal_answer(self, mover: int, kind: str, resource: int, promised: Sequence[int] = ()) -> bool:
+    def deal_answer(self, mover: int, kind: str, resource: int, promised: Sequence[int] = (),
+                    to: int | None = None) -> bool:
         """Whether this seat promises `mover` a card of `resource` for a deal
         of `kind` (`hexset.deals.NO_BLOCK`, `NO_STEAL`), `promised` the seats
-        that already have, in the order they did (`hexset.deals.answer`).
+        that already have, in the order they did, `to` the seat the mover
+        named, if it named one (`hexset.deals.answer`, `Ask.to`).
         A promise is the seat's consent: the client pays the card if the
         robber spares it. Once the robber has moved this turn, the seat on
         turn is promised nothing."""
@@ -532,16 +537,23 @@ class Seat:
         self._sync()
         if self._robber_moved and mover == self.game.current_player:
             return False                    # this turn's robber has moved: nothing left to promise against
-        promise = deal_answer(self.game, self.seat, self.gate, self.deals, Ask(mover, kind, resource), promised)
+        promise = deal_answer(self.game, self.seat, self.gate, self.deals, Ask(mover, kind, resource, to), promised)
         if promise:
             self._promise = (mover, kind, resource)
         return promise
 
-    def deal_targeted(self, mover: int, kind: str, resource: int, promised: Sequence[int] = ()) -> bool:
+    def deal_withdraw(self) -> None:
+        """Take back the promise `deal_answer` last made, before the mover
+        heard it: the client never said it, so nothing is owed for it."""
+        self._promise = None
+
+    def deal_targeted(self, mover: int, kind: str, resource: int, promised: Sequence[int] = (),
+                      to: int | None = None) -> bool:
         """Whether this seat is the one `mover` is likeliest to hit, for a
         deal of `kind` asking a card of `resource` (`hexset.deals.targeted`),
         read with the seat's own robber model -- whether the seat holds the
-        card or not. A seat that answers no deals, or asked once the robber
+        card or not -- unless the mover named a seat (`to`), which is then
+        the one targeted. A seat that answers no deals, or asked once the robber
         has moved this turn, is targeted by nothing. What lets a client say
         a true "none" to an ask aimed at it while holding none to pay."""
         if self.deals is None or not self.deals.answer or kind not in self.deals.kinds:
@@ -549,7 +561,7 @@ class Seat:
         self._sync()
         if self._robber_moved and mover == self.game.current_player:
             return False
-        return deal_targeted(self.game, self.seat, Ask(mover, kind, resource), tuple(promised),
+        return deal_targeted(self.game, self.seat, Ask(mover, kind, resource, to), tuple(promised),
                              robber_model(self.deals.model))
 
     def _settle_promise(self, mover: int, hex_index: int, robbed: int | None) -> None:

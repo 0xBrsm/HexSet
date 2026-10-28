@@ -13,6 +13,7 @@ from hexset.bots import RandomBot
 from hexset.game import Phase, run_trade_event, start
 from hexset.record import moves, record_game, replay
 from helpers import deal
+from journals import fresh
 
 WOOD, BRICK, SHEEP, WHEAT, ORE = (int(r) for r in Resource)
 
@@ -134,7 +135,7 @@ def test_a_recorded_game_files_a_mid_turn_trade_at_its_step_and_replays():
     bots = [LateTrader(random.Random(40 + s)) for s in range(4)]
     # A short capped game rather than a finished one: random hands only grow,
     # and every trade event prices the whole enumeration of them.
-    record = record_game(bots, board, 4, turn_cap=12)
+    record = record_game(bots, board, 4, turn_cap=12, journal=fresh())
     assert sum(b.yes for b in bots) > 0
     kinds = {ActionType(record.actions[step][0]) for step, *_ in record.trades}
     assert record.trades, "nobody traded"

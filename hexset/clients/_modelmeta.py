@@ -46,6 +46,11 @@ class RolloutConfig:
     #: Every opening root searched whatever `decisive` says (metadata
     #: `setup = full`, `PairedRollouts.full_setup`).
     full_setup: bool = False
+    #: `(policy, encoder)`: the files that play every other seat of a playout
+    #: (`hexset.clients.conditioned.Opponents`), named beside this one by
+    #: metadata `opponents` and `opponent_encoder`; `None` for the file's own
+    #: policy at every seat.
+    opponents: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -191,12 +196,28 @@ def robber_tip_of(checkpoint: object) -> float:
     return float(getattr(checkpoint, "robber_tip", 0.0))
 
 
+def _opponents(policy: str | None, encoder: str | None) -> tuple[str, str] | None:
+    """`opponents` and `opponent_encoder`, both or neither: a file name each,
+    beside the file that names them. One without the other fails the load:
+    a model of the other seats with nothing to read them by, or the reverse."""
+    policy, encoder = (policy or "").strip(), (encoder or "").strip()
+    if not policy and not encoder:
+        return None
+    if not policy or not encoder:
+        raise ValueError("`opponents` and `opponent_encoder` name a pair: give both or neither")
+    for name in (policy, encoder):
+        if "/" in name or name.startswith("."):
+            raise ValueError(f"{name!r}: an opponent file is named beside the file, not by path")
+    return policy, encoder
+
+
 def search_config(meta: dict[str, str]) -> SearchConfig:
     """The search `meta` asks for, read only when the file actually asks to be
     searched, so a stale `simulations` cannot turn a policy into a search.
 
     `search = mcts` reads `simulations`, `wave` and `decisive`; `search =
-    rollout` reads `worlds`, `top`, `decisive`, `horizon` and `setup`. Every
+    rollout` reads `worlds`, `top`, `decisive`, `horizon`, `setup` and the
+    `opponents`/`opponent_encoder` pair. Every
     file reads `own_calibration` (`SearchConfig.own_calibration` says where
     it applies). Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
     and an unreadable one takes its default; a setting that changes what the
@@ -214,6 +235,7 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
                 top=max(2, _clamp(meta.get("top"), DEFAULT_TOP, MAX_TOP) or DEFAULT_TOP),
                 horizon=_horizon(meta.get("horizon")),
                 full_setup=_full_setup(meta.get("setup")),
+                opponents=_opponents(meta.get("opponents"), meta.get("opponent_encoder")),
             ),
         )
     if method != "mcts":

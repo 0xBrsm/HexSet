@@ -13,8 +13,9 @@ from hexset.bench.duel import add_table_options
 from hexset.bench.metrics import json_metrics, paired_mean, side_metrics
 from hexset.experiment import provenance, result_document
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import RUNTIME_HELP, base_name, compete, lineup_from_names, load_runtime, pooled
+from hexset.arena import RETIRED, RUNTIME_HELP, base_name, compete, lineup_from_names, load_runtime, pooled
 from hexset.rules import game_type
+from hexset.seeds import add_arguments as add_seed_arguments, resolve as resolve_seed
 
 __all__ = [
     "main",
@@ -42,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         default=40,
         help="must divide evenly over the seats, so the rotation completes",
     )
-    parser.add_argument("--seed", type=int, default=0)
+    add_seed_arguments(parser)
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     add_table_options(parser)
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.against is not None and not 0 <= args.against < len(lineup):
         parser.error("--against must index an entrant in the lineup")
     run_provenance = provenance(lineup)
+    resolve_seed(args, sum(1 for e in lineup if e.kind != RETIRED))
     journal = args.journal or str(
         Path("runs/baselines") / f"{'-'.join(args.lineup)}.s{args.seed}.g{args.games}.games.jsonl")
     result = compete(
@@ -79,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         board_mode=args.board,
         journal=journal,
         resume=args.resume,
+        seed_bypass=args.bypass_seed_policy,
+        registration=args.registration,
     )
     payload = {
         "experiment": result_document(result, lineup, seed=args.seed, workers=args.workers,

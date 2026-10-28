@@ -14,6 +14,7 @@ from hexset.game import MAX_TURNS, start
 from hexset.rules import GameType, Rules
 
 from helpers import mini_board
+from journals import fresh
 
 
 class Idler:
@@ -45,7 +46,7 @@ def test_a_stuck_run_aborts_rather_than_scoring():
 
     register_preset("idler", Entrant("idler", kind="idler"))
     with pytest.raises(Exhausted) as caught:
-        compete(lineup_from_names(["idler", "idler"]), 2, seed=11, workers=1)
+        compete(lineup_from_names(["idler", "idler"]), 2, seed=11, workers=1, journal=fresh())
     assert caught.value.turns >= MAX_TURNS
 
 
@@ -56,7 +57,7 @@ def test_the_abort_carries_what_it_takes_to_replay():
 
     register_preset("idler", Entrant("idler", kind="idler"))
     with pytest.raises(Exhausted) as caught:
-        compete(lineup_from_names(["idler", "idler"]), 2, seed=11, workers=1, turn_cap=30)
+        compete(lineup_from_names(["idler", "idler"]), 2, seed=11, workers=1, turn_cap=30, journal=fresh())
     failure = caught.value
     assert 30 <= failure.turns < MAX_TURNS
     assert failure.seed == 11
@@ -75,6 +76,6 @@ def test_a_run_that_finishes_is_untouched():
     sprint = GameType("sprint", Rules(winning_points=3), (2,))
     tournament = compete(
         lineup_from_names(["random"] * 2), 2, seed=3, workers=1, game_type=sprint
-    )
+    , journal=fresh())
     assert tournament.games == 2
     assert all(winner is not None for winner in tournament.winners)

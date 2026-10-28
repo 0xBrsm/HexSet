@@ -11,11 +11,12 @@ from hexset.arena import (
     entrant_from_name,
     lineup_from_names,
 )
+from journals import fresh
 
 
 def test_a_lineup_the_rotation_cannot_balance_is_refused():
     with pytest.raises(ValueError, match="divide evenly"):
-        compete(lineup_from_names(["random"] * 4), 6)
+        compete(lineup_from_names(["random"] * 4), 6, journal=fresh())
 
 
 def test_a_checkpoint_path_names_an_entrant_wherever_a_preset_would():
@@ -276,17 +277,17 @@ def test_the_runs_bargaining_settings_reach_every_game(monkeypatch):
     import hexset.arena as arena
 
     seen = []
-    original = arena.play_game
+    original = arena.seat_bots
 
-    def spy(game, bots, **kwargs):
-        seen.append(kwargs.get("trade_mode"))
-        return original(game, bots, **kwargs)
+    def spy(game, bots, trade_mode="round", no_trade=()):
+        seen.append(trade_mode)
+        return original(game, bots, trade_mode, no_trade)
 
-    monkeypatch.setattr(arena, "play_game", spy)
-    compete(lineup_from_names(["random"] * 2), 2, workers=1, action_cap=40, trade_mode="auto")
+    monkeypatch.setattr(arena, "seat_bots", spy)
+    compete(lineup_from_names(["random"] * 2), 2, workers=1, action_cap=40, trade_mode="auto", journal=fresh())
     assert seen == ["auto"] * 2
     seen.clear()
-    compete(lineup_from_names(["random"] * 2), 2, workers=1, action_cap=40)
+    compete(lineup_from_names(["random"] * 2), 2, workers=1, action_cap=40, journal=fresh())
     assert seen == ["round"] * 2, "the mechanism is all a run names"
 
 
@@ -295,6 +296,7 @@ def test_compete_reports_from_the_calling_process_with_workers():
     tournament = compete(
         lineup_from_names(["random"] * 2), 2, workers=2, turn_cap=UNSTRUCTURED_TURN_CAP,
         progress=lambda done, games, outcome: seen.append((done, outcome.winner)),
+        journal=fresh(),
     )
     assert [done for done, _ in seen] == [1, 2]
     assert [winner for _, winner in seen] == list(tournament.winners)
@@ -355,6 +357,7 @@ def test_every_playing_entrant_opens_equally_often(opener_kind, geometry, comple
     compete(
         _sides(geometry), 16, workers=1, action_cap=1, antithetic=antithetic,
         complement=complement if antithetic else None,
+        journal=fresh(),
     )
     assert sorted(OPENERS) == ["a"] * 8 + ["b"] * 8
 
@@ -377,12 +380,12 @@ def test_a_full_table_opens_on_seat_zero_under_the_old_rotation():
 
 def test_the_default_complement_is_refused_where_it_moves_a_retired_seat():
     with pytest.raises(ValueError, match="retired entrant onto a playing seat"):
-        compete(lineup_from_names(["random", "random", "retired", "retired"]), 4, action_cap=1)
+        compete(lineup_from_names(["random", "random", "retired", "retired"]), 4, action_cap=1, journal=fresh())
     with pytest.raises(ValueError, match="not a permutation"):
-        compete(lineup_from_names(["random"] * 2), 2, action_cap=1, complement=(0, 0))
+        compete(lineup_from_names(["random"] * 2), 2, action_cap=1, complement=(0, 0), journal=fresh())
     with pytest.raises(ValueError, match="antithetic=True"):
         compete(lineup_from_names(["random"] * 2), 2, action_cap=1, antithetic=False,
-                complement=(1, 0))
+                complement=(1, 0), journal=fresh())
 
 
 @pytest.mark.parametrize("geometry,complement", [

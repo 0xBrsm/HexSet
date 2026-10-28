@@ -32,7 +32,7 @@ def test_draws_are_indexed_exclude_held_out_cells_and_use_every_slot():
 
 def test_rule_and_board_draws_reach_the_lanes_and_their_replay_records():
     law = Distribution(specification(), 4, 9)
-    env = LaneEnv(4, 9, lanes=4, deal=8, action_cap=20, records=True, deal_law=law)
+    env = LaneEnv(4, 9, lanes=4, deal=8, action_cap=20, deal_law=law)
     episodes = []
     while env.running:
         requests = env.requests()

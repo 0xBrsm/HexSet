@@ -8,6 +8,7 @@ are game-level and assume an independence paired games do not have.
 
 from __future__ import annotations
 
+import os
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -18,7 +19,8 @@ from .metrics import json_metrics
 from ..arena import MAX_ACTIONS, Standing, mean_interval, wilson
 from ..game import MAX_TURNS
 from ..casting import Caster, rotating, swapped
-from ..gym.lanes import BoardBots, Episode, LaneEnv, Request
+from .. import gamelog
+from ..gym.lanes import BoardBots, Episode, LaneEnv, Request, episode_entry
 
 if TYPE_CHECKING:  # annotation-only
     from ..actions import Action
@@ -221,7 +223,7 @@ def compete_batched(
     names: Mapping[int, str] | None = None,
     gates: Mapping[int, Callable[[Game, int], object]] | None = None,
     episodes: bool = False,
-    records: bool = False,
+    journal: str | os.PathLike,
 ) -> Verdict:
     """Play `games` games between batched policies and report the verdict.
 
@@ -231,9 +233,11 @@ def compete_batched(
     `antithetic` plays every board both ways, averaging its two readings; it
     needs exactly two policies and an even `games`, which counts games, not
     boards. `lanes` changes only the wall clock. Each seat bargains as its
-    own gate declares (`gates`, or a policy's own `gate`). `records=True`
-    attaches a `Record` to each episode, reaching the caller only under
-    `episodes=True`.
+    own gate declares (`gates`, or a policy's own `gate`). Every game is
+    written to `journal` as it finishes (`hexset.gym.lanes.episode_entry`:
+    the seating by policy id, how it ended and its `Record`), under a header
+    naming the duellists; a journal that already holds games is refused.
+    `episodes=True` also hands the episodes back.
 
     A game that reaches `turn_cap` with no winner ends there: a reading in
     which neither side won, scored on the points it reached and counted in
@@ -248,6 +252,18 @@ def compete_batched(
     if learner not in policies:
         raise ValueError(f"policy {learner} is not one of the duellists")
     ids = sorted(policies)
+    if not journal:
+        raise ValueError("a duel keeps its games in a journal: name one")
+    if os.path.exists(journal) and os.path.getsize(journal) > 0:
+        raise FileExistsError(f"{journal} already holds games: give this duel a journal of its own")
+    from .. import __version__
+
+    header = {
+        "kind": "header", "journal": gamelog.JOURNAL_VERSION, "hexset": __version__, "versus": True,
+        "policies": {str(pid): (names or {}).get(pid, str(pid)) for pid in ids}, "learner": learner,
+        "games": games, "seed": seed, "players": players, "antithetic": antithetic,
+        "action_cap": action_cap, "turn_cap": turn_cap,
+    }
 
     if caster is None:
         if players % len(ids):
@@ -258,7 +274,7 @@ def compete_batched(
         share = players // len(ids)
         caster = rotating(tuple(pid for pid in ids for _ in range(share)))
 
-    # A seat with its own trade gate is gated here too, as under `arena.play`.
+    # A seat with its own trade gate is gated here too, as `arena.compete` seats it.
     seated: dict[int, Callable[[Game, int], object]] = {}
     for pid, policy in policies.items():
         gate = getattr(policy, "gate", None)
@@ -295,9 +311,9 @@ def compete_batched(
             turn_cap=turn_cap,
             caster=cohort_caster,
             gates=seated,
-            records=records and episodes,
         )
         for episode in env.drain(answer):
+            gamelog.append_after_header(journal, header, episode_entry(episode))
             readings.setdefault(episode.index, []).append(_read(episode, learner))
             if episodes:
                 played.append(episode)

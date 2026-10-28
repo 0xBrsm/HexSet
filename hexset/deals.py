@@ -329,11 +329,27 @@ def promise_model(name: str) -> PromiseModel:
 
 @dataclass(frozen=True)
 class Ask:
-    """The mover's ask: one card of `resource` for a deal of `kind`."""
+    """The mover's ask: one card of `resource` for a deal of `kind`, `to` the
+    one seat the mover named where it named one (`None`: said to the table).
+    A named seat is the one the mover is coming for unless it pays
+    (`targeted`, `toward`)."""
 
     mover: int
     kind: str
     resource: int
+    to: int | None = None
+
+
+def toward(state: GameState, ask: Ask, seat: int, allowed: frozenset[int] | None) -> frozenset[int] | None:
+    """The hexes the mover may take that hit `seat` -- a building of its on
+    the hex -- when `ask` names `seat`: where a seat the mover named reads
+    the robber going if it stays silent. `allowed` otherwise, or where no
+    such hex is open to the mover."""
+    if ask.to is None or ask.to != seat:
+        return allowed
+    hexes = range(state.board.num_hexes) if allowed is None else allowed
+    hit = frozenset(h for h in hexes if may_stand(state, h) and seat in occupants(state, h))
+    return hit or allowed
 
 
 @dataclass
@@ -516,7 +532,11 @@ def targeted(game: "Game", seat: int, ask: Ask, promised: Sequence[int], model: 
     no-block ask, robbed for a no-steal one, with the promises already made
     taken as kept. A tie for the likeliest counts; a seat with no chance of
     being hit is never targeted. What a deal is predicated on: a seat the
-    mover is not coming for has no hit to buy off, and says nothing."""
+    mover is not coming for has no hit to buy off, and says nothing. An ask
+    that names a seat (`Ask.to`) targets that seat and no other, whatever
+    the model reads."""
+    if ask.to is not None:
+        return seat == ask.to
     st = game.state(seat).state
     mover, taken = ask.mover, {s: ask.kind for s in promised}
     hexes = model.hexes(st, mover, allowed_targets(st, mover, game.robber_allowed), taken)
@@ -546,7 +566,8 @@ def promise_value(game: "Game", seat: int, gate: object, ask: Ask, promised: Seq
     it to the mover for nothing. The swap is the asked card for one of the
     four others, equally likely, since the mover chooses. Both readings of
     the mover -- with this promise and without -- take the promises already
-    made as accepted."""
+    made as accepted; silent, a seat the ask names reads the mover going
+    for it (`toward`)."""
     from .trading import valued_many
 
     view = game.state(seat)
@@ -581,7 +602,7 @@ def promise_value(game: "Game", seat: int, gate: object, ask: Ask, promised: Seq
             total += p * (block + robbed[h] * steal)
         return total
 
-    silent = hit_chances(model, state, mover, allowed, others, seat)
+    silent = hit_chances(model, state, mover, toward(state, ask, seat, allowed), others, seat)
     sure = hit_chances(model, state, mover, allowed, {**others, seat: ask.kind}, seat)
     if ask.kind == NO_BLOCK:
         spared = sum(p for h, p in sure[0].items() if seat not in occupants(state, h))
@@ -842,7 +863,8 @@ class ValueDealer:
       promises where its win chance promising beats its win chance silent.
       Either way the mover's robber move is read off the params' robber
       model (`model`), the promises already made taken as kept, and each
-      move is valued card by card of its steal, as above. Promising, the
+      move is valued card by card of its steal, as above; silent, a seat the
+      ask names reads the move as one that hits it (`toward`). Promising, the
       model reads the seat as promised too, and where the move spares it,
       the exchange is priced after the move, the asked card for each card
       the mover may give back, by the chance the mover holds it (the card
@@ -1180,7 +1202,7 @@ class ValueDealer:
         model = robber_model(self.params.model)
         allowed = allowed_targets(state, mover, game.robber_allowed)
         taken = {s: kind for s in promised if s != seat}
-        silent = self._move_chances(game, model, state, mover, allowed, taken, options)
+        silent = self._move_chances(game, model, state, mover, toward(state, ask, seat, allowed), taken, options)
         sure = self._move_chances(game, model, state, mover, allowed, {**taken, seat: kind}, options)
         self._value(at, seat, plan, {i for i, p in (*silent.items(), *sure.items()) if p > 0})
 
@@ -1418,7 +1440,7 @@ __all__ = [
     "ANSWERING",
     "NO_BLOCK", "NO_STEAL", "KINDS", "DICE_STAY", "DealParams", "Ask", "RobberModel", "PlainMover",
     "register_robber_model", "robber_model", "candidate_hexes", "weights_on", "softmax", "hit_chances",
-    "targeted", "promise_value", "default_answer", "answer", "deal_params_of", "Dealing", "Deal", "default_ask",
+    "targeted", "toward", "promise_value", "default_answer", "answer", "deal_params_of", "Dealing", "Deal", "default_ask",
     "default_accept", "default_return", "keep_promises", "holds", "run_deal_event", "close_deal",
     "settle_deals", "blacklist", "closed", "MOVERS", "deal_seed", "Answerer", "register_answerer", "answerer_for",
     "STEAL_SAMPLES", "value_net", "ValueDealer", "PromiseModel", "register_promise_model", "promise_model",

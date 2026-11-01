@@ -406,8 +406,8 @@ none.
 
 `GET /api/models` lists every preset a runtime registered, in registration
 order (with the `catanatron` extra installed, `catanatron` among them), then
-each `*.onnx` in the models directory as `<name>-<version>`, from the `name`
-and `version` its metadata declares ([onnx.md](onnx.md#serving-a-model)); the
+each `*.onnx` in the models directory by the `name` its metadata declares
+([onnx.md](onnx.md#serving-a-model)), one file per name at each game type; the
 filename plays no part. `models` is every entry once; `game_types` maps each
 `hexset.rules.GAME_TYPES` name to the entries a table of that type seats, each
 with the `name`, `version` and `commit` a model file declares, and the

@@ -1,7 +1,7 @@
-"""The picker names a model file by the `name` and `version` it declares,
-never by its filename, as `<name>-<version>`: files may share a name as long
-as their versions differ, and each is offered only at the game types it
-declares."""
+"""The picker names a model file by the `name` it declares, never by its
+filename; its `version` is its profile's. One name is one bot, which may be
+one file at some game types and another at the rest, each file offered only
+at the game types it declares."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def spawned(monkeypatch):
     """Every ONNX spawn the server asks for, as `(path, game_type)`."""
     asked = []
 
-    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None):
+    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None, workers=0, pools=None):
         asked.append((path, game_type))
         from hexset.bots import RandomBot
 
@@ -53,16 +53,16 @@ def spawned(monkeypatch):
     return asked
 
 
-def test_a_file_is_offered_by_the_name_and_version_it_declares_not_its_filename(models):
+def test_a_file_is_offered_by_the_name_it_declares_not_its_filename(models):
     (models / "whatever-file.onnx").write_bytes(named(name="mynet", version="1.0", commit="abc"))
     (models / "unversioned.onnx").write_bytes(named(name="plain"))
-    assert model_options()["mynet-1.0"] == str(models / "whatever-file.onnx")
-    assert model_options()["plain"] == str(models / "unversioned.onnx"), "no version, the name alone"
-    assert "whatever-file" not in listed_models() and "mynet" not in listed_models()
+    assert model_options()["mynet"] == str(models / "whatever-file.onnx")
+    assert model_options()["plain"] == str(models / "unversioned.onnx")
+    assert "whatever-file" not in listed_models() and "mynet-1.0" not in listed_models()
     view = new_tables().handle("GET", "/api/models", {}, None)
-    assert "mynet-1.0" in view["models"]
-    assert view["game_types"]["standard"]["mynet-1.0"] == {"name": "mynet", "version": "1.0", "commit": "abc"}
-    assert "mynet-1.0" not in view["game_types"]["duel-variant"], "no modes is standard only"
+    assert "mynet" in view["models"]
+    assert view["game_types"]["standard"]["mynet"] == {"name": "mynet", "version": "1.0", "commit": "abc"}
+    assert "mynet" not in view["game_types"]["duel-variant"], "no modes is standard only"
 
 
 def test_files_that_name_nothing_are_not_offered(models, capsys):
@@ -78,48 +78,49 @@ def test_files_that_name_nothing_are_not_offered(models, capsys):
     assert logged.count("declares no name") == 1, "each logged once"
 
 
-def test_one_name_in_several_versions_each_at_its_own_game_types(models, spawned):
-    (models / "a.onnx").write_bytes(named(name="net", modes="standard", version="4.0", commit="w"))
-    (models / "b.onnx").write_bytes(named(name="net", modes="standard", version="4.1", commit="x"))
-    (models / "c.onnx").write_bytes(named(name="net", modes="duel-variant", version="4d.0", commit="y"))
+def test_one_name_is_one_file_at_some_game_types_and_another_at_the_rest(models, spawned):
+    (models / "a.onnx").write_bytes(named(name="net", modes="standard", version="6.2", commit="x"))
+    (models / "b.onnx").write_bytes(named(name="net", modes="duel-variant", version="4d.3", commit="y"))
     registry = new_tables()
     view = registry.handle("GET", "/api/models", {}, None)
-    assert [m for m in view["models"] if m.startswith("net")] == ["net-4.0", "net-4.1", "net-4d.0"]
-    assert {m for m in view["game_types"]["standard"] if m.startswith("net")} == {"net-4.0", "net-4.1"}
-    assert {m for m in view["game_types"]["duel-variant"] if m.startswith("net")} == {"net-4d.0"}
+    assert [m for m in view["models"] if m.startswith("net")] == ["net"]
+    assert view["game_types"]["standard"]["net"]["version"] == "6.2"
+    assert view["game_types"]["duel-variant"]["net"]["version"] == "4d.3"
+    assert api.bot_profile("net", "standard") == {"version": "6.2"}
+    assert api.bot_profile("net", "duel-variant") == {"version": "4d.3"}
+    assert api.bot_profile("net", spec=str(models / "b.onnx")) == {"version": "4d.3"}
 
-    registry.handle("POST", "/api/games", {"bots": ["net-4.1", "net-4.0"]}, None)
-    registry.handle("POST", "/api/games", {"bots": ["net-4d.0"], "game_type": "duel-variant"}, None)
+    registry.handle("POST", "/api/games", {"bots": ["net", "net"]}, None)
+    registry.handle("POST", "/api/games", {"bots": ["net"], "game_type": "duel-variant"}, None)
     assert spawned == [
-        (str(models / "b.onnx"), "standard"), (str(models / "a.onnx"), "standard"),
-        (str(models / "c.onnx"), "duel-variant"),
+        (str(models / "a.onnx"), "standard"), (str(models / "a.onnx"), "standard"),
+        (str(models / "b.onnx"), "duel-variant"),
     ]
 
 
 def test_an_entry_not_offered_at_the_table_s_game_type_is_refused(models, spawned):
     (models / "a.onnx").write_bytes(named(name="fourseat", version="3.6"))
     registry = new_tables()
-    with pytest.raises(ApiError, match="fourseat-3.6 does not play duel-variant games"):
-        registry.handle("POST", "/api/games", {"bots": ["fourseat-3.6"], "game_type": "duel-variant"}, None)
-    with pytest.raises(ApiError, match="unknown model: fourseat"):
-        registry.handle("POST", "/api/games", {"bots": ["fourseat"]}, None)
+    with pytest.raises(ApiError, match="fourseat does not play duel-variant games"):
+        registry.handle("POST", "/api/games", {"bots": ["fourseat"], "game_type": "duel-variant"}, None)
+    with pytest.raises(ApiError, match="unknown model: fourseat-3.6"):
+        registry.handle("POST", "/api/games", {"bots": ["fourseat-3.6"]}, None)
 
     data = registry.handle("POST", "/api/games", {"game_type": "duel-variant"}, None)
     table = registry.get(data["code"])
     seat = next(i for i in (0, 1) if table.seats[i].kind.name == "EMPTY")
     with pytest.raises(ApiError, match="does not play duel-variant"):
-        registry.handle("POST", "/api/bot", {"seat": seat, "model": "fourseat-3.6"}, data["token"])
+        registry.handle("POST", "/api/bot", {"seat": seat, "model": "fourseat"}, data["token"])
     assert spawned == []
 
 
-def test_two_files_declaring_one_name_and_version_are_neither_offered(models, capsys):
-    (models / "a.onnx").write_bytes(named(name="net", version="1", modes="standard"))
-    (models / "b.onnx").write_bytes(named(name="net", version="1", modes="duel-variant"))
-    (models / "c.onnx").write_bytes(named(name="net", version="2"))
+def test_two_files_offering_one_name_at_one_game_type_are_neither_offered_there(models, capsys):
+    (models / "a.onnx").write_bytes(named(name="net", version="1", modes="standard,duel-variant"))
+    (models / "b.onnx").write_bytes(named(name="net", version="2"))
     catalogue = model_catalogue()
-    assert "net-1" not in catalogue["standard"] and "net-1" not in catalogue["duel-variant"]
-    assert catalogue["standard"]["net-2"].spec == str(models / "c.onnx")
-    assert "none is offered" in capsys.readouterr().err
+    assert "net" not in catalogue["standard"], "both offer it at the standard game"
+    assert catalogue["duel-variant"]["net"].spec == str(models / "a.onnx"), "only one offers it in duels"
+    assert "none is offered there" in capsys.readouterr().err
 
 
 def test_a_replaced_file_is_read_again(models):
@@ -127,7 +128,7 @@ def test_a_replaced_file_is_read_again(models):
     path.write_bytes(named(name="old"))
     assert "old" in model_options()
     path.write_bytes(named(name="newer", version="2"))
-    assert "newer-2" in model_options() and "old" not in model_options()
+    assert "newer" in model_options() and "old" not in model_options()
 
 
 def test_a_file_may_declare_a_profile_held_to_a_clients_rules(models, capsys):
@@ -136,11 +137,11 @@ def test_a_file_may_declare_a_profile_held_to_a_clients_rules(models, capsys):
     (models / "b.onnx").write_bytes(named(name="other", version="1", owner="octocat", url="ftp://x",
                                           description="x" * 101))
     listed = new_tables().handle("GET", "/api/models", {}, None)["game_types"]["standard"]
-    assert listed["mynet-1.0"] == {"name": "mynet", "version": "1.0", "commit": "abc", "owner": "octocat",
+    assert listed["mynet"] == {"name": "mynet", "version": "1.0", "commit": "abc", "owner": "octocat",
                                    "url": "https://example.org/mynet", "description": "A small net."}
-    assert listed["other-1"] == {"name": "other", "version": "1", "owner": "octocat"}
+    assert listed["other"] == {"name": "other", "version": "1", "owner": "octocat"}
     logged = capsys.readouterr().err
     assert "declares a url it may not" in logged and "declares a description it may not" in logged
-    assert api.bot_profile("mynet-1.0") == {"version": "1.0", "owner": "octocat",
+    assert api.bot_profile("mynet") == {"version": "1.0", "owner": "octocat",
                                             "url": "https://example.org/mynet", "description": "A small net."}
     assert api.bot_profile("test-trader") == {} and api.bot_profile("nothing") == {}

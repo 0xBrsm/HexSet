@@ -604,6 +604,8 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
         if action.type is ActionType.DISCARD
     )
 
+    # A header written before it carried `rules` is a standard game.
+    rules = rules_from(header.get("rules", {}))
     return Record(
         layout=tuple(tuple(h) for h in header["layout"]),
         terrain=tuple(header["terrain"]),
@@ -619,8 +621,11 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
         turns=result["turns"],
         seed=header.get("seed"),
         first=header.get("first", 0),
-        # A header written before it carried `rules` is a standard game.
-        rules=rules_from(header.get("rules", {})),
+        rules=rules,
+        # The server deals every game from the source its rules ask for
+        # (`chance.for_rules`, on a resume too), so a journal's rules say
+        # whether its rolls came off the dice deck.
+        balanced_dice=rules.balanced_dice,
         # How the seed drew its dice, for the seed cross-check. Absent: shared.
         split_streams=header.get("split_streams", False),
         locked=tuple(sorted(locked)),

@@ -33,6 +33,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import random
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -49,6 +50,7 @@ from .view import HoldReading
 
 __all__ = [
     "MARKS", "SETUP_PHASES", "STEP_LIMIT", "Decision", "Lanes", "PairedRollouts", "RolloutPool", "RolloutBatch",
+    "SharedPools",
     "paired_copy", "play_lanes",
 ]
 
@@ -663,7 +665,7 @@ class RolloutPool:
         try:
             for run in runs[1:]:
                 futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks, context))
-        except BrokenProcessPool:
+        except (BrokenProcessPool, RuntimeError):   # RuntimeError: retired since the check above
             self.broken = True
         here = play_lanes(policy, runs[0], moves, seat, start, horizon, marks)
         parts = [here]
@@ -682,8 +684,50 @@ class RolloutPool:
         self.broken = True
         self._executor.shutdown(wait=True, cancel_futures=True)
 
+    def retire(self) -> None:
+        """Takes no more work, without waiting: a decision whose worlds are
+        out with the workers gets them back, and every later one plays here.
+        The workers stop once their last share is done."""
+        self.broken = True
+        self._executor.shutdown(wait=False)
+
     def __enter__(self) -> "RolloutPool":
         return self
 
     def __exit__(self, *exc) -> None:
         self.close()
+
+
+class SharedPools:
+    """Rollout worker pools kept across bots, one per model file, so every
+    seat a server spawns from one file plays its worlds out in the same
+    `workers` processes instead of starting its own (`get`). A file loaded
+    another way, or replaced on disk, gets a new pool, and the old one is
+    retired (`RolloutPool.retire`): a seat still holding it plays its
+    decisions here. A broken pool is replaced the same way. `close` stops
+    every pool."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: dict[str, tuple[tuple, RolloutPool]] = {}
+
+    def get(self, path: str, key: tuple, load_policy: Callable[[], object], workers: int) -> RolloutPool:
+        """The pool for the file at `path` loaded as `key` says (`key` names
+        the file's state on disk and how its policy is loaded), started at
+        the first call."""
+        with self._lock:
+            held = self._held.get(path)
+            if held is not None and held[0] == key and not held[1].broken:
+                return held[1]
+            if held is not None:
+                held[1].retire()
+            pool = RolloutPool(load_policy, workers)
+            self._held[path] = (key, pool)
+            return pool
+
+    def close(self) -> None:
+        with self._lock:
+            pools = [pool for _, pool in self._held.values()]
+            self._held.clear()
+        for pool in pools:
+            pool.close()

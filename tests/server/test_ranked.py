@@ -265,7 +265,7 @@ def test_a_model_queues_over_mcp_and_is_seated_at_its_first_move():
 # --- server bots entered as players ------------------------------------------------
 
 
-ENTRANT = "mynet-2.0"
+ENTRANT = "mynet"
 
 
 @pytest.fixture
@@ -284,7 +284,7 @@ def entrant_model(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "_warned", set())
     monkeypatch.setattr(api.Tables, "_start_runners", lambda self, table, bots: None)
 
-    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None):
+    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None, workers=0, pools=None):
         from hexset.bots import RandomBot
 
         return RandomBot(random.Random(0))
@@ -357,6 +357,54 @@ def test_an_entrant_meets_clients_and_the_fill_bot_under_the_pair_cap(tmp_path, 
         assert met(queue_._history()[1]) == (1, 2, 1)
 
 
+def test_an_entrant_plays_each_game_type_as_the_file_offered_there(tmp_path, entrant_model):
+    from hexset.clients.onnxmeta import with_metadata
+    from hexset.server import api
+
+    entry = entrant_model("standard")
+    duel = {"name": entry, "version": "2d.0", "commit": "def", "modes": "duel-variant"}
+    (api.MODELS_DIR / "mynet-duel.onnx").write_bytes(with_metadata(b"\x3a\x00", duel))
+    games = tmp_path / "games"
+    games.mkdir()
+    tables = new_tables(games_dir=str(games), ranked_bot=FILL, ranked_entrants=(entry,))
+    queue(tables, client("a"), game_type="standard")
+    queue(tables, client("b"), game_type="standard")
+    tables.queue.tick()
+    played = {h["game_type"]: h["bots"][str(h["entrants"][0])] for h in headers(games)}
+    assert {kind: (bot["name"], bot["version"]) for kind, bot in played.items()} == {
+        "standard": (entry, "2.0"), "duel-variant": (entry, "2d.0")}
+
+
+def test_an_entrant_waiting_at_its_cap_plays_again_when_its_file_moves_to_a_new_version(tmp_path, entrant_model):
+    from hexset.clients.onnxmeta import with_metadata
+    from hexset.server import api
+
+    entry = entrant_model("duel-variant")
+    games = tmp_path / "games"
+    games.mkdir()
+    tables = new_tables(games_dir=str(games), ranked_bot=FILL, ranked_entrants=(entry,))
+    tables.queue._history()[1][pair((f"bot:{entry}", "2.0"), tables.queue._filler(FILL))] = PAIR_CAP
+    tables.queue.tick()
+    tables.queue.tick()
+    assert headers(games) == [], "capped at 2.0 against the fill bot: its ticket waits"
+    newer = {"name": entry, "version": "2.1", "modes": "duel-variant"}
+    (api.MODELS_DIR / "mynet.onnx").write_bytes(with_metadata(b"\x3a\x00", newer))
+    tables.queue.tick()
+    tables.queue.tick()
+    [header] = headers(games)
+    assert header["bots"][str(header["entrants"][0])]["version"] == "2.1"
+
+
+def test_a_bot_journalled_under_its_versioned_entry_is_the_same_bot_by_its_name():
+    from hexset.server.ranked import _units
+
+    def header(name):
+        return {"num_players": 2, "bots": {"0": {"name": name, "spec": "m.onnx", "version": "2.0"},
+                                           "1": {"name": FILL, "spec": FILL}}}
+    assert _units(header("mynet-2.0")) == _units(header("mynet")) == (
+        ["bot:mynet", f"bot:{FILL}"], [("bot:mynet", "2.0"), (f"bot:{FILL}", None)])
+
+
 def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, entrant_model):
     entry = entrant_model("duel-variant")
     games = tmp_path / "games"
@@ -386,6 +434,27 @@ def test_an_entrants_rankings_row_carries_its_models_profile(tmp_path, entrant_m
     tables.rankings.wait()
     [row] = tables.handle("GET", "/api/rankings", {}, None)["boards"][0]["rows"]
     assert (row["name"], row["version"], row["owner"], row["description"]) == (entry, "2.0", "octocat", "A test net.")
+
+
+def test_on_a_board_keyed_by_a_game_type_a_bots_row_shows_the_file_offered_there(tmp_path, entrant_model):
+    from hexset.clients.onnxmeta import with_metadata
+    from hexset.server import api
+
+    entry = entrant_model("standard")
+    duel = {"name": entry, "version": "2d.0", "modes": "duel-variant"}
+    (api.MODELS_DIR / "mynet-duel.onnx").write_bytes(with_metadata(b"\x3a\x00", duel))
+
+    def rank(games):
+        rows = [{"name": entry, "id": f"bot:{entry}", "games": 12}]
+        gone = [{"name": "old", "id": "bot:old", "games": 12, "version": "1.0"}]
+        return {"boards": [{"key": kind, "title": kind, "columns": [], "rows": rows + gone}
+                           for kind in ("standard", "duel-variant", "all")]}
+
+    tables = new_tables(games_dir=str(tmp_path), ranker=rank)
+    tables.rankings.wait()
+    boards = tables.handle("GET", "/api/rankings", {}, None)["boards"]
+    assert [[row["version"] for row in board["rows"]] for board in boards] == [
+        ["2.0", "1.0"], ["2d.0", "1.0"], ["2.0", "1.0"]], "a bot no longer offered keeps the ranker's"
 
 
 def test_only_completed_games_count_toward_the_pair_cap(tmp_path):

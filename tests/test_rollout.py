@@ -319,6 +319,24 @@ def test_a_pool_decides_as_one_process_does():
         assert not pool.broken
 
 
+def test_shared_pools_keep_one_pool_a_file_and_retire_it_when_the_file_changes():
+    from hexset.rollout import SharedPools
+
+    alone = decided(None)
+    pools = SharedPools()
+    try:
+        first = pools.get("/m/a.onnx", ("v1",), a_stub, 2)
+        assert pools.get("/m/a.onnx", ("v1",), a_stub, 2) is first, "every seat of one file shares it"
+        assert pools.get("/m/b.onnx", ("v1",), a_stub, 2) is not first
+        replaced = pools.get("/m/a.onnx", ("v2",), a_stub, 2)
+        assert replaced is not first and first.broken and not replaced.broken
+        # A seat still holding the retired pool decides as it would have, here.
+        assert decided(first) == decided(replaced) == alone
+    finally:
+        pools.close()
+    assert replaced.broken
+
+
 def persistent_batch(policy=None, marks=(2, 4, 8)):
     from hexset.rollout import RolloutBatch
 

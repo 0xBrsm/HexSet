@@ -9,6 +9,7 @@ are game-level and assume an independence paired games do not have.
 from __future__ import annotations
 
 import os
+import random
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -43,10 +44,24 @@ class BatchPolicy(Protocol):
 
 
 class BotPolicy:
-    """A `hexset.bots.Bot` behind `BatchPolicy`, one bot per board."""
+    """A `hexset.bots.Bot` behind `BatchPolicy`.
 
-    def __init__(self, spawn: Callable[[Board], Bot], capacity: int = 256) -> None:
-        self.bench = BoardBots(spawn, capacity=capacity)
+    `compete_batched` hands its `bench` to the lanes, which build each seat a
+    bot of its own for the game, off `seat_spawn(board, rng)` and the stream
+    `hexset.arena.seat_key` names, or off `spawn(board)` without one
+    (`hexset.gym.lanes.BoardBots`); a bot that draws should take that stream.
+    Its own `act` and `gate`, for a caller with no lanes, share one bot per
+    board instead.
+    """
+
+    def __init__(
+        self,
+        spawn: Callable[[Board], Bot],
+        capacity: int = 256,
+        *,
+        seat_spawn: Callable[[Board, random.Random], Bot] | None = None,
+    ) -> None:
+        self.bench = BoardBots(spawn, capacity=capacity, seat_spawn=seat_spawn)
 
     def _bot(self, game: Game) -> Bot:
         return self.bench.bot(game.state(0, hidden=False).board)
@@ -232,7 +247,9 @@ def compete_batched(
     ids are seated as `compete`'s own lineup, rotating by game index.
     `antithetic` plays every board both ways, averaging its two readings; it
     needs exactly two policies and an even `games`, which counts games, not
-    boards. `lanes` changes only the wall clock. Each seat bargains as its
+    boards. `lanes` changes only the wall clock. A `BotPolicy` is played by
+    the lanes themselves, a bot per seat per game, each its own gate
+    (`hexset.gym.lanes.LaneEnv`'s `bots`); every other seat bargains as its
     own gate declares (`gates`, or a policy's own `gate`). Every game is
     written to `journal` as it finishes (`hexset.gym.lanes.episode_entry`:
     the seating by policy id, how it ended and its `Record`), under a header
@@ -274,9 +291,16 @@ def compete_batched(
         share = players // len(ids)
         caster = rotating(tuple(pid for pid in ids for _ in range(share)))
 
+    # A bot is played by the lanes, a bot of its own per seat per game and
+    # seated as its own gate; it is answered `None` here (`_answer`).
+    benches = {pid: policy.bench for pid, policy in policies.items() if isinstance(policy, BotPolicy)}
+    if set(gates or {}) & set(benches):
+        raise ValueError("a bot seat is its own gate; it takes none from `gates`")
     # A seat with its own trade gate is gated here too, as `arena.compete` seats it.
     seated: dict[int, Callable[[Game, int], object]] = {}
     for pid, policy in policies.items():
+        if pid in benches:
+            continue
         gate = getattr(policy, "gate", None)
         if gate is not None:
             seated[pid] = gate
@@ -297,7 +321,7 @@ def compete_batched(
             raise ValueError("a duel needs at least one game")
         cohorts = ((caster, games),)
 
-    answer = _answer(policies)
+    answer = _answer({pid: policy for pid, policy in policies.items() if pid not in benches})
     started = time.perf_counter()
     played: list[Episode] = []
     readings: dict[int, list[_Reading]] = {}
@@ -311,6 +335,7 @@ def compete_batched(
             turn_cap=turn_cap,
             caster=cohort_caster,
             gates=seated,
+            bots=benches,
         )
         for episode in env.drain(answer):
             gamelog.append_after_header(journal, header, episode_entry(episode))

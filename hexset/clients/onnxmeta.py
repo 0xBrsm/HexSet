@@ -1,10 +1,10 @@
 """An ONNX file's `metadata_props`, read and rewritten without a model runtime.
 
-A served model names itself: the server's picker offers it as
-`<name>-<version>`, at the game types its `modes` declare
-(`hexset.rules.GAME_TYPES` names, comma separated), and `commit` is the code
-it was built from. The filename plays no part. Files may share a name as long
-as their versions differ. A file may also declare an `owner`, a `url` and a
+A served model names itself: the server's picker offers it by its `name`,
+at the game types its `modes` declare (`hexset.rules.GAME_TYPES` names, comma
+separated), with its `version`, and `commit` is the code it was built from.
+The filename plays no part. One name may be one file at some game types and
+another at the rest. A file may also declare an `owner`, a `url` and a
 `description` (`PROFILE_KEYS`), shown with it as a bot's profile is.
 
 Reading parses only the top level of the `ModelProto` protobuf, so listing a

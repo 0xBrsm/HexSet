@@ -5,6 +5,153 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.24.0
+
+### Breaking
+
+- **A served model is offered by its name alone.** The picker,
+  `GET /api/models`, `POST /api/games` and `--ranked-entrant` name a model
+  file by the `name` it declares, no longer `<name>-<version>`; the
+  `version` stays in its profile and in each game's journal. One name may be
+  one file at some game types and another at the rest (a four-seat file and
+  a duel file under one name); two files offering one name at one game type
+  are neither offered there. A server bot's rankings row shows the profile
+  of the file offered at its board's game type, and the ranked pair cap
+  counts a model journalled as `<name>-<version>` as the same bot as its
+  name.
+
+### Added
+
+- **A lane asks many bots of one class in one call.** A bot class with a
+  `choose_many(pairs)` classmethod (`hexset.bots.ChoosesMany`,
+  `chooses_many`) is handed every `(bot, game)` of its class that is to move
+  in a `LaneEnv` tick, in lane order, and returns what each bot's `choose`
+  would: a network bot answers every pending seat in one batched forward
+  instead of one per seat, each bot keeping its own state and streams. An
+  out-of-order discard is asked as `choose` is asked, with its seat alone
+  owing. Every other bot, and every bot at any other table, is asked
+  `choose` as before.
+
+- **The server plays a rollout model's worlds out in worker processes.**
+  `--rollout-workers N` (`Config.rollout_workers`) gives every seat of one
+  rollout model file a shared pool of `N` processes (`SharedPools`,
+  `onnxbot.spawn(pools=)`), started at its first seat, replaced when the file
+  changes and stopped by `Tables.close`; the moves are the ones the server's
+  own process would make. `RolloutPool.retire` stops a pool taking new work
+  without waiting on the decision in flight.
+
+- **A `compete` run can be extended.** Resumed with more `games` than it
+  began with, a run plays only the indices after the ones its journal holds,
+  on the same seed, so the whole equals a run planned that long from the
+  start. The journal's header keeps the games first planned and the source
+  line records the extension (`extended_to`); `read_journal` reports the
+  extended plan. Resuming with fewer games is still refused as a different
+  run.
+
+- **An MCTS seat logs every decision it makes.** `hexset.mcts.Search.decide`
+  searches one position and keeps a `Decision` in `Search.decision_log`: the
+  root's options, prior and value, each option's visits and mean, the move
+  chosen, whether the root was searched at all (a forced move or a
+  `decisive` prior is not), the worlds, the budget and the CPU time.
+  `choose`, and the served `GatedSearch`'s, go through it, so an arena
+  journal now carries an MCTS seat's decisions as it does a rollout seat's
+  (`hexset.arena.search_logs`). The moves played are unchanged; `run` and
+  `run_many` log nothing.
+
+### Changed
+
+- **A robber deal holds for the rest of the mover's turn.** At a later
+  robber move the same turn, a promiser that has paid is spared again, and
+  one not yet paid is a promise the mover already holds: not counted again
+  if it promises anew, and weighed with that move's promises
+  (`ValueDealer.spare`), so the mover breaks it where another move pays
+  more. A promiser that move hits is `broken` and owed no exchange. Both at
+  the engine's own tables and at a hosted `Seat` (`deals.turn_deals`,
+  `spare_for`, `hit_carried`; `Game.carried_deals`).
+
+- **A served duel's journal replays against its seed.** `from_journal` and
+  `from_events` read `Record.balanced_dice` from the journal's rules, the
+  source the server dealt from, where it was always false: the seed check
+  regenerated independent dice and reported every balanced-dice game as
+  diverging at its first roll.
+
+- **A ranked entrant whose model file moves to a new version queues at
+  it.** A server entrant's ticket waiting at the old version (at its pair
+  cap, say) is withdrawn and a new one made at the version the file now
+  declares; one at a game type it is no longer offered at is withdrawn.
+
+- **A lane shows a bot that reads the table every move, as the arena
+  does.** `hexset.gym.lanes.LaneEnv` asked its bots to move but never
+  showed them the moves, so a bot with a `seen` hook (`hexset.bots.watch`)
+  played a lane with nothing read. Each watching seat's bot now sees every
+  move of its game before it is applied, in seat order and from its own
+  seat, as `hexset.arena.run_seated` shows it: its own moves, a caller's,
+  each part of a compound and a discard drawn out of seat order included.
+  Such a bot is no longer shared: each of its seats gets one of its own for
+  the game (`BoardBots.fresh`), built by the new `BoardBots(seat_spawn=)`
+  off `random.Random(f"{seed}:{index}:{seat}")` (a pure function of the game
+  and seat), or by `spawn` without one. A bot without `seen` is shared per
+  board as before and costs nothing more. Each lane holds its seats' bots
+  for the whole game, and `LaneEnv`'s `bots` takes a `BoardBots` as well as
+  a factory.
+
+- **Every lane bot draws a stream of its own game and seat.** A bot
+  without a `seen` hook was one object per board, built off whatever stream
+  its factory closed over, so a bot that draws (a sampling seat, a random
+  tie-break) started every game from the same numbers, and the seats it
+  played in one game shared one stream. `LaneEnv` now builds every bot
+  seat its own bot for the game (`BoardBots.fresh`), off
+  `random.Random(seat_key(seed, index, seat))`: the new
+  `hexset.arena.seat_key` gives the key a watching bot's stream already
+  had, so a watching bot plays as before. Draws are a pure function of the
+  seed, the game index and the seat, whatever the lane count or worker
+  split. A bot that draws nothing plays the same games, byte for byte.
+  **New runs whose lane bots draw play different games from before** at
+  the same seed: their bots now take `seat_spawn`'s stream, where a
+  `BoardBots` names one (a bare factory still decides its own stream).
+  `BoardBots.bot`, one bot per board, stays for callers with no game and
+  seat to key a stream by.
+
+- **`compete_batched` plays a `BotPolicy` in the lanes.** A bot duellist
+  was answered through its own `act`, one bot per board, so it drew one
+  stream across games and a bot with a `seen` hook was shown nothing. Its
+  bench now goes to `LaneEnv`'s `bots`: a bot of its own per seat per game,
+  shown every move where it watches and seated as its own gate (a `gates`
+  entry for a bot duellist is refused). `BotPolicy` takes `seat_spawn=`, as
+  `BoardBots` does; a duel whose bot duellist draws plays different games
+  from before.
+
+### Fixed
+
+- **A robber deal is approved once per stage, through one path.** A value
+  mover (`deals.ValueDealer`) counts a deal only where its trading takes the
+  exchange at its trade floor, both to ask (`plan`) and to count a promise
+  it then gets (`spare`, which no longer takes a promise the floor
+  refuses), and pays it after the steal above `DealParams.pay_floor`, both
+  to choose the card back (`give_back`) and to execute the promiser's
+  acceptance (`pays_back`). The payment is executed by `deals.payment_pick`,
+  which the engine's `settle_deals` and a hosted `Seat.pick` both read: a
+  spared promiser's acceptance of the deal's exchange is taken at once,
+  never held for another taker and never refused by the mover's trading
+  after the deal cleared it. Before, the mover's trading picked the answer
+  again at its own floor and rules, and could refuse the very payment its
+  dealer had offered.
+
+- **A value mover pays a robber deal unless paying would cost it.** Once a
+  promiser is spared, `ValueDealer.give_back` offers the card it minds
+  least for the asked one wherever the exchange's gain clears the new
+  `DealParams.pay_floor` (spec `payfloor=`, default 0), without asking its
+  trading's own rules or floor. Before, it offered nothing whenever its
+  trading would no longer take the exchange, which a steal of the asked
+  card usually caused. The ask prices each steal's exchange by the same
+  rule.
+
+- **A hosted seat pays every deal its robber spared in a turn.** A knight's
+  deal before the roll is still owed after a seven's deal the same turn:
+  `Seat` keeps them in order, as `settle_deals` does at the engine's own
+  tables, where the second ask dropped the first.
+
+
 ## 1.23.0
 
 ### Breaking

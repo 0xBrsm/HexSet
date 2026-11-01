@@ -390,3 +390,27 @@ def test_a_rollout_file_with_workers_plays_as_it_does_alone(tmp_path):
     assert bot.pool is not None and not bot.pool.broken
     bot.pool.close()
 
+
+def test_bots_spawned_from_one_rollout_file_with_pools_share_one_pool(tmp_path):
+    from hexset.clients.onnxbot import spawn
+    from hexset.clients.onnxmeta import with_metadata
+    from hexset.rollout import SharedPools
+
+    stub9 = Path(__file__).parent / "fixtures" / "stub-contract9.onnx"
+    path = tmp_path / "rollouts.onnx"
+    meta = {"search": "rollout", "worlds": "3", "top": "2", "horizon": "2"}
+    path.write_bytes(with_metadata(stub9.read_bytes(), meta))
+    board = random_base_board(random.Random(0))
+    pools = SharedPools()
+    try:
+        a = spawn(str(path), board, rng=random.Random(1), workers=2, pools=pools)
+        b = spawn(str(path), board, rng=random.Random(2), workers=2, pools=pools)
+        assert a.pool is b.pool and not a.pool.broken
+        path.write_bytes(with_metadata(stub9.read_bytes(), {**meta, "worlds": "4"}))
+        c = spawn(str(path), board, rng=random.Random(3), workers=2, pools=pools)
+        assert c.pool is not a.pool and a.pool.broken, "a replaced file gets a pool of its own"
+        game = start(board, 4, random.Random(3))
+        assert a.choose(game) is not None, "the retired pool's seat still decides"
+    finally:
+        pools.close()
+

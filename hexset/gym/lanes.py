@@ -25,20 +25,38 @@ asks the lowest owing seat first (`hexset.game.to_move`); `"random"` draws the
 next seat uniformly among those owing, from a stream of the game's own that
 draws nothing from its dice or deck, and lets it finish its whole discard
 before drawing again.
+
+A bot that reads the table's moves (`hexset.bots.watch`, a `seen` hook) is
+shown every move of its lane as `hexset.arena.run_seated` shows it: each
+watching seat's bot, in seat order and from its own seat, sees the move
+before it is applied, its own moves, a caller's and each part of a compound
+included.
+
+Every bot seat gets a bot of its own for its game (`BoardBots.fresh`), built
+off a stream that is a pure function of the game and seat
+(`hexset.arena.seat_key`): no two games or seats draw the same numbers, and a
+game draws the same ones whatever the lane count or worker split.
+
+A bot whose class chooses for several of its bots at once
+(`hexset.bots.ChoosesMany`) is asked in one call per tick for every lane in
+which a bot of that class is to move, in lane order; every other bot is asked
+its own `choose`.
 """
 
 from __future__ import annotations
 
 import random
 from collections import OrderedDict
+from contextlib import ExitStack, contextmanager
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .. import decisions as D
 from ..actions import Action, ActionSpace, Stuck, apply, legal_actions, options_for, space_for
-from ..arena import MAX_ACTIONS, deal_game, game_key
+from ..arena import MAX_ACTIONS, deal_game, game_key, seat_key
 from ..board.board import BOARD_MODES, Board
+from ..bots.base import chooses_many, watch, watches
 from ..game import MAX_TURNS, Game, Phase, is_over, players_owing_discards, to_move
 from ..record import Record, Tape, recording
 from .distribution import Deal
@@ -177,19 +195,31 @@ def _bind_gates(game: Game) -> None:
 
 
 class BoardBots:
-    """One bot per board, for a policy id played by a scripted bot; keyed by
-    board object and evicted oldest-first.
+    """How a policy id played by a scripted bot gets its bots.
 
-    One bot serves every seat and lane on the same board and policy id, so its
-    factory must support that sharing: mutable state, random generators
-    included, is shared, and stochastic choices can therefore depend on request
-    order and lane count. Seat-specific trade gates belong in `LaneEnv.gates`.
+    `LaneEnv` asks `fresh` for one bot per seat per game, held by nobody
+    else. `seat_spawn(board, rng)`, when given, builds it off the stream the
+    lane hands it (`hexset.arena.seat_key`), a pure function of the game and
+    seat; without it `fresh` calls `spawn(board)`, and a bot that draws
+    decides its own stream there, so give it `seat_spawn`.
+
+    `bot(board)` is the other use: one bot per board for a caller that has no
+    game and seat to key a stream by, keyed by board object and evicted
+    oldest-first. It serves every seat and lane on that board, so mutable
+    state, random generators included, is shared among them.
     """
 
-    def __init__(self, spawn: Callable[[Board], Bot], capacity: int = 256) -> None:
+    def __init__(
+        self,
+        spawn: Callable[[Board], Bot],
+        capacity: int = 256,
+        *,
+        seat_spawn: Callable[[Board, random.Random], Bot] | None = None,
+    ) -> None:
         if capacity < 1:
             raise ValueError("a bot per board needs room for at least one")
         self.spawn = spawn
+        self.seat_spawn = seat_spawn
         self.capacity = capacity
         self._bots: OrderedDict[int, tuple[Board, Bot]] = OrderedDict()
 
@@ -204,6 +234,12 @@ class BoardBots:
         while len(self._bots) > self.capacity:
             self._bots.popitem(last=False)
         return bot
+
+    def fresh(self, board: Board, rng: random.Random) -> Bot:
+        """A bot of one seat's own for one game, held by nobody else."""
+        if self.seat_spawn is not None:
+            return self.seat_spawn(board, rng)
+        return self.spawn(board)
 
 
 @dataclass
@@ -227,6 +263,10 @@ class _Lane:
     # how many runs the game has begun.
     running: dict[int, tuple[int, int]] = field(default_factory=dict)
     runs: int = 0
+    # The bot playing each seat (`None` for a caller's), and the seats whose
+    # bot watches the table with that bot, in seat order.
+    seat_bots: tuple[Bot | None, ...] = ()
+    watching: tuple[tuple[int, Bot], ...] = ()
 
 
 class LaneEnv:
@@ -240,8 +280,12 @@ class LaneEnv:
     implements the optional trading methods, where a caller-driven seat instead
     supplies `gates[id](game, seat)` -- a `NetworkBot` used only as a gate must
     be bound with `seat_at(game)`, and a missing gate disables trading there.
-    A bot serves every lane on its board (`BoardBots`), so before each action
-    every gate in that lane with a `seat_at` is seated at the lane's game.
+    Each bot seat gets a bot of its own for the game, built off
+    `random.Random(seat_key(seed, index, seat))` (`BoardBots.fresh`); one
+    that watches the table is shown every move of it (the module docstring).
+    A caller's gate may serve several lanes, so before each action every gate
+    in that lane with a `seat_at` is seated at the lane's game. A value of
+    `bots` is a factory `board -> Bot` or a `BoardBots` the caller holds.
 
     `deal_game(seed, index, players)` fixes each game's board and chance stream
     independently of lane count; `first_game`/`stride` shard the index sequence,
@@ -263,7 +307,7 @@ class LaneEnv:
         board_mode: str = "random",
         deal_law: Callable[[int], Deal] | None = None,
         caster: Callable[[int], Sequence[int]] | None = None,
-        bots: Mapping[int, Callable[[Board], Bot]] | None = None,
+        bots: Mapping[int, Callable[[Board], Bot] | BoardBots] | None = None,
         gates: Mapping[int, Callable[[Game, int], object]] | None = None,
         first_game: int = 0,
         stride: int = 1,
@@ -309,7 +353,7 @@ class LaneEnv:
         self.caster = caster
         self.gates = dict(gates or {})
         self.bots = {
-            pid: BoardBots(spawn, capacity=bot_capacity)
+            pid: spawn if isinstance(spawn, BoardBots) else BoardBots(spawn, capacity=bot_capacity)
             for pid, spawn in (bots or {}).items()
         }
         self.stride = stride
@@ -338,14 +382,27 @@ class LaneEnv:
             raise ValueError(f"cast {cast} names a policy that cannot exist")
         return cast
 
-    def _seat_gates(self, game: Game, cast: Sequence[int]) -> tuple[object, ...]:
-        """Who answers each seat's private gate; a bot-played seat is seated as
-        its own bot, so the two cannot disagree."""
-        out: list[object] = []
+    def _seat_bots(self, game: Game, index: int, cast: Sequence[int]) -> tuple[Bot | None, ...]:
+        """The bot playing each seat of game `index`, `None` for a caller's:
+        one of the seat's own for the game (`BoardBots.fresh`), off the
+        stream `seat_key(seed, index, seat)` names."""
+        # public field: a bot reads the board off the true state.
+        board = game.state(0, hidden=False).board
+        out: list[Bot | None] = []
         for seat, pid in enumerate(cast):
             bench = self.bots.get(pid)
-            if bench is not None:
-                out.append(bench.bot(game.state(0, hidden=False).board))
+            out.append(None if bench is None else
+                       bench.fresh(board, random.Random(seat_key(self.seed, index, seat))))
+        return tuple(out)
+
+    def _seat_gates(self, game: Game, cast: Sequence[int],
+                    bots: Sequence[Bot | None]) -> tuple[object, ...]:
+        """Who answers each seat's private gate; a bot-played seat is seated as
+        its own bot (`bots`, `_seat_bots`), so the two cannot disagree."""
+        out: list[object] = []
+        for seat, pid in enumerate(cast):
+            if pid in self.bots:
+                out.append(bots[seat])
                 continue
             make = self.gates.get(pid)
             out.append(None if make is None else make(game, seat))
@@ -370,13 +427,19 @@ class LaneEnv:
             chance=lambda rng: recording(rng, drawn.game_type.rules),
             turn_cap=self.turn_cap,
         )
-        game.gates = self._seat_gates(game, cast)
+        bots = self._seat_bots(game, index, cast)
+        game.gates = self._seat_gates(game, cast, bots)
         return _Lane(
             index=index,
             game=game,
             cast=cast,
             by_seat=[[] for _ in range(self.players)],
             tape=Tape(),
+            seat_bots=bots,
+            watching=tuple(
+                (seat, bot) for seat, bot in enumerate(bots)
+                if bot is not None and watches(bot)
+            ),
         )
 
     # --- the tick ---------------------------------------------------------
@@ -492,13 +555,10 @@ class LaneEnv:
                 )
             if action is not None and not self._legal(request, action):
                 raise ValueError(f"illegal action {action!r} for lane {request.lane}")
-        resolved: list[D.Option] = []
-        for request, action in zip(requests, chosen):
-            if action is None:
-                action = self._bot_action(request)
-                if action not in request.options:
-                    raise ValueError(f"illegal bot action {action!r} for lane {request.lane}")
-            resolved.append(action)
+        resolved = self._bot_actions(requests, chosen)
+        for request, action, asked in zip(requests, resolved, chosen):
+            if asked is None and action not in request.options:
+                raise ValueError(f"illegal bot action {action!r} for lane {request.lane}")
         self._outstanding = None
 
         finished: list[Episode] = []
@@ -548,6 +608,10 @@ class LaneEnv:
         # The action can open a trade event, which asks every gate here;
         # one shared with another lane was last seated at that lane.
         _bind_gates(game)
+        # A bot reading the table sees each move from its own seat before it
+        # is applied, as `hexset.arena.run_seated` shows it.
+        for viewer, bot in lane.watching:
+            watch(bot, game, request.seat, action, viewer)
         apply(game, action, request.seat if discarding else None)
         lane.trades += max(0, game.trades_made - cleared)
         for trade in game.trades[before:]:
@@ -560,24 +624,58 @@ class LaneEnv:
         lane.actions += 1
         return is_over(game) or lane.actions >= self.action_cap
 
-    def _bot_action(self, request: Request) -> Action:
-        bench = self.bots.get(request.policy)
-        if bench is None:
+    def _bot(self, request: Request) -> Bot:
+        lane = self._lanes[request.lane]
+        bot = None if lane is None else lane.seat_bots[request.seat]
+        if bot is None:
             raise ValueError(
                 f"lane {request.lane} seat {request.seat} is policy "
                 f"{request.policy}, which has no bot to answer for it"
             )
-        # public field: a bot reads the board off the true state.
-        bot = bench.bot(request.game.state(0, hidden=False).board)
+        return bot
+
+    def _bot_actions(
+        self, requests: Sequence[Request], chosen: Sequence[D.Option | None]
+    ) -> list[D.Option]:
+        """`chosen` with every unanswered request played by its seat's bot:
+        each bot on its own, in request order, but every bot of a class that
+        chooses for many (`hexset.bots.ChoosesMany`) in one call for the class,
+        its bots in request order."""
+        out = list(chosen)
+        together: dict[type, list[int]] = {}
+        for i, (request, action) in enumerate(zip(requests, chosen)):
+            if action is not None:
+                continue
+            bot = self._bot(request)
+            if chooses_many(bot):
+                together.setdefault(type(bot), []).append(i)
+                continue
+            with self._asked(request):
+                out[i] = bot.choose(request.game)
+        for kind, share in together.items():
+            with ExitStack() as stack:
+                for i in share:
+                    stack.enter_context(self._asked(requests[i]))
+                answers = list(kind.choose_many([(self._bot(requests[i]), requests[i].game) for i in share]))
+            if len(answers) != len(share):
+                raise ValueError(f"{kind.__name__}.choose_many answered {len(answers)} of {len(share)} bots")
+            for i, action in zip(share, answers):
+                out[i] = action
+        return out  # type: ignore[return-value]
+
+    @contextmanager
+    def _asked(self, request: Request):
+        """The position `request`'s seat's bot is asked at. A bot answers for
+        `to_move`, so a discard drawn out of seat order is asked with the seat
+        alone owing, and the round put back."""
         game = request.game
         if request.seat == to_move(game):
-            return bot.choose(game)
-        # A discard drawn out of seat order: a bot answers for `to_move`, so
-        # it is asked with the seat alone owing, and the round put back.
+            yield
+            return
         quota = game.discard_quota
         game.discard_quota = [n if s == request.seat else 0 for s, n in enumerate(quota)]
         try:
-            return bot.choose(game)
+            yield
         finally:
             game.discard_quota = quota
 

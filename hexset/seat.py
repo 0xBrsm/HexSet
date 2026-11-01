@@ -60,8 +60,8 @@ from .cards import DevCard
 from .bots.base import seat_at, watch
 from .chance import UNSEEN, ChanceError, Hosted
 from .deals import (
-    ANSWERING, NO_BLOCK, Ask, Deal, DealParams, blacklist, closed, deal_params_of, default_accept, default_ask,
-    default_return, robber_model,
+    ANSWERING, NO_BLOCK, Ask, Deal, DealParams, blacklist, closed, deal_params_of, default_ask, default_return,
+    hit_carried, payment_pick, robber_model, spare_for, turn_deals,
 )
 from .deals import answer as deal_answer
 from .deals import targeted as deal_targeted
@@ -240,9 +240,8 @@ class Seat:
         self.game = game
         self._seat_bots()
         self._sync()
-        deal = self._deal
-        if deal is not None and deal.hex is None and game.phase is Phase.ROBBER:
-            game.robber_promised = tuple((s, deal.kind) for s in deal.accepted)
+        if game.phase is Phase.ROBBER and self._deal_key == (game.turns, game._state.robber):
+            game.robber_promised = self._robber_promised
 
     def _seat_bots(self) -> None:
         # The gate prices offers on this seat's game from the first one, not
@@ -355,8 +354,8 @@ class Seat:
         after that closes it too. `None` while a round of this seat's is
         still open.
 
-        Before any of that, a robber deal this seat made this turn: when its
-        robber move spared a promiser, the first offer is the deal's exchange
+        Before any of that, each robber deal this seat made this turn whose
+        robber move spared a promiser: its exchange is the first offer
         (`_deal_offer`), outside the gate's budget, as the engine's own tables
         put it before the turn's trade event (`deals.settle_deals`).
         """
@@ -411,11 +410,18 @@ class Seat:
         takes its preferred taker the moment no better one can still come,
         and otherwise `None`: wait for the rest, with `held` saying what is
         waited for. An open offer (`Offer.any`) cannot be accepted as put, so
-        it never waits."""
+        it never waits. A robber deal's offer takes a spared promiser's
+        acceptance as the deal's payment, at once (`deals.payment_pick`)."""
         if self._round is None:
             raise ValueError("this seat has no open offer")
         self._responses = list(responses)
         self.held = None
+        if self._deal_round is not None:
+            # A robber deal's offer: a spared promiser's acceptance is the deal's payment, executed
+            # at once, approved as the payment was (`deals.payment_pick`), never held for another taker.
+            paid = payment_pick(self.game, self.gate, self.seat, self._deal_round, self._responses)
+            if paid is not None:
+                return self._responses[paid]
         chosen = trading.pick(self.game, self.gate, self.seat, self._responses)
         if chosen is None or self._round.any:
             return chosen
@@ -436,7 +442,7 @@ class Seat:
         spread over several offers learns whether its fragment cleared."""
         if self._round is None:
             return
-        if self._deal_round:
+        if self._deal_round is not None:
             self._settle_deal(trade)
         offer, self._round = self._round, None
         trading.clear_repeat(self.gate, self._already_offered, offer, self._responses, trade)
@@ -642,7 +648,13 @@ class Seat:
         dealer (`Dealing.deal_dealer`), else its own `deal_ask`, else
         `deals.default_ask`. Decided once a robber move; asked again, the same
         answer. `None` for a gate that does not ask, or nothing worth asking.
-        An ask is this seat's `Deal`, kept in `deal_log`."""
+        An ask is this seat's `Deal`, kept in `deal_log`.
+
+        A deal of an earlier robber move this turn reaches this one, as a
+        table reads "no block" for the whole turn (`deals.turn_deals`): a
+        promiser that has paid is spared again; one not yet paid is a promise
+        already held, weighed like a fresh one and kept where it is worth it
+        (`deals.spare_for`), with or without an ask."""
         self._sync()
         game = self.game
         if game.phase is not Phase.ROBBER or game.current_player != self.seat:
@@ -653,46 +665,59 @@ class Seat:
         params, dealer = self._dealing()
         if params is None:
             return None
+        bound, open_ = turn_deals(self._deal_log, self.seat, game.turns)
+        self._carried = (bound, open_)
+        self._promise_move(bound)
         hook = dealer.ask if dealer is not None else getattr(self.gate, "deal_ask", None)
         ask = hook(game, self.seat) if hook is not None else default_ask(game, self.seat, self.gate, params)
         self._deal_key, self._ask = key, ask
         if ask is not None:
             self._deal = Deal(game.turns, self.seat, ask.kind, ask.resource)
             self._deal_log.append(self._deal)
+        if open_:                   # until promises come in, the carried deals alone
+            self._promise_move({**bound, **spare_for(game, self.seat, self.gate, None, (), open_)})
         return ask
+
+    def _promise_move(self, spared: dict[int, str]) -> None:
+        """The promises the robber move at hand keeps (`Game.robber_promised`)."""
+        self._robber_promised = tuple(spared.items())
+        self.game.robber_promised = self._robber_promised
 
     def deal_promised(self, promised: Sequence[int]) -> tuple[int, ...]:
         """The seats that promised this seat's ask, in the order they did.
         Of them it counts every one but a seat its own view says cannot hold
         the card (`Deal.void`) and one it has blacklisted or is under an
         embargo with (`Deal.ignored`, `deals.blacklist`, `deals.closed`), and spares for those its dealer picks
-        (`deal_accept`, else `deals.default_accept`): the robber move it then
-        chooses spares them (`Game.robber_promised`). Returns the seats spared
-        for; `()` without an open ask."""
+        (`deal_accept`, else `deals.default_accept`), weighed with the deals
+        carried from earlier this turn (`deals.spare_for`); a seat already
+        holding one is not counted again. The robber move it then chooses
+        spares them (`Game.robber_promised`). Returns the seats it spares,
+        carried deals included; `()` without an open ask."""
         deal, game = self._deal, self.game
         if deal is None or deal.hex is not None or game.phase is not Phase.ROBBER or self._ask is None:
             return ()
         view = game.state(self.seat)
         card = tuple(int(r == deal.resource) for r in range(len(view.known[self.seat])))
-        banned = blacklist(game, self.seat) | closed(game, self.seat)
+        bound, open_ = self._carried
+        banned = blacklist(game, self.seat) | closed(game, self.seat) | set(bound) | {s for _, s in open_}
         promised = tuple(dict.fromkeys(s for s in promised if s != self.seat))
         deal.promised = promised
         deal.void = tuple(s for s in promised if not trading.has_room(view, s, card))
         deal.ignored = tuple(s for s in promised if s in banned and s not in deal.void)
         counted = deal.counted
-        deal.accepted = ()
-        if counted:
-            _, dealer = self._dealing()
-            accept = dealer.accept if dealer is not None else getattr(self.gate, "deal_accept", None)
-            taken = (accept(game, self.seat, self._ask, counted) if accept is not None
-                     else default_accept(game, self.seat, self.gate, self._ask, counted))
-            deal.accepted = tuple(s for s in counted if s in set(taken))
-        game.robber_promised = tuple((s, deal.kind) for s in deal.accepted)
-        return deal.accepted
+        spared = spare_for(game, self.seat, self.gate, self._ask, counted, open_)
+        deal.accepted = tuple(s for s in counted if s in spared)
+        self._promise_move({**bound, **spared})
+        return tuple(spared)
 
     def _close_deal(self, hex_index: int, robbed: int | None) -> None:
         """This seat's robber move, as the table took it: where it went, whom it
-        robbed, and which counted promisers it spared (`kept`) and hit."""
+        robbed, and which counted promisers it spared (`kept`) and hit -- a
+        carried deal's promiser too, which a hit leaves owed nothing."""
+        _, open_ = self._carried
+        self._carried = ({}, [])
+        hit_carried(self.game.state(self.seat).state, open_, hex_index, robbed)
+        self._payments = [d for d in self._payments if d.kept]
         deal = self._deal
         if deal is None or deal.hex is not None:
             return
@@ -701,36 +726,41 @@ class Seat:
         hit = (lambda s: s in on) if deal.kind == NO_BLOCK else (lambda s: s == robbed)
         deal.kept = tuple(s for s in deal.counted if not hit(s))
         deal.broken = tuple(s for s in deal.counted if hit(s))
+        if deal.kept:
+            self._payments.append(deal)
 
     def _deal_offer(self) -> Offer | None:
-        """The deal's exchange, once, when the robber spared a promiser: the
-        asked card for the one the dealer offers back (`give_back`, else the
-        gate's `deal_return`, else `deals.default_return`). None owed, or no
-        card to give, no offer (`Deal.unpaid`)."""
-        deal = self._deal
-        if deal is None or not deal.kept or deal.offered is not None or deal.unpaid:
-            return None
+        """The next owed deal's exchange, once each, in the order the robber
+        spared its promisers -- a knight's deal before the roll is still owed
+        after a seven's deal the same turn, as `deals.settle_deals` owes them
+        at the engine's own tables: the asked card for the one the dealer
+        offers back (`give_back`, else the gate's `deal_return`, else
+        `deals.default_return`). No card to give, no offer for that deal
+        (`Deal.unpaid`)."""
         game, gate = self.game, self.gate
         _, dealer = self._dealing()
         hook = dealer.give_back if dealer is not None else getattr(gate, "deal_return", None)
-        back = (hook(game, self.seat, deal.kept, deal.resource) if hook is not None
-                else default_return(game, self.seat, gate, deal.kept, deal.resource))
         hand = game.state(self.seat).state.hands[self.seat]
-        if back is None or back == deal.resource or hand[back] < 1:
-            deal.unpaid = deal.kept
-            return None
-        deal.offered = back
-        received = [0] * len(hand)
-        received[deal.resource], received[back] = 1, -1
-        self._round = Offer(self.seat, tuple(received))
-        self._responses = []
-        self._deal_round = True
-        return self._round
+        while self._payments:
+            deal = self._payments.pop(0)
+            back = (hook(game, self.seat, deal.kept, deal.resource) if hook is not None
+                    else default_return(game, self.seat, gate, deal.kept, deal.resource))
+            if back is None or back == deal.resource or hand[back] < 1:
+                deal.unpaid = deal.kept
+                continue
+            deal.offered = back
+            received = [0] * len(hand)
+            received[deal.resource], received[back] = 1, -1
+            self._round = Offer(self.seat, tuple(received))
+            self._responses = []
+            self._deal_round = deal
+            return self._round
+        return None
 
     def _settle_deal(self, trade: Trade | None) -> None:
         """The deal's round is over: who took it, and which spared promisers
         did not (`Deal.rejected`, blacklisted from here on)."""
-        deal, self._deal_round = self._deal, False
+        deal, self._deal_round = self._deal_round, None
         if deal is None:
             return
         if trade is not None:
@@ -765,13 +795,15 @@ class Seat:
         self._promise: tuple[int, str, int] | None = None   # (mover, kind, resource) this seat promised
         self._owed: tuple[int, int] | None = None           # (mover, resource) the robber spared it for
         self._robber_moved = False                          # the robber has moved this turn
-        deal = getattr(self, "_deal", None)
-        if deal is not None and deal.kept and deal.offered is None and not deal.unpaid:
+        for deal in getattr(self, "_payments", ()):
             deal.unpaid = deal.kept                         # the turn ended before the deal's offer
-        self._deal: Deal | None = None                      # this turn's ask of this seat's
+        self._payments: list[Deal] = []                     # this turn's spared deals, not yet offered
+        self._deal: Deal | None = None                      # this turn's latest ask of this seat's
         self._deal_key: tuple[int, int | None] | None = None   # the robber move it was decided for
         self._ask: Ask | None = None
-        self._deal_round = False                            # the open round is the deal's
+        self._deal_round: Deal | None = None                # the deal the open round is, if any
+        self._carried: tuple[dict[int, str], list[tuple[Deal, int]]] = ({}, [])   # earlier deals reaching this move
+        self._robber_promised: tuple[tuple[int, str], ...] = ()                  # what the move at hand keeps
 
     def _sync(self) -> None:
         """Start a new turn's bookkeeping when the game has moved to one, and

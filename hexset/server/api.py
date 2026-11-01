@@ -79,6 +79,7 @@ from hexset.clients.onnxmeta import PROFILE_KEYS, modes_of, read_metadata
 from hexset.game import Game, Phase, is_over, lock_seat, may_act, pending_free_roads, start
 from hexset.onnx_record import record_from_game
 from hexset.record import from_events, open_record
+from hexset.rollout import SharedPools
 from hexset.rules import GAME_TYPES, STANDARD_GAME, GameType, rules_from
 from hexset.trading import holds
 
@@ -444,12 +445,6 @@ class Offered:
         return {key: value for key, value in fields if value}
 
 
-def entry_name(name: str, version: str | None) -> str:
-    """What the picker offers a model file as: `<name>-<version>`, or the
-    name alone for a file that declares no version."""
-    return f"{name}-{version}" if version else name
-
-
 @lru_cache(maxsize=256)
 def _declared(path: str, mtime_ns: int, size: int) -> dict[str, str] | None:
     """The metadata the file at `path` declares, or `None` for one that is
@@ -475,21 +470,21 @@ def model_catalogue() -> dict[str, dict[str, Offered]]:
     `hexset.rules.GAME_TYPES` entry: every preset a runtime registered
     (`hexset.arena.registered_presets`, so the server's `--runtime`, and
     catanatron where its extra is installed) at every type, then each
-    `*.onnx` under `MODELS_DIR` as `<name>-<version>` (`entry_name`) from the
-    `name` and `version` it declares, at the game types its `modes` declare
-    (`hexset.clients.onnxmeta`; the standard game when it declares none).
-    The filename plays no part: files may share a name, each version its
-    own entry.
+    `*.onnx` under `MODELS_DIR` under the `name` it declares, at the game
+    types its `modes` declare (`hexset.clients.onnxmeta`; the standard game
+    when it declares none). The filename plays no part, and the `version` it
+    declares is its profile's, not its entry's: one name is one bot, which
+    may be one file at some game types and another at the rest.
 
-    A file that is not a model, declares no `name`, or whose entry is a
-    preset's name is not offered; two files declaring one name and version
-    are neither offered. Each is logged once. Specs never cross the wire, so
-    a request cannot point a bot at an arbitrary file. Scanned on every
-    call, so a new file needs no restart."""
+    A file that is not a model, declares no name, or whose name is a
+    preset's is not offered; two files offering one name at one game type
+    are neither offered there. Each is logged once. Specs never cross the
+    wire, so a request cannot point a bot at an arbitrary file. Scanned on
+    every call, so a new file needs no restart."""
     catanatron_seatable()  # registers its preset where the extra is installed
     presets = {name: Offered(name, profile=tuple(preset_profile(name).items())) for name in registered_presets()}
     catalogue = {kind: dict(presets) for kind in GAME_TYPES}
-    files: dict[str, list[tuple[Path, dict[str, str]]]] = {}
+    files: dict[tuple[str, str], list[tuple[Path, dict[str, str]]]] = {}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         try:
             stat = path.stat()
@@ -503,26 +498,24 @@ def model_catalogue() -> dict[str, dict[str, Offered]]:
         if not name:
             _warn_once(f"models: {path} declares no name; not offered")
             continue
-        entry = entry_name(name, meta.get("version", "").strip() or None)
-        if entry in presets:
-            _warn_once(f"models: {path} is offered as {entry!r}, a registered bot's name; not offered")
+        if name in presets:
+            _warn_once(f"models: {path} is offered as {name!r}, a registered bot's name; not offered")
             continue
-        files.setdefault(entry, []).append((path, meta))
-    for entry, declaring in files.items():
-        if len(declaring) > 1:
-            paths = ", ".join(str(path) for path, _ in declaring)
-            _warn_once(f"models: {paths} all declare {entry!r}; none is offered")
-            continue
-        path, meta = declaring[0]
-        offered = Offered(
-            str(path), meta["name"].strip(), meta.get("version", "").strip() or None,
-            meta.get("commit", "").strip() or None, _declared_profile(path, meta),
-        )
         for kind in modes_of(meta):
             if kind not in catalogue:
                 _warn_once(f"models: {path} declares mode {kind!r}, not a game type this server deals")
                 continue
-            catalogue[kind][entry] = offered
+            files.setdefault((kind, name), []).append((path, meta))
+    for (kind, name), declaring in files.items():
+        if len(declaring) > 1:
+            paths = ", ".join(str(path) for path, _ in declaring)
+            _warn_once(f"models: {paths} all offer {name!r} at {kind}; none is offered there")
+            continue
+        path, meta = declaring[0]
+        catalogue[kind][name] = Offered(
+            str(path), name, meta.get("version", "").strip() or None,
+            meta.get("commit", "").strip() or None, _declared_profile(path, meta),
+        )
     return catalogue
 
 
@@ -544,18 +537,22 @@ def _declared_profile(path: Path, meta: dict[str, str]) -> tuple[tuple[str, str]
     return tuple(profile)
 
 
-def bot_profile(entry: str) -> dict[str, str]:
+def bot_profile(entry: str, game_type: str | None = None, spec: str | None = None) -> dict[str, str]:
     """The profile the server shows for its bot `entry` (`BOT_PROFILE_FIELDS`):
     the one its preset was registered with, else the version and profile the
-    model file offered as `entry` declares; empty for neither."""
+    model file offered as `entry` declares; empty for neither. A name may be
+    one file at some game types and another at the rest (`model_catalogue`):
+    `game_type` reads the one offered there, `spec` the one at that path,
+    and neither the first."""
     profile = preset_profile(entry)
     if profile:
         return profile
-    for offered in model_catalogue().values():
-        if entry in offered and offered[entry].name is not None:
-            found = offered[entry]
-            fields = {"version": found.version, **dict(found.profile)}
-            return {key: value for key, value in fields.items() if key in BOT_PROFILE_FIELDS and value}
+    for kind, offered in model_catalogue().items():
+        found = offered.get(entry)
+        if found is None or found.name is None or game_type not in (None, kind) or spec not in (None, found.spec):
+            continue
+        fields = {"version": found.version, **dict(found.profile)}
+        return {key: value for key, value in fields.items() if key in BOT_PROFILE_FIELDS and value}
     return {}
 
 
@@ -672,6 +669,12 @@ class Config:
     # ticket waiting at every game type `model_catalogue` offers it at, one
     # ranked game at a time, and is ranked as `bot:<entry>` (`ranked.py`).
     ranked_entrants: tuple[str, ...] = ()
+    # Worker processes a seated model that searches by paired rollouts plays
+    # its worlds out in (`onnxbot.spawn`'s `workers`): every seat of one file
+    # shares one pool of them, kept in `rollout_pools` and stopped by
+    # `Tables.close`. 0 plays them in the server's own process.
+    rollout_workers: int = 0
+    rollout_pools: SharedPools = field(default_factory=SharedPools)
 
     def __post_init__(self) -> None:
         if self.board_mode not in BOARD_MODES:
@@ -905,7 +908,8 @@ def spawn_bot(
 
     from hexset.clients.onnxbot import spawn  # onnxruntime-free import boundary
 
-    return spawn(spec, board, rng=rng, device=config.device, players=players, game_type=game_type)
+    return spawn(spec, board, rng=rng, device=config.device, players=players, game_type=game_type,
+                 workers=config.rollout_workers, pools=config.rollout_pools)
 
 
 def seat_spawn(
@@ -1757,7 +1761,7 @@ class Tables:
         ranked queue's and the rankings' workers. Eviction
         does the same job one table at a time in a long-lived server; this is
         for a shutting-down process or a test, which would otherwise leak a
-        runner thread per bot seat."""
+        runner thread per bot seat. The rollout worker pools stop too."""
         with self._registry_lock:
             tables = list(self._tables.values())
             self._tables.clear()
@@ -1766,6 +1770,7 @@ class Tables:
         self.queue.close()
         if self.rankings is not None:
             self.rankings.close()
+        self.config.rollout_pools.close()
 
     # --- play -------------------------------------------------------------
 

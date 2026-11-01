@@ -8,7 +8,7 @@ import random
 import pytest
 
 from hexset import deals as D
-from hexset.actions import Action, ActionType
+from hexset.actions import Action, ActionType, legal_actions
 from hexset.board.board import random_base_board
 from hexset.chance import UNSEEN
 from hexset.game import Phase, observe, start
@@ -446,6 +446,91 @@ def test_a_spared_promiser_that_takes_it_is_paid_and_not_blacklisted():
     seat.close_round(seat.traded(0, 1, offer.received))
     (deal,) = seat.deal_log
     assert deal.paid == ((1, ORE),) and deal.rejected == () and D.blacklist(seat.game, 0) == set()
+
+
+class Refuser(Asker):
+    """A mover whose own trading takes no answer to any offer."""
+
+    def pick(self, view, responses):
+        return None
+
+
+def test_a_spared_promiser_is_paid_though_the_mover_s_trading_takes_no_answer():
+    seat = Seat(observe(a_robber_move(), 0), 0, object(), Refuser())
+    seat.deal_ask()
+    assert seat.deal_promised((1, 2)) == (1,)
+    state = seat.game._state
+    hex_ = next(h for h in range(state.board.num_hexes)
+                if 2 in occupants(state, h) and 1 not in occupants(state, h) and h != state.robber)
+    seat.play(0, Action(ActionType.MOVE_ROBBER, hex_, 2), stolen=WOOD)
+    offer = seat.offer()
+    # Another seat's acceptance is an ordinary taker: its trading refuses it.
+    assert seat.pick([offer_answer(3, RESPONSE_ACCEPT, offer.received)]) is None
+    # The promiser's acceptance is the deal's payment, taken at once with others still to answer.
+    taken = seat.pick([offer_answer(3, RESPONSE_ACCEPT, offer.received),
+                       offer_answer(1, RESPONSE_ACCEPT, offer.received)], waiting=(2,))
+    assert taken.seat == 1
+    seat.close_round(seat.traded(0, 1, offer.received))
+    (deal,) = seat.deal_log
+    assert deal.paid == ((1, ORE),) and deal.rejected == ()
+
+
+def a_second_robber_move(seat):
+    """The same turn's next robber move, as a knight's after a seven's."""
+    seat.game.phase = Phase.ROBBER
+
+
+def spare(seat, promised, spares=None, rob=None):
+    """Seat 0 asks, `promised` promise, and it makes the first robber move
+    its promises leave it (robbing `rob`, where given), which keeps clear of
+    every seat it spares (`spares`, else `promised`)."""
+    seat.deal_ask()
+    spared = seat.deal_promised(promised)
+    assert set(spared) == set(spares if spares is not None else promised)
+    move = next(a for a in legal_actions(seat.game)
+                if a.type is ActionType.MOVE_ROBBER and rob in (None, a.b))
+    assert not set(spared) & set(occupants(seat.game._state, move.a))
+    seat.play(0, move, stolen=WOOD if move.b < seat.game.num_players else None)
+
+
+def test_every_deal_the_robber_spared_this_turn_is_offered_in_turn():
+    # A knight's deal before the roll, then a seven's the same turn: both are owed.
+    game = a_robber_move()
+    deal(game, 0, ORE)                                    # an ore back for each deal
+    seat = a_mover(game)
+    spare(seat, (1,), rob=2)                              # seat 3 keeps its wood for its own promise
+    a_second_robber_move(seat)
+    spare(seat, (3,), spares=(1, 3))                   # the first deal is carried: seat 1 spared again
+    first, second = seat.deal_log
+    assert first.kept == (1,) and second.kept == (3,)
+    for owed, payer in ((first, 1), (second, 3)):
+        offer = seat.offer()
+        assert offer == Offer(0, (1, 0, 0, 0, -1))
+        seat.pick([offer_answer(payer, RESPONSE_ACCEPT, offer.received)])
+        seat.close_round(seat.traded(0, payer, offer.received))
+        assert owed.paid == ((payer, ORE),)
+    assert seat.offer() is None
+
+
+def test_a_carried_promiser_is_not_counted_again():
+    seat = a_mover()
+    spare(seat, (1,))
+    a_second_robber_move(seat)
+    spare(seat, (1,))                                     # it says yes again: the first deal stands
+    first, second = seat.deal_log
+    assert second.ignored == (1,) and second.accepted == () and first.kept == (1,)
+
+
+def test_a_paid_deal_binds_the_rest_of_the_turn():
+    seat = a_spared_deal()
+    offer = seat.offer()
+    seat.pick([offer_answer(1, RESPONSE_ACCEPT, offer.received)])
+    seat.close_round(seat.traded(0, 1, offer.received))
+    a_second_robber_move(seat)
+    seat.deal_ask()
+    assert seat.game.robber_promised == ((1, D.NO_BLOCK),)
+    hexes = {a.a for a in legal_actions(seat.game) if a.type is ActionType.MOVE_ROBBER}
+    assert not any(1 in occupants(seat.game._state, h) for h in hexes)
 
 
 def test_the_deal_log_survives_a_rebuilt_game():

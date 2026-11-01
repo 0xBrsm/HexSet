@@ -417,6 +417,27 @@ def test_a_rollout_seat_journals_every_decision_it_made(board, arena_registry):
     assert _outcome_from_entry(entry).searches == outcome.searches
 
 
+def test_an_mcts_seat_journals_every_decision_it_made(board, arena_registry):
+    """An MCTS seat's decisions reach the game's journal line as a rollout
+    seat's do, found under the trader it is dealt with, and read back
+    unchanged."""
+    import json
+
+    from hexset.arena import (
+        MAX_ACTIONS, _journal_entry, _outcome_from_entry, _play_one, entrant_from_name,
+    )
+    from hexset.rules import STANDARD_GAME
+
+    register_entrants(lambda path, topology: _Traded(stub_checkpoint(board), "random"))
+    lineup = tuple(entrant_from_name(name) for name in ("mcts:/tmp/x.onnx@4w2", "random", "random", "random"))
+    outcome = _play_one((lineup, 0, 7, MAX_ACTIONS, False, "round", STANDARD_GAME, 3, "random"), fresh())
+    log, *others = outcome.searches
+    assert log and not any(others)
+    searched = [d for d in log if d["searched"]]
+    assert searched and all(sum(d["visits"]) == pytest.approx(4.0, abs=0.01) for d in searched)
+    entry = json.loads(json.dumps(_journal_entry(outcome)))
+    assert _outcome_from_entry(entry).searches == outcome.searches
+
 def test_search_logs_finds_the_searchers_own_log_through_the_seats_wrappers(board, arena_registry):
     """`hexset.arena.search_logs` hands back the rollout searcher's own
     `decision_log`, through the trader the seat is dealt with, so a decision

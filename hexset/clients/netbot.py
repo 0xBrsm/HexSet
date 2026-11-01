@@ -625,17 +625,15 @@ class GatedSearch(_Gated, trading.DeclaredTrade, Search):
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
+        decision = self.decide(game)
+        picked = decision.chosen
         tip = self.gate.robber_tip
-        if not tip:
-            return super().choose(game)
-        root, options, visits = self.run(game)
-        if not options:
-            raise ValueError("no legal action to choose from")
-        picked = int(visits.argmax())
-        if options[0].type is ActionType.MOVE_ROBBER:
+        if tip and decision.options[0].type is ActionType.MOVE_ROBBER:
             # The root's own prior and value: no forward beyond the search's.
-            picked = tip_robber(options, root.prior, root.value, root.mover, picked, tip)
-        return options[picked]
+            picked = tip_robber(
+                decision.options, decision.prior, decision.value, decision.seat, picked, tip
+            )
+        return decision.options[picked]
 
 
 class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):

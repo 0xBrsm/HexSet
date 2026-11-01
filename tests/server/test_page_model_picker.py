@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """A seat's model picker offers what the table's game type seats: a model
-file as the name and version it declares, at the game types it declares.
+file as the name it declares, at the game types it declares.
 Skipped without Playwright, which is not one of this project's extras.
 """
 
@@ -73,13 +73,12 @@ def offered(page) -> list[str]:
     )
 
 
-def test_a_standard_table_offers_the_standard_file_with_its_version(server, browser):
+def test_a_standard_table_offers_every_name_a_file_declares_there(server, browser):
     page = browser.new_context().new_page()
     try:
         front_door(page, BASE_URL)
         names = offered(page)
-        assert "net-4.1" in names and "fourseat-3.6" in names
-        assert "net-4d.0" not in names
+        assert "net" in names and "fourseat" in names
     finally:
         page.context.close()
 
@@ -93,8 +92,7 @@ def test_a_duel_table_offers_only_what_declares_the_duel(server, browser):
         page.click("#deal-new-game")
         page.wait_for_selector("#players .player-row")
         names = offered(page)
-        assert "net-4d.0" in names
-        assert "net-4.1" not in names and not any(n.startswith("fourseat") for n in names)
+        assert "net" in names and "fourseat" not in names
 
         # A watcher's page reads the same table and offers the same.
         watcher = page.context.browser.new_context().new_page()

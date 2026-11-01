@@ -72,6 +72,31 @@ def test_a_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     assert sorted(outcomes) == list(range(8))
 
 
+
+def test_a_run_resumed_with_more_games_plays_only_the_indices_after_them(tmp_path):
+    """An extension: the journal keeps the first games, the run plays the
+    next indices on the same seed, and the whole equals a run planned that
+    long from the start. Fewer games than planned is a different run."""
+    lineup = lineup_from_names(LINEUP)
+    whole = compete(lineup, 8, workers=1, **QUICK, journal=fresh())
+    journal = tmp_path / "run.games.jsonl"
+    compete(lineup, 4, workers=1, journal=journal, **QUICK)
+    played = []
+    extended = compete(lineup, 8, workers=1, journal=journal, resume=True,
+                       progress=lambda done, games, outcome: played.append(outcome), **QUICK)
+    entries = lines(journal)
+    assert entries[0]["games"] == 4                       # the header keeps the first plan
+    sources = [e for e in entries if e["kind"] == "source"]
+    assert [(s["games"], s.get("extended_to")) for s in sources] == [(0, None), (4, 8)]
+    assert sorted(e["index"] for e in entries if e["kind"] == "game") == list(range(8))
+    for field in ("winners", "points", "turns", "seating"):
+        assert getattr(extended, field) == getattr(whole, field)
+    header, outcomes = read_journal(journal)
+    assert header["games"] == 8 and sorted(outcomes) == list(range(8))
+    compete(lineup, 8, workers=1, journal=journal, resume=True, **QUICK)   # the extended plan resumes
+    with pytest.raises(ValueError, match="different run"):
+        compete(lineup, 4, workers=1, journal=journal, resume=True, **QUICK)
+
 def test_each_opening_of_a_journal_says_which_code_writes_the_games_after_it(tmp_path, monkeypatch):
     from hexset import arena
     lineup = lineup_from_names(LINEUP)

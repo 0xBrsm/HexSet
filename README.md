@@ -116,10 +116,11 @@ or given a bot, except at a duel table; after it the seats are fixed.
 
 The opponent picker lists every preset a `--runtime` registered, `catanatron`
 when its extra is installed, and each `*.onnx` file in `models/` (or
-`$HEXSET_UI_MODELS_DIR`) as `<name>-<version>` from the `name` and `version`
-its metadata declares, at the game types its `modes` declare (standard only
-when it declares none); the filename plays no part, and a file declaring no
-name is not listed. Files may share a name as long as their versions differ.
+`$HEXSET_UI_MODELS_DIR`) by the `name` its metadata declares, at the game
+types its `modes` declare (standard only when it declares none); the filename
+plays no part, its `version` is shown with it, and a file declaring no name is
+not listed. One name may be one file at some game types and another at the
+rest; two files offering one name at one game type are neither offered there.
 `python -m hexset.clients.onnxmeta stamp` names a file. The directory is
 rescanned on each listing, so a file dropped there appears without a restart;
 it must meet the [ONNX model contract](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md).

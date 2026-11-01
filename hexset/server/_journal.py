@@ -756,11 +756,11 @@ def most_recent(directory: str | None, code: str) -> Path | None:
 
 def _bot(name: str, spec: str) -> dict:
     """A bot seat's record: its entry `name` and `spec`, and the `version`
-    its profile declares (`api.bot_profile`: its preset's, or its model
-    file's), the one that played."""
+    its profile declares (`api.bot_profile`: its preset's, or the model
+    file's at `spec`), the one that played."""
     from .api import bot_profile  # local: `api` imports this module
 
-    version = bot_profile(name).get("version")
+    version = bot_profile(name, spec=spec).get("version")
     return {"name": name, "spec": spec, **({"version": version} if version else {})}
 
 

@@ -534,6 +534,12 @@ def main(argv: list[str] | None = None) -> None:
              "bot:<NAME>. Repeat for more. Default: none.",
     )
     parser.add_argument(
+        "--rollout-workers", type=int, default=0, metavar="N",
+        help="Worker processes a seated model that searches by paired rollouts plays its "
+             "worlds out in, one pool shared by every seat of that model file (default: 0, "
+             "in the server's own process). Other models ignore it.",
+    )
+    parser.add_argument(
         "--rankings-min-games", type=int, default=Config.rankings_min_games, metavar="N",
         help=f"Ranking rows that played fewer games are not shown "
              f"(default: {Config.rankings_min_games}).",
@@ -562,6 +568,7 @@ def main(argv: list[str] | None = None) -> None:
         rankings_min_games=args.rankings_min_games,
         ranked_bot=args.ranked_bot,
         ranked_entrants=entrants,
+        rollout_workers=args.rollout_workers,
     )
     tables = Tables(config)
     if entrants:

@@ -195,10 +195,13 @@ class Game:
     # copied by `imagine` so a search keeps them too.
     robber_promised: tuple[tuple[int, str], ...] = ()
     # The deal of the robber move at hand, until the robber moves; then the
-    # deals whose payments are owed, until the mover's turn opens to trading.
-    # Neither is copied by `imagine`: a hypothetical makes no payment.
+    # deals whose payments are owed, until the mover's turn opens to trading;
+    # and the open deals of earlier robber moves this turn that the move at
+    # hand weighs again (`deals.turn_deals`), until it is made. None is
+    # copied by `imagine`: a hypothetical makes no payment.
     open_deal: "Deal | None" = None
     deal_payments: list["Deal"] = field(default_factory=list)
+    carried_deals: list[tuple["Deal", int]] = field(default_factory=list)
     # Every deal asked this game, in order, with what came of it.
     deal_log: list["Deal"] = field(default_factory=list)
     turns: int = 0
@@ -1169,6 +1172,7 @@ def _close_turn(game: Game) -> None:
     game.robber_allowed = None
     game.robber_promised = ()
     game.open_deal = None
+    game.carried_deals = []
     for deal in game.deal_payments:         # the turn ended before they could be paid
         deal.unpaid = deal.unpaid + tuple(s for s in deal.kept if s not in {p for p, _ in deal.paid})
     game.deal_payments = []

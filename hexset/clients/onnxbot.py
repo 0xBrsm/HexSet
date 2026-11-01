@@ -32,7 +32,7 @@ from hexset.encoding import from_frame
 from hexset.game import Game, Phase, pending_free_roads
 from hexset.lockstep import forward
 from hexset.mcts import Search
-from hexset.rollout import RolloutPool
+from hexset.rollout import RolloutPool, SharedPools
 from hexset.clients.onnxmeta import modes_of
 from hexset.clients.batching import coalesce, coalesce_rows
 from hexset.clients.finishing import Finishing
@@ -595,6 +595,7 @@ def spawn(
     players: int | None = None,
     game_type: str | None = None,
     workers: int = 0,
+    pools: SharedPools | None = None,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
     Single forward or search over its own priors, and a trader to answer its
@@ -603,6 +604,8 @@ def spawn(
     that asks for paired rollouts plays its worlds out in that many worker
     processes beside this one (`hexset.rollout.RolloutPool`, each loading
     the file at one thread), and with 0 here alone. Other files ignore it.
+    With `pools`, every bot spawned from one file shares one such pool
+    (`hexset.rollout.SharedPools`) instead of starting its own.
 
     A `closer` the file names plays its move wherever it has one, in place
     of the file's own (`hexset.arena.closed`); the trader trades for the
@@ -627,10 +630,22 @@ def spawn(
         )
     trader = declared_trader(loaded, path)
     closer = declared_closer(loaded, path)
-    own = _spawn_own(path, board, loaded, rng, device, threads, workers)
+    own = _spawn_own(path, board, loaded, rng, device, threads, workers, pools)
     own = closed(own, closer, board, random.Random() if rng is None else rng)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
                   veto_picks=trader_veto_pick_of(loaded))
+
+
+def _pool(path, load_policy, workers, pools, loaded_as):
+    """The worker pool a rollout file plays its worlds out in: none without
+    `workers`, its own, or the one `pools` keeps for the file as it is on
+    disk now and loaded as `loaded_as` says."""
+    if not workers:
+        return None
+    if pools is None:
+        return RolloutPool(load_policy, workers)
+    stat = os.stat(path)
+    return pools.get(os.path.abspath(path), (stat.st_mtime_ns, stat.st_size, workers, *loaded_as), load_policy, workers)
 
 
 def _pool_policy(path: str, topology: Topology, device: str):
@@ -654,7 +669,7 @@ def _opponent_files(path: str, names: tuple[str, str]) -> tuple[str, str]:
     return os.path.join(here, names[0]), os.path.join(here, names[1])
 
 
-def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
+def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
     (`hexset.clients.netbot.rollouts_for`), trading through its own gate.
@@ -683,7 +698,8 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0):
             horizon=rollout.horizon,
             full_setup=rollout.full_setup,
             rng=rng,
-            pool=RolloutPool(pool_load or partial(_pool_policy, path, board.topology, device), workers) if workers else None,
+            pool=_pool(path, pool_load or partial(_pool_policy, path, board.topology, device), workers, pools,
+                       (board.topology, device, rollout.opponents)),
             own_calibration=loaded.search.own_calibration,
             opponents=opponents,
         )

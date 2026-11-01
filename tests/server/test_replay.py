@@ -475,6 +475,29 @@ def test_a_served_round_replays_to_the_same_ledger(tmp_path):
     assert replayed.ledger == game.ledger
 
 
+def test_a_served_duel_replays_against_its_seed(tmp_path):
+    """The duel's rules roll off the dice deck, and the journal's rules are
+    all that says so: read as independent dice, the seed check would diverge
+    at the first roll."""
+    from hexset.chance import Balanced
+    from hexset.record import from_journal, replay
+    from hexset.rules import DUEL_VARIANT_GAME
+
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), Seat(kind=SeatKind.EMPTY), Seat(kind=SeatKind.EMPTY)]
+    session = build_session("ABC123", seats, config, first=0,
+                            game_type=DUEL_VARIANT_GAME, locked=(2, 3))
+    assert isinstance(session.game.chance, Balanced)
+    drive(session, 400, random.Random(4))
+    session.journal.finish(session.game)
+
+    record = from_journal(next(Path(tmp_path).glob("*.jsonl")))
+    assert record.seed is not None and record.balanced_dice
+    assert sum(1 for kind, _ in record.chance if kind == "roll") > 5
+    replayed = replay(record)
+    assert replayed.state(0, hidden=False).hands == session.game.state(0, hidden=False).hands
+
+
 def test_a_journal_records_its_closed_seats_as_retired(tmp_path):
     from dataclasses import replace
 

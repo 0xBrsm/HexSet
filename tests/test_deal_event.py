@@ -18,6 +18,7 @@ from hexset.bots import RandomBot
 from hexset.cards import DevCard
 from hexset.game import Phase, move_robber_to, roll_dice, start
 from hexset.robber import occupants, victims
+from hexset.trading import RESPONSE_ACCEPT, Response
 
 from helpers import clear_hand, deal
 from tests.test_game import run_setup
@@ -240,6 +241,48 @@ def test_a_knight_before_the_roll_is_paid_after_it():
     assert d.paid == ((1, ORE),)
 
 
+def test_a_knight_s_deal_reaches_a_seven_rolled_after_it():
+    # "No block" holds for the turn: the seven's robber move keeps the
+    # knight's promise without asking again, and the promiser pays once.
+    game = a_table()
+    state = game._state
+    deal(game, 0, ORE)
+    deal(game, 1, WOOD)
+    state.dev_cards[0][DevCard.KNIGHT] += 1
+    seat(game, [Gate(ASKER, ask=D.Ask(0, D.NO_BLOCK, WOOD), accept=lambda p: p),
+                Gate(ANSWERS, answer=True), Gate(), Gate()])
+    apply(game, next(a for a in legal_actions(game) if a.type is ActionType.PLAY_KNIGHT))
+    apply(game, next(a for a in legal_actions(game) if a.type is ActionType.MOVE_ROBBER))
+    roll_dice(game, 7)
+    assert game.phase is Phase.ROBBER
+    knight, seven = game.deal_log
+    assert seven.promised == (1,) and seven.ignored == (1,) and seven.accepted == ()
+    assert game.robber_promised == ((1, D.NO_BLOCK),)
+    assert not robber_hexes(game) & hexes_of(game, 1)
+    apply(game, next(a for a in legal_actions(game) if a.type is ActionType.MOVE_ROBBER))
+    assert knight.kept == (1,) and knight.paid == ((1, ORE),) and seven.kept == ()
+
+
+def test_a_value_mover_prices_a_carried_deal_like_a_fresh_one():
+    game, dealer = a_value_mover(gain=0.2)          # sparing seat 1 costs 0.1, its card is worth 0.2
+    assert dealer.spare(game, 0, [(1, WOOD)]) == (1,)
+    game, dealer = a_value_mover(gain=0.05)         # worth 0.05: another move pays more
+    assert dealer.spare(game, 0, [(1, WOOD)]) == ()
+
+
+def test_a_carried_deal_whose_promiser_is_hit_is_broken_and_owed_nothing():
+    game = a_table()
+    state = game._state
+    d = D.Deal(game.turns, 0, D.NO_BLOCK, WOOD, promised=(1, 2), accepted=(1, 2), hex=0, kept=(1, 2))
+    target = min(hexes_of(game, 1) - hexes_of(game, 2))
+    D.hit_carried(state, [(d, 1), (d, 2)], target, None)
+    assert d.kept == (2,) and d.broken == (1,)
+    paid = D.Deal(game.turns, 0, D.NO_BLOCK, WOOD, hex=0, kept=(2,), offered=ORE, taker=2, paid=((2, ORE),))
+    bound, open_ = D.turn_deals([d, paid], 0, game.turns)
+    assert bound == {2: D.NO_BLOCK} and open_ == []      # paid binds; offered is no longer open
+    assert D.turn_deals([d], 0, game.turns + 1) == ({}, [])
+
+
 def test_a_seat_without_the_card_or_the_params_is_not_asked():
     game = a_table()
     deal(game, 0, ORE)
@@ -415,6 +458,44 @@ def test_the_value_mover_gives_back_the_card_it_minds_least():
     assert dealer.give_back(game, 0, (1,), WOOD) == BRICK
 
 
+def test_the_value_mover_executes_the_payment_it_offered_though_its_trading_would_refuse_it():
+    game, dealer = a_value_mover(gain=0.2, refuse_after=True)   # its trading takes no exchange after the move
+    game._state.robber = dealer.net.target
+    game.phase = Phase.MAIN
+    dealer.params = D.DealParams(ask=True, mover="value", pay_floor=0.01)
+    dealer.net.after_gain = 0.02                     # above the payment floor, below the trade floor
+    deal_ = D.Deal(game.turns, 0, D.NO_BLOCK, WOOD, kept=(1,), offered=ORE)
+    gate = type("Mover", (), {"deal_dealer": dealer})()
+    received = D._swap(WOOD, ORE)
+    other = Response(2, RESPONSE_ACCEPT, received)
+    promiser = Response(1, RESPONSE_ACCEPT, received)
+    assert D.payment_pick(game, gate, 0, deal_, [other, promiser]) == 1
+    assert D.payment_pick(game, gate, 0, deal_, [other]) is None          # not a promiser: its trading's
+    dealer.net.after_gain = 0.005                                       # below the payment floor
+    assert D.payment_pick(game, gate, 0, deal_, [promiser]) is None
+
+
+def test_a_promise_counts_as_a_deal_only_above_the_trade_floor():
+    """Sparing seat 1 costs nothing; its card gains `gain` before the move and
+    after it. The veto's trade floor is 0.03, the payment floor 0.01."""
+    def mover(gain):
+        game, dealer = a_value_mover(gain=gain)
+        net = dealer.net
+        net.high = net.low = 0.5
+        net.after_gain = gain
+        net.trade_floor = 0.03
+        dealer.gate.veto = net                          # its trading, vetoed by the network
+        dealer.gate = type("Gate", (), {"trader": dealer.gate})()
+        dealer.params = D.DealParams(ask=True, mover="value", pay_floor=0.01)
+        return game, dealer
+    game, dealer = mover(0.02)
+    assert dealer.ask(game, 0) is None                                   # under 0.03: not asked
+    assert dealer.accept(game, 0, D.Ask(0, D.NO_BLOCK, WOOD), (1,)) == ()   # nor counted when promised
+    game, dealer = mover(0.05)
+    ask = dealer.ask(game, 0)
+    assert ask == D.Ask(0, D.NO_BLOCK, WOOD) and dealer.accept(game, 0, ask, (1,)) == (1,)
+
+
 class Promises:
     """A stand-in promise model: every holder promises at `chance`, every spared promiser pays at `pays`."""
 
@@ -437,11 +518,13 @@ def a_reading_mover(gain, chance, cost=0.0, pays=1.0):
 
 
 def test_promise_and_cost_parse_back_and_are_checked():
-    p = D.DealParams.parse("answer,ask,noblock,mover=value,promise=corpus,cost=0.01")
-    assert p.promise == "corpus" and p.ask_cost == 0.01
+    p = D.DealParams.parse("answer,ask,noblock,mover=value,promise=corpus,cost=0.01,payfloor=0.02")
+    assert p.promise == "corpus" and p.ask_cost == 0.01 and p.pay_floor == 0.02
     assert D.DealParams.parse(p.spec()) == p
     with pytest.raises(ValueError, match="cost"):
         D.DealParams(ask=True, ask_cost=-0.1)
+    with pytest.raises(ValueError, match="payment floor"):
+        D.DealParams(ask=True, pay_floor=-0.1)
     with pytest.raises(ValueError, match="no promise model"):
         D.promise_model("nobody-registered-this")
 
@@ -531,14 +614,31 @@ def test_the_value_mover_keeps_one_plan_from_the_ask_to_whom_it_spares():
     assert dealer._plan is plan and dealer.net.calls == 1      # one batch of robber values, kept
 
 
-def test_the_value_mover_does_not_spare_for_a_deal_it_would_not_take_after_the_steal():
+def test_the_value_mover_pays_a_deal_its_trading_would_refuse_after_the_steal():
     game, dealer = a_value_mover(gain=0.2, refuse_after=True)   # its trading takes it before the move, not after
-    assert dealer.accept(game, 0, D.Ask(0, D.NO_BLOCK, WOOD), (1,)) == ()
+    assert dealer.accept(game, 0, D.Ask(0, D.NO_BLOCK, WOOD), (1,)) == (1,)
+    game._state.robber = dealer.net.target
+    game.phase = Phase.MAIN
+    dealer.net.after_gain = 0.01                     # the steal leaves the card worth less: still paid
+    assert dealer.give_back(game, 0, (1,), WOOD) == BRICK
+
+
+def test_the_value_mover_pays_only_above_its_payment_floor_and_asks_so():
+    # Sparing seat 1 costs 0.1; after the steal its card gains 0.15.
+    game, dealer = a_value_mover(gain=0.2)
+    dealer.net.after_gain = 0.15
+    dealer.params = D.DealParams(ask=True, mover="value", pay_floor=0.1)
+    assert dealer.ask(game, 0) == D.Ask(0, D.NO_BLOCK, WOOD)     # paid at 0.15: worth 0.05
+    game, dealer = a_value_mover(gain=0.2)
+    dealer.net.after_gain = 0.15
+    dealer.params = D.DealParams(ask=True, mover="value", pay_floor=0.2)
+    assert dealer.ask(game, 0) is None                           # unpaid at 0.15: worth -0.1
+    game._state.robber = dealer.net.target
+    game.phase = Phase.MAIN
+    assert dealer.give_back(game, 0, (1,), WOOD) is None
 
 
 def test_the_value_mover_asks_only_where_it_would_spare_the_seat_that_promised():
-    game, dealer = a_value_mover(gain=0.2, refuse_after=True)   # worth asking before the move, not after it
-    assert dealer.ask(game, 0) is None
     game, dealer = a_value_mover(gain=0.2)
     dealer.net.after_gain = 0.05                                 # the steal leaves the card worth too little
     assert dealer.ask(game, 0) is None

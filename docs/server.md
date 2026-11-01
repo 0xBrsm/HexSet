@@ -21,6 +21,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--board` | `spiral` | How boards are dealt: `spiral` (the rulebook's lettered spiral) or `random` (number discs in random order, 6 and 8 apart). A game journalled without a board mode resumes as `random` |
 | `--runtime` | none | Module imported first, so the bots it registers can be seated and listed (repeatable) |
 | `--device` | `cpu` | ONNX Runtime device; another value asks for `<DEVICE>ExecutionProvider` with CPU fallback |
+| `--rollout-workers` | `0` | Worker processes a seated model that searches by paired rollouts plays its worlds out in: one pool per model file, shared by every seat of it, started at its first seat and replaced when the file changes. `0` plays them in the server's own process; other models ignore it |
 | `--games-dir` | `$HEXSET_UI_GAMES_DIR` | Journal directory; an empty string disables journaling |
 | `--forwarded-header` | none | The header a reverse proxy puts the client's address in (`CF-Connecting-IP`, `X-Forwarded-For`: its last entry); without it, the socket peer |
 | `--games-per-period` | `100` | New games one client address may deal per rolling `--period-days`, through the page, the API and MCP alike, counted across restarts from the journals; `0` is no limit |

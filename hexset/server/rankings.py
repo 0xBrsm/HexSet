@@ -33,7 +33,9 @@ profile is served with it in place of anything the ranker wrote there, its
 `name` too when the profile has one; a profile changing re-serves the board
 without ranking again. A server bot has no client: a row whose `id` is
 `bot:<entry>` (`BOT_ID`) carries the profile its preset or its model file
-declares (`api.bot_profile`), the version the server runs now.
+declares (`api.bot_profile`; on a board keyed by a game type, the file
+offered there), the version the server runs now. One that is no longer
+offered keeps what the ranker wrote.
 
 A ranker that raises, or returns something `check` refuses, is logged and
 the last good rankings stay up. A game is handed over as its journal
@@ -54,6 +56,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from hexset.rules import GAME_TYPES
 from . import _journal as journal
 from .constants import PROFILE_FIELDS, profile_value
 
@@ -522,16 +525,18 @@ class Rankings:
         if self._ranked is None:
             return
         updated, games, ranked = self._ranked
-        boards = [{**board, "rows": [self._profiled(row) for row in board["rows"]]} for board in ranked]
+        boards = [{**board, "rows": [self._profiled(row, board.get("key")) for row in board["rows"]]}
+                  for board in ranked]
         board = {"updated": updated, "games": games, "min_games": self._min_games, "boards": boards}
         with self._lock:
             self._board = board
 
-    def _profiled(self, row: dict) -> dict:
+    def _profiled(self, row: dict, board: str | None) -> dict:
         if row["id"] and row["id"].startswith(BOT_ID):
             from .api import bot_profile  # local: `api` imports this module
 
-            profile = bot_profile(row["id"][len(BOT_ID):])
+            # A board keyed by a game type shows the bot that plays there.
+            profile = bot_profile(row["id"][len(BOT_ID):], board if board in GAME_TYPES else None)
             return {**row, **{field: profile.get(field) for field in PROFILE_FIELDS[1:]}} if profile else row
         profile = self._profiles.get(row["id"]) if row["id"] else None
         if profile is None:

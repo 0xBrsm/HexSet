@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Collection, Protocol, Sequence
@@ -25,6 +26,7 @@ from .actions import (
     victim_of,
 )
 from .game import Game, imagine, is_over, roll_dice, roll_odds, to_move
+from .victory import public_victory_points
 from .view import HoldReading
 
 __all__ = [
@@ -39,6 +41,7 @@ __all__ = [
     "lost_value",
     "side_value",
     "calibrate_own",
+    "Decision",
     "Search",
     "visit_policy",
 ]
@@ -279,6 +282,65 @@ def lost_value(stance: str, seats: int) -> float:
     return float(STANCE_ROWS[stance](won_by_other, 0)[0])
 
 
+
+@dataclass(frozen=True)
+class Decision:
+    """One decision as `Search.decide` made it: the root's `options`, the
+    evaluator's `prior` over them and the root's `value` (board-seat order),
+    combined over the decision's worlds as the root is (`Search._combine`);
+    each option's root `visits` and `means`, the mover's stance reading of
+    the values backed up through it (`nan` for an option never visited); and
+    the option `chosen`, the most visited. `searched` is false for a root the
+    search credited without descending: one legal move, or a prior at or
+    above `decisive` in every world. `worlds` counts the distinct worlds the
+    root was searched in.
+
+    What it was made from, for the log: the root's `turn` and `phase`, the
+    deciding `seat`, every seat's public victory `points` as that seat sees
+    them, the `simulations` budget of each world's tree, and `cpu_seconds`,
+    the process time the decision took."""
+
+    options: tuple[Action, ...]
+    prior: np.ndarray
+    value: tuple[float, ...]
+    visits: np.ndarray
+    means: tuple[float, ...]
+    chosen: int
+    searched: bool
+    worlds: int
+    turn: int = 0
+    phase: str = ""
+    seat: int = 0
+    points: tuple[int, ...] = ()
+    simulations: int = 0
+    cpu_seconds: float = 0.0
+
+    def to_json(self) -> dict:
+        """The decision as one JSON object. A decision it did not search keeps
+        its top prior and the option count; a searched one lists every visited
+        option, most visited first."""
+        out = {
+            "turn": self.turn, "phase": self.phase, "seat": self.seat,
+            "points": list(self.points), "options": len(self.options),
+            "top_prior": round(float(self.prior.max()), 4) if self.prior.size else None,
+            "chosen": self.chosen, "searched": self.searched, "worlds": self.worlds,
+            "simulations": self.simulations, "cpu_seconds": round(self.cpu_seconds, 4),
+        }
+        if not self.searched:
+            return out
+        r = lambda x: round(float(x), 4)  # noqa: E731
+        visited = sorted((i for i in range(len(self.options)) if self.visits[i] > 0),
+                         key=lambda i: (-self.visits[i], i))
+        out.update(
+            candidates=visited,
+            actions=[[self.options[i].type.name, self.options[i].a, self.options[i].b] for i in visited],
+            prior=[r(self.prior[i]) for i in visited],
+            visits=[r(self.visits[i]) for i in visited],
+            means=[r(self.means[i]) for i in visited],
+            value=[r(v) for v in self.value],
+        )
+        return out
+
 class Search:
     """One tree per determinized world per decision. Not reused across moves --
     see `run`.
@@ -312,6 +374,9 @@ class Search:
     move is credited with the whole budget at the root's own value, as a root
     with one legal move is, and no simulation is spent. `None`, the default,
     searches every root with more than one move.
+
+    `decision_log` keeps every decision `decide` (and so `choose`) made, in
+    order, as a `Decision`; `run` and `run_many` log nothing.
 
     `against` names seats the search plays against as one side (`side_value`):
     at a node whose mover is not one of them, the mover ranks a position by
@@ -365,6 +430,7 @@ class Search:
             else (float(own_calibration[0]), float(own_calibration[1]))
         )
         self.decisive = None if decisive is None else float(decisive)
+        self.decision_log: list[Decision] = []
         self.play_against(against)
 
     def play_against(self, seats: Collection[int]) -> None:
@@ -791,13 +857,41 @@ class Search:
         """Search one position; the scalar form of `run_many`."""
         return self.run_many([game])[0]
 
+    def decide(self, game: Game) -> Decision:
+        """Search one position and log it (`decision_log`): the `Decision`,
+        whose `chosen` is the most-visited root action."""
+        began = time.process_time()
+        root, options, visits = self.run(game)
+        if not options:
+            raise ValueError("no legal action to choose from")
+        seat = root.mover
+        seen = game.state(seat).state
+        means = tuple(
+            float(root.ranked[i] / visits[i]) if visits[i] > 0 else math.nan
+            for i in range(len(options))
+        )
+        searched = any(
+            len(world.options) > 1 and not (
+                self.decisive is not None and world.prior is not None
+                and float(world.prior.max()) >= self.decisive
+            )
+            for _, world in root.worlds
+        )
+        decision = Decision(
+            options, np.asarray(root.prior, dtype=np.float64), tuple(root.value),
+            np.asarray(visits, dtype=np.float64), means, int(np.argmax(visits)), searched,
+            len(root.worlds), turn=game.turns, phase=game.phase.name, seat=seat,
+            points=tuple(public_victory_points(seen, s) for s in range(seen.num_players)),
+            simulations=self.simulations, cpu_seconds=time.process_time() - began,
+        )
+        self.decision_log.append(decision)
+        return decision
+
     def choose(self, game: Game) -> Action:
         """The most-visited root action: a rarely-visited edge can hold a high
         mean off one lucky rollout, and PUCT's guarantees are about visits."""
-        _, options, visits = self.run(game)
-        if not options:
-            raise ValueError("no legal action to choose from")
-        return options[int(np.argmax(visits))]
+        decision = self.decide(game)
+        return decision.options[decision.chosen]
 
 
 def visit_policy(visits: np.ndarray, temperature: float = 1.0) -> np.ndarray:

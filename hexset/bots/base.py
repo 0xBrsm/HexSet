@@ -9,7 +9,8 @@ one bot's moves over another's trading; ``Handoff`` seats one bot's moves up
 to a round and another's after it; ``Closes`` plays a closer's move wherever
 it has one and the bot's own everywhere else. ``PlaysAgainst`` is the optional hook
 a bot implements to play as one side against named seats
-(``hexset.bots.coalition``).
+(``hexset.bots.coalition``). ``ChoosesMany`` is the optional hook a bot
+class implements to choose for several of its bots in one call.
 """
 from __future__ import annotations
 
@@ -32,6 +33,8 @@ __all__ = [
     "handed_off",
     "Closes",
     "PlaysAgainst",
+    "ChoosesMany",
+    "chooses_many",
     "seat_at",
     "play_against",
     "RandomBot",
@@ -347,6 +350,29 @@ def watches(bot: object) -> bool:
     if isinstance(bot, Handoff):
         return watches(bot.first) or watches(bot.second)
     return getattr(type(bot), "seen", None) is not None
+
+
+class ChoosesMany(Protocol):
+    """Optional: a bot class that chooses for several of its bots at once.
+
+    ``type(bot).choose_many(pairs)`` takes ``(bot, game)`` pairs, each bot an
+    instance of the class and each to move at its own game (no two pairs
+    share one), and returns, in order, the action ``bot.choose(game)`` would
+    return for each. Every bot keeps its own state and streams, so a move
+    does not depend on which bots are asked together or in what order: what
+    it buys is one batched forward for every pending seat instead of one per
+    seat. ``hexset.gym.lanes.LaneEnv`` asks every bot of one such class that
+    is to move in a tick in a single call; any other table calls ``choose``.
+    A wrapper (``TradesBy``, ``Handoff``, ``Closes``) is asked through its
+    own ``choose``."""
+
+    @classmethod
+    def choose_many(cls, pairs: Sequence[tuple[Bot, Game]]) -> Sequence[Action]: ...
+
+
+def chooses_many(bot: object) -> bool:
+    """Whether ``bot``'s own class has a ``choose_many`` (``ChoosesMany``)."""
+    return getattr(type(bot), "choose_many", None) is not None
 
 
 class PlaysAgainst(Protocol):

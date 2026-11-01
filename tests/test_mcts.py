@@ -22,6 +22,7 @@ from hexset.mcts import (
     Evaluation,
     HIDDEN_DRAW,
     STANCE_ROWS,
+    Decision,
     Leaf,
     Node,
     Search,
@@ -271,6 +272,48 @@ def test_a_forced_move_is_evaluated_but_not_searched():
     assert [len(wave) for wave in stub.waves] == [1]
     assert root.totals[0].tolist() == [32.0, -32.0, 16.0, -16.0]
 
+
+
+def test_decide_logs_each_decision_with_its_root_statistics():
+    """`decide` (and `choose`, through it) keeps every decision in order: the
+    visits the search spent, the most visited as `chosen`, and a JSON form
+    listing the visited options, most visited first."""
+    import json
+
+    stub = Stub(value=(0.5, -0.5, 0.25, -0.25))
+    search = Search(stub, simulations=32, wave=4, rng=random.Random(5))
+    game = a_game()
+    action = search.choose(game)
+    (decision,) = search.decision_log
+    assert isinstance(decision, Decision)
+    assert decision.options[decision.chosen] == action
+    assert decision.chosen == int(np.argmax(decision.visits))
+    assert decision.visits.sum() == pytest.approx(32.0)
+    assert decision.searched and decision.worlds == 1 and decision.simulations == 32
+    assert decision.seat == to_move(game) and decision.turn == game.turns
+    assert decision.phase == game.phase.name and len(decision.points) == 4
+    out = json.loads(json.dumps(decision.to_json()))
+    assert out["visits"] == sorted(out["visits"], reverse=True)
+    assert out["candidates"][0] == decision.chosen
+    assert len(out["candidates"]) == len(out["actions"]) == len(out["prior"]) == len(out["means"])
+    assert sum(out["visits"]) == pytest.approx(32.0, abs=0.01)
+    search.decide(game)
+    assert len(search.decision_log) == 2
+    search.run(game)
+    assert len(search.decision_log) == 2        # `run` logs nothing
+
+
+def test_a_root_it_did_not_search_is_logged_as_unsearched():
+    """A forced move, and a root the prior decides under `decisive`, are
+    logged without their visit table."""
+    forced = OneWay(Stub(), simulations=16, rng=random.Random(1))
+    forced.choose(a_game())
+    (decision,) = forced.decision_log
+    assert not decision.searched and "candidates" not in decision.to_json()
+    confident = Search(Stub(favour=0), simulations=16, decisive=0.9, rng=random.Random(1))
+    confident.choose(a_game())
+    (decision,) = confident.decision_log
+    assert not decision.searched and decision.to_json()["top_prior"] == pytest.approx(0.99)
 
 def test_a_forced_move_carries_its_value_through_several_worlds():
     stub = Stub(value=(0.5, -0.5, 0.25, -0.25))

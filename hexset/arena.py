@@ -256,9 +256,10 @@ MAX_ACTIONS = 20000
 # --- the game law -----------------------------------------------------------
 #
 # A run's `index`-th game is a pure function of `(seed, index)`: the board from
-# one key, every draw the engine makes from another. A tournament fanned out
-# over processes and a lockstep collector both depend on that exactly, and both
-# call the four functions below rather than deriving the keys themselves.
+# one key, every draw the engine makes from another, a lane's bot from a key of
+# its seat's. A tournament fanned out over processes and a lockstep collector
+# both depend on that exactly, and both call the functions below rather than
+# deriving the keys themselves.
 
 
 def board_key(seed: int, index: int) -> str:
@@ -271,6 +272,14 @@ def game_key(seed: int, index: int) -> str:
     rather than a generator because a `hexset.record.Record` stores it as
     its seed: a record names the stream it replays."""
     return f"{seed}:{index}:game"
+
+
+def seat_key(seed: int, index: int, seat: int) -> str:
+    """The rng key a lane's bot in `seat` of the `index`-th game draws from
+    (`hexset.gym.lanes.LaneEnv`): its own for the game and seat, so no two
+    games or seats share a stream, and the same whatever the lane count or
+    worker split."""
+    return f"{seed}:{index}:{seat}"
 
 
 def deal_board(seed: int, index: int, mode: str = "random") -> Board:
@@ -1036,12 +1045,18 @@ def _outcome_from_entry(entry: dict) -> Outcome:
 def read_journal(path: str | os.PathLike) -> tuple[dict, dict[int, Outcome]]:
     """A `compete` journal's header and every finished game in it, by game
     index -- readable while the run is still going, or after it died. Games
-    that exhausted the turn cap are not among them."""
+    that exhausted the turn cap are not among them. A run extended on resume
+    reads with the header's `games` the latest extension's (`extended_to` on
+    its source line); the header line itself keeps the games first planned."""
     entries = gamelog.read_lines(path)
     if not entries or entries[0].get("kind") != "header":
         raise ValueError(f"{path} is not a compete journal: no header line")
     games = {e["index"]: _outcome_from_entry(e) for e in entries[1:] if e.get("kind") == "game"}
-    return entries[0], games
+    header = entries[0]
+    for e in entries[1:]:
+        if e.get("kind") == "source" and "extended_to" in e:
+            header = {**header, "games": e["extended_to"]}
+    return header, games
 
 
 def journal_tournament(path: str | os.PathLike) -> "Tournament":
@@ -1199,7 +1214,10 @@ def compete(
     `journal_tournament` read it part-way. A journal that already holds a
     run is refused unless `resume=True`, which checks its header against
     this run's settings and plays only the games it lacks: every game is a
-    function of `seed` and its index, so the result is the run's own.
+    function of `seed` and its index, so the result is the run's own. A
+    resumed run may name more `games` than it began with, and so plays the
+    indices after them on the same seed: an extension, which the journal's
+    source line records (`extended_to`). Fewer is a different run.
 
     `seed` is held to the project's seed policy, if it has one
     (`hexset.seeds`): a run naming no seed takes the policy's default for its
@@ -1575,13 +1593,20 @@ def _open_journal(
         )
     gamelog.cut_torn_tail(path)
     found, games = read_journal(path)
-    differs = sorted(k for k in set(found) | set(header) if found.get(k) != header.get(k))
+    # More games than the run planned is an extension: the same games, and
+    # the indices after them (a game is a function of the seed and its index).
+    extended = header["games"] > found["games"]
+    differs = sorted(
+        k for k in set(found) | set(header)
+        if found.get(k) != header.get(k) and not (k == "games" and extended)
+    )
     if differs:
         raise ValueError(
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
-    gamelog.append(path, _source_line(len(games), seeds))
+    line = _source_line(len(games), seeds)
+    gamelog.append(path, {**line, "extended_to": header["games"]} if extended else line)
     return games
 
 
@@ -1962,7 +1987,7 @@ __all__ = [
     "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT", "KIND_HINT",
     "spawn", "traded", "search_logs",
     # the game law
-    "MAX_ACTIONS", "board_key", "game_key", "deal_board", "deal_game", "deal_seats",
+    "MAX_ACTIONS", "board_key", "game_key", "seat_key", "deal_board", "deal_game", "deal_seats",
     "half_turn", "seat_of",
     # playing
     "seat_bots", "run_seated", "compete", "compete_lanes", "Exhausted",

@@ -99,7 +99,7 @@ def test_a_checkpoint_is_spawned_for_the_table_s_player_count(monkeypatch, tmp_p
     monkeypatch.setattr(api, "MODELS_DIR", models)
     asked = []
 
-    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None):
+    def spawn(path, board, *, rng=None, device="cpu", players=None, game_type=None, workers=0, pools=None):
         asked.append(players)
         raise ValueError(f"{path} was trained for 2 players, not this table's {players}")
 

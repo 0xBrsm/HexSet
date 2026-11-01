@@ -28,9 +28,9 @@ ONNX `metadata_props` values are strings.
 | `num_vertices` | Board vertex count | Required integer |
 | `num_edges` | Board edge count | Required integer |
 | `iteration` | Training iteration, kept as model information | 0; must be an integer when present |
-| `name` | The model's name; the server's picker offers the file as `<name>-<version>` ([serving a model](#serving-a-model)) | Absent: the server does not list the file |
+| `name` | The model's name; the server's picker offers the file by it ([serving a model](#serving-a-model)) | Absent: the server does not list the file |
 | `modes` | Game types it plays, comma separated `hexset.rules.GAME_TYPES` names | `standard`; seating it at a table of another type raises, and so does `spawn` given the table's `game_type` |
-| `version` | The model's version, part of its picker entry | Free text |
+| `version` | The model's version, shown with it and journalled with each game it plays | Free text |
 | `commit` | The code commit it was built and served from | Free text; kept as model information |
 | `search` | `mcts` plays the graph through search over its priors and values | Any other value: one forward per decision |
 | `simulations` | Search descents per decision | 128; at most 4096 |
@@ -84,16 +84,16 @@ not metadata either.
 ## Serving a model
 
 The server names a model file by what it declares, never by its filename:
-its picker entry is `<name>-<version>` (the name alone without a version),
-`modes` are the game types a table of which may seat it, and `commit` the code
-it was built from. A model plays the standard game alone unless its `modes`
-say otherwise, so no file is offered at every game type by default. Files may
-share a name as long as their versions differ, each version its own entry. A
-file declaring no `name` is not listed, and two declaring one name and version
-are neither offered. A file may also declare an `owner`, a `url` and a
-one-sentence `description` (at most 100 characters), shown with it in the
-model list and on its rankings row; one a client's profile would refuse is
-left out.
+its picker entry is its `name`, `modes` are the game types a table of which
+may seat it, `version` is shown with it and journalled with each game it
+plays, and `commit` the code it was built from. A model plays the standard
+game alone unless its `modes` say otherwise, so no file is offered at every
+game type by default. One name is one bot, which may be one file at some game
+types and another at the rest. A file declaring no `name` is not listed, and
+two offering one name at one game type are neither offered there. A file may
+also declare an `owner`, a `url` and a one-sentence `description` (at most 100
+characters), shown with it in the model list and on its rankings row; one a
+client's profile would refuse is left out.
 
 `hexset.clients.onnxmeta` reads and writes these keys without a model runtime,
 copying the graph unchanged:

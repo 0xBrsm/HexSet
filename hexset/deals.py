@@ -136,6 +136,13 @@ class DealParams:
     #: What an ask costs the mover, in its win chance: `ValueDealer` asks
     #: only where the ask is worth more.
     ask_cost: float = 0.0
+    #: The least a deal's exchange must gain the mover, in its win chance by
+    #: its own network, for `ValueDealer` to pay it once a promiser is spared
+    #: (`give_back`); its trading's own rules and floor are not asked. Below
+    #: it, paying would cost the mover more than the deal is worth -- a steal
+    #: that completed a build the card back would break -- and it offers
+    #: nothing, which the ask prices in.
+    pay_floor: float = 0.0
 
     def __post_init__(self) -> None:
         if self.mover not in MOVERS:
@@ -144,6 +151,8 @@ class DealParams:
             raise ValueError(f"a payment chance is in (0, 1], not {self.pay}")
         if self.ask_cost < 0.0:
             raise ValueError(f"an ask's cost is not negative, not {self.ask_cost}")
+        if self.pay_floor < 0.0:
+            raise ValueError(f"a payment floor is not negative, not {self.pay_floor}")
         if self.answerer is not None and not self.answer:
             raise ValueError("an answerer answers only for a seat that answers (`answer`)")
         kinds = tuple(k for k in KINDS if k in self.kinds)
@@ -156,14 +165,15 @@ class DealParams:
     def parse(cls, text: str) -> "DealParams":
         """`answer`, `ask`, the kinds (`noblock`, `nosteal`; both when none is
         named), `model=<name>`, `mover=<plain|value>`, `answerer=<name>`,
-        `pay=<chance>`, `promise=<name>` and `cost=<win chance>`, comma
-        separated: ``answer,ask,noblock,mover=value``.
+        `pay=<chance>`, `promise=<name>`, `cost=<win chance>` and
+        `payfloor=<win chance>`, comma separated:
+        ``answer,ask,noblock,mover=value``.
         `none` alone is a seat that neither answers nor asks."""
         if text.strip() == "none":
             return cls()
         answer = ask = False
         kinds: list[str] = []
-        model, mover, answerer, pay, promise, cost = "plain", "plain", None, 1.0, None, 0.0
+        model, mover, answerer, pay, promise, cost, pay_floor = "plain", "plain", None, 1.0, None, 0.0, 0.0
         for part in filter(None, (p.strip() for p in text.split(","))):
             if part == "answer":
                 answer = True
@@ -183,12 +193,14 @@ class DealParams:
                 promise = part[len("promise="):]
             elif part.startswith("cost="):
                 cost = float(part[len("cost="):])
+            elif part.startswith("payfloor="):
+                pay_floor = float(part[len("payfloor="):])
             else:
                 raise ValueError(f"unknown deal setting {part!r}: answer, ask, noblock, nosteal, "
                                  "model=<name>, mover=<plain|value>, answerer=<name>, pay=<chance>, "
-                                 "promise=<name>, cost=<win chance>")
+                                 "promise=<name>, cost=<win chance>, payfloor=<win chance>")
         return cls(answer=answer, ask=ask, kinds=tuple(kinds) or KINDS, model=model, mover=mover,
-                   answerer=answerer, pay=pay, promise=promise, ask_cost=cost)
+                   answerer=answerer, pay=pay, promise=promise, ask_cost=cost, pay_floor=pay_floor)
 
     def spec(self) -> str:
         """The text `parse` reads back to these params."""
@@ -207,6 +219,8 @@ class DealParams:
             parts.append(f"promise={self.promise}")
         if self.ask_cost != 0.0:
             parts.append(f"cost={self.ask_cost:g}")
+        if self.pay_floor != 0.0:
+            parts.append(f"payfloor={self.pay_floor:g}")
         return ",".join(parts)
 
 
@@ -357,7 +371,8 @@ class Deal:
     """One ask and what came of it, as the game keeps it (`Game.deal_log`).
     `promised` every seat that promised, in order; of those, `void` the ones
     the mover's own view said could not hold the card and `ignored` the ones
-    it had blacklisted or was under an embargo with, which it did not count; `accepted` the counted
+    it had blacklisted or was under an embargo with, or already held a deal
+    with this turn (`turn_deals`), which it did not count; `accepted` the counted
     promises it chose to spare for. Once the robber has moved: `hex` and
     `victim`, where it went and whom it robbed; `kept` and `broken`, the
     counted promisers it spared and did not. Once the turn opens to trading:
@@ -839,9 +854,9 @@ class ValueDealer:
       (`worth`): `value[spare_at[s]] + pay * gain(s, r) > value[pick]`, with
       the exchange priced where it would be made -- in the positions after
       the move that spares the seat, card by card of the steal, at the best
-      card back its own trading would take there, and at nothing where it
-      would take none. `pay` is its chance that a spared seat honours the
-      deal: the promise model's (`DealParams.promise`), else `DealParams.pay`.
+      card back there where it clears `DealParams.pay_floor`, and at nothing
+      where it does not, as `give_back` pays it. `pay` is its chance that a
+      spared seat honours the deal: the promise model's (`DealParams.promise`), else `DealParams.pay`.
       The exchange priced before the move picks which seats are priced so;
       only a seat whose promise it would take counts towards an ask. An ask
       for a card is worth the deal it expects to make: one, with the best of
@@ -854,9 +869,10 @@ class ValueDealer:
       worth most, where that beats the pick; one, since a deal is one
       exchange, priced as the ask priced it. A promiser it had not considered
       is valued then.
-    * **Offer back** (`give_back`): of the cards its own trading would take
-      the exchange for from a spared promiser, the one it minds least,
-      priced after the steal; none such, no offer.
+    * **Offer back** (`give_back`): of the cards it holds but the asked one,
+      the one it minds least, priced after the steal, where its gain clears
+      `DealParams.pay_floor`; none such, no offer. The deal fixed the
+      exchange, so its trading's own rules and floor are not asked.
 
     * **Answer** (`promise`, as the seat's `Answerer` under
       `DealParams(answerer="value")`): asked by another mover, the seat
@@ -939,8 +955,6 @@ class ValueDealer:
         pairs = [(t, r, y) for r, (give, seats) in wants.items() for t in seats
                  for y in range(NUM_RESOURCES) if y != r and hand[y] > 0]
         if pairs:
-            from .trading import clears_floor
-
             self.net.seat_at(game)
             gains = self.net.gains_many(view, [_swap(r, y) for _, r, y in pairs], [t for t, _, _ in pairs])
             priced: dict[tuple[int, int], list[tuple[float, int]]] = {}
@@ -953,10 +967,7 @@ class ValueDealer:
                 for t in seats:
                     plan.spare_at[t] = self._spare_move(game, plan, t)
                 self._value(game, seat, plan, {plan.pick, *[i for i in plan.spare_at.values() if i is not None]})
-            # Its own trading takes an exchange it offered that seat (the proposer's rules) that clears
-            # the veto's floor; the veto is this network, so `g` is the veto's own gain. Another card back
-            # than the proposer's own is asked of its trading (`_takes`).
-            veto = self._veto()
+            # A deal is asked only where its trading takes the exchange at the trade floor (`_approves`).
             for (t, r), options in priced.items():
                 i = plan.spare_at.get(t)
                 if i is None:
@@ -965,11 +976,7 @@ class ValueDealer:
                 for g, y in sorted(options, key=lambda o: (-o[0], o[1])):
                     if plan.value[i] + plan.pay * g <= plan.best:
                         break                     # the rest are worth less
-                    if y == give and (veto is None or veto is self.net):
-                        takes = veto is None or clears_floor(g, veto, view)
-                    else:
-                        takes = self._takes(game, seat, t, _swap(r, y), g)
-                    if takes:
+                    if self._approves(game, seat, t, r, y, g, give):
                         plan.gain[(t, r)] = g
                         break
             # Each pair the price before the move would ask for, priced as its promise would be.
@@ -1067,28 +1074,42 @@ class ValueDealer:
         return promise_model(self.params.promise).pay_chance(game, seat)
 
     def accept(self, game: "Game", seat: int, ask: "Ask", promised: Sequence[int]) -> tuple[int, ...]:
+        return self.spare(game, seat, [(s, ask.resource) for s in promised])
+
+    def spare(self, game: "Game", seat: int, pairs: Sequence[tuple[int, int]]) -> tuple[int, ...]:
+        """Of the promises `pairs`, each `(seat, card it owes)` -- this
+        move's, and the deals of earlier robber moves this turn still unpaid
+        (`turn_deals`) -- the one seat whose deal is worth most, where that
+        beats the best move; one, since a deal is one exchange."""
+        pairs = list(dict.fromkeys(pairs))
+        if not pairs:
+            return ()
         plan = self.plan(game, seat)
         if not plan.odds:                  # it had nothing to ask for: read the table now
             others = [s for s in range(game.num_players) if s != seat and s not in game.locked]
             self._beliefs(game.state(seat), plan, others)
-        fresh = [s for s in promised if s not in plan.spare_at]
+        # A promise counts as a deal only where the deal clears the trade floor, as an ask must.
+        unpriced = [p for p in pairs if p not in plan.gain]
+        if unpriced:
+            cleared = self._priced(game, seat, unpriced)
+            pairs = [p for p in pairs if p in plan.gain or p in cleared]
+            if not pairs:
+                return ()
+        fresh = [s for s in dict.fromkeys(t for t, _ in pairs) if s not in plan.spare_at]
         for s in fresh:
             plan.spare_at[s] = self._spare_move(game, plan, s)
         self._value(game, seat, plan, {plan.pick} | {plan.spare_at[s] for s in fresh if plan.spare_at[s] is not None})
-        r = ask.resource
-        unpriced = [(s, r) for s in dict.fromkeys(promised) if (s, r) not in plan.worth]
-        plan.worth.update(self._worths(game, seat, plan, unpriced))
-        worth = {s: plan.worth[(s, r)] for s in promised}
-        good = [s for s in promised if worth[s] > 0]
-        return (max(good, key=lambda s: (worth[s], -s)),) if good else ()
+        plan.worth.update(self._worths(game, seat, plan, [p for p in pairs if p not in plan.worth]))
+        good = [p for p in pairs if plan.worth[p] > 0]
+        return (max(good, key=lambda p: (plan.worth[p], -p[0], -p[1]))[0],) if good else ()
 
     def _worths(self, game: "Game", seat: int, plan: _Plan, pairs) -> dict[tuple[int, int], float]:
         """What sparing each seat `s` for its card of `r`, for each `(s, r)`
         of `pairs`, is worth over the best move: the exchange priced in the
         positions after the move that spares `s`, card by card of the steal,
-        at the best card back its own trading would take there, and at
-        nothing where it would take none. Every position of every pair is
-        priced in one batch (`_gains_across`)."""
+        at the best card back there where it clears `DealParams.pay_floor`,
+        and at nothing where it does not, as `give_back` pays it. Every
+        position of every pair is priced in one batch (`_gains_across`)."""
         out: dict[tuple[int, int], float] = {}
         asks, where = [], []
         banned = blacklist(game, seat) | closed(game, seat)
@@ -1106,12 +1127,9 @@ class ValueDealer:
                     where.append(((s, r), g, p, cards))
         for (pair, g, p, cards), gains in zip(where, self._gains_across(seat, asks)):
             s, r = pair
-            for y, gy in sorted(zip(cards, gains), key=lambda t: (-t[1], t[0])):
-                if gy <= -1.0:            # the gate's "cannot be covered"
-                    break
-                if self._takes(g, seat, s, _swap(r, y), gy):
-                    out[pair] += p * gy
-                    break
+            best = max(gains)
+            if best > self.params.pay_floor:                # never the gate's -1, "cannot be covered"
+                out[pair] += p * best
         self.net.seat_at(game)
         for (s, r), expected in out.items():
             if expected != -math.inf:
@@ -1131,6 +1149,60 @@ class ValueDealer:
             self.net.seat_at(g)
             out.append(self.net.gains_many(g.state(seat), received, counterparties))
         return out
+
+    def _approves(self, game: "Game", seat: int, t: int, r: int, y: int, gain: float, give: int | None) -> bool:
+        """Whether a deal with `t` -- its card of `r` for this seat's `y`, at
+        the network's gain `gain` before the robber moves -- is one this seat
+        makes: its trading takes the exchange at its trade floor, as any
+        offer of its own clears. Where the veto is this network and `y` is
+        the card its proposer gives (`give`), `gain` is the veto's own
+        reading and the floor is the whole check; otherwise its trading is
+        asked (`_takes`). The one approval a deal passes before the steal:
+        to be asked (`plan`) and to count once promised (`spare`)."""
+        from .trading import clears_floor
+
+        veto = self._veto()
+        if y == give and (veto is None or veto is self.net):
+            return veto is None or clears_floor(gain, veto, game.state(seat))
+        return self._takes(game, seat, t, _swap(r, y), gain)
+
+    def _priced(self, game: "Game", seat: int, pairs: Sequence[tuple[int, int]]) -> dict[tuple[int, int], float]:
+        """Each `(t, r)` of `pairs` this seat would make a deal of before the
+        robber moves (`_approves`), at the gain of the best card back it
+        holds that clears; pairs it would not are left out."""
+        view = game.state(seat)
+        hand = view.state.hands[seat]
+        cands = [(t, r, y) for t, r in pairs for y in range(NUM_RESOURCES) if y != r and hand[y] > 0]
+        if not cands:
+            return {}
+        self.net.seat_at(game)
+        gains = self.net.gains_many(view, [_swap(r, y) for _, r, y in cands], [t for t, _, _ in cands])
+        plan = self._plan
+        wants = plan.wants if plan is not None else {}
+        out: dict[tuple[int, int], float] = {}
+        for (t, r, y), g in sorted(zip(cands, gains), key=lambda c: (-c[1], c[0][2])):
+            if (t, r) in out or g <= -1.0:   # -1: cannot be covered
+                continue
+            if self._approves(game, seat, t, r, y, g, wants.get(r, (None,))[0]):
+                out[(t, r)] = g
+        return out
+
+    def _pays(self, gain: float) -> bool:
+        """Whether a spared promiser's deal is paid at `gain`, the network's
+        reading of the exchange after the steal: above `DealParams.pay_floor`.
+        The one approval a deal passes after the steal, both to choose the
+        card back (`give_back`) and to execute the promiser's acceptance of
+        it (`pays_back`)."""
+        return gain > self.params.pay_floor
+
+    def pays_back(self, game: "Game", seat: int, payer: int, resource: int, back: int) -> bool:
+        """Whether this seat executes `payer`'s acceptance of its deal's
+        exchange -- `payer`'s card of `resource` for its `back` -- read now,
+        as `give_back` chose it (`_pays`)."""
+        view = game.state(seat)
+        self.net.seat_at(game)
+        (gain,) = self.net.gains_many(view, [_swap(resource, back)], [payer])
+        return self._pays(gain)
 
     def _takes(self, g: "Game", seat: int, s: int, received: tuple[int, ...], gain: float) -> bool:
         """Whether its own trading takes `received` (signed towards it) from
@@ -1162,12 +1234,10 @@ class ValueDealer:
         self.net.seat_at(game)
         pairs = [(y, p) for y in choices for p in payers]
         gains = self.net.gains_many(view, [_swap(resource, y) for y, _ in pairs], [p for _, p in pairs])
-        gain = dict(zip(pairs, gains))
-        # Of the cards its own trading would take the exchange for from some payer, the best.
-        for y in sorted(choices, key=lambda k: (-max(g for (z, _), g in zip(pairs, gains) if z == k), k)):
-            if any(self._takes(game, seat, p, _swap(resource, y), gain[(y, p)]) for p in payers):
-                return y
-        return None
+        best = {y: max(g for (z, _), g in zip(pairs, gains) if z == y) for y in choices}
+        # The deal fixed the exchange: only the card back is chosen, held to the payment floor.
+        y = max(choices, key=lambda k: (best[k], -k))
+        return y if self._pays(best[y]) else None
 
     def promise(self, game: "Game", seat: int, ask: "Ask", promised: Sequence[int]) -> bool:
         if not targeted(game, seat, ask, promised, robber_model(self.params.model)):
@@ -1286,6 +1356,55 @@ def holds(state: GameState, seat: int, resource: int) -> bool:
     return state.hands[seat][resource] > 0
 
 
+def turn_deals(deals: Sequence[Deal], mover: int, turn: int) -> tuple[dict[int, str], list[tuple[Deal, int]]]:
+    """The deals `mover` made at earlier robber moves of turn `turn` that
+    still reach its next one, as a table reads "no block" for the whole
+    turn: `bound`, `{seat: kind}` for every promiser that has paid, which
+    the move keeps as a promise; and `open`, `(deal, seat)` for every spared
+    promiser not yet offered the exchange, a promise the mover holds without
+    asking again and weighs like a fresh one (`spare_for`)."""
+    mine = [d for d in deals if d.mover == mover and d.turn == turn and d.hex is not None]
+    bound = {taker: d.kind for d in mine for taker, _ in d.paid}
+    open_ = [(d, s) for d in mine if d.offered is None and not d.unpaid for s in d.kept if s not in bound]
+    return bound, open_
+
+
+def spare_for(game: "Game", mover: int, gate: object, ask: "Ask | None", counted: Sequence[int],
+              open_: Sequence[tuple[Deal, int]]) -> dict[int, str]:
+    """Whom `mover`'s robber move spares, `{seat: kind}`: of this move's
+    counted promises for `ask` and the open deals carried from earlier this
+    turn (`turn_deals`), the ones its dealer picks -- a value dealer the one
+    worth most over the best move (`ValueDealer.spare`), breaking a carried
+    deal where another move pays more; else its own `deal_accept` or
+    `default_accept` for this move's, keeping every carried one."""
+    dealer = getattr(gate, "deal_dealer", None)
+    kinds = {s: d.kind for d, s in open_}
+    if ask is not None:
+        kinds.update((s, ask.kind) for s in counted)
+    if dealer is not None:
+        pairs = [(s, d.resource) for d, s in open_]
+        if ask is not None:
+            pairs += [(s, ask.resource) for s in counted]
+        return {s: kinds[s] for s in dealer.spare(game, mover, pairs)}
+    taken: tuple[int, ...] = ()
+    if ask is not None and counted:
+        accept = getattr(gate, "deal_accept", None)
+        taken = accept(game, mover, ask, counted) if accept is not None else \
+            default_accept(game, mover, gate, ask, counted)
+    return {s: kinds[s] for s in dict.fromkeys([*(s for _, s in open_), *(s for s in counted if s in set(taken))])}
+
+
+def hit_carried(state: GameState, open_: Sequence[tuple[Deal, int]], target: int, victim: int | None) -> None:
+    """The robber move to `target`, robbing `victim`, as it falls on the
+    open deals carried into it: a promiser it hits is `broken` and no longer
+    `kept`, and is owed no exchange."""
+    on = occupants(state, target)
+    for d, s in open_:
+        if s in d.kept and (s in on if d.kind == NO_BLOCK else s == victim):
+            d.kept = tuple(t for t in d.kept if t != s)
+            d.broken = (*d.broken, s)
+
+
 def run_deal_event(game: "Game") -> None:
     """The mover's ask, the table's promises and the mover's choice of whom
     to spare, as the robber phase opens: called by the engine on every entry
@@ -1302,10 +1421,15 @@ def run_deal_event(game: "Game") -> None:
     params = deal_params_of(gate)
     if params is None or not params.ask:
         return
+    bound, open_ = turn_deals(game.deal_log, mover, game.turns)
+    game.robber_promised = tuple(bound.items())
+    game.carried_deals = open_
     dealer = getattr(gate, "deal_dealer", None)
     hook = dealer.ask if dealer is not None else getattr(gate, "deal_ask", None)
     ask = hook(game, mover) if hook is not None else default_ask(game, mover, gate, params)
     if ask is None:
+        if open_:
+            game.robber_promised = tuple({**bound, **spare_for(game, mover, gate, None, (), open_)}.items())
         return
     if ask.kind not in params.kinds:
         raise ValueError(f"seat {mover} asked for a {ask.kind} deal it does not make")
@@ -1324,18 +1448,15 @@ def run_deal_event(game: "Game") -> None:
 
     view = game.state(mover)
     card = tuple(int(r == ask.resource) for r in range(NUM_RESOURCES))
-    banned = blacklist(game, mover) | closed(game, mover)
+    banned = blacklist(game, mover) | closed(game, mover) | set(bound) | {s for _, s in open_}
     deal = Deal(game.turns, mover, ask.kind, ask.resource, promised=tuple(promised),
                 void=tuple(s for s in promised if not has_room(view, s, card)),
                 ignored=tuple(s for s in promised if s in banned and has_room(view, s, card)))
     game.deal_log.append(deal)
     counted = deal.counted
-    if counted:
-        accept = dealer.accept if dealer is not None else getattr(gate, "deal_accept", None)
-        taken = accept(game, mover, ask, counted) if accept is not None else \
-            default_accept(game, mover, gate, ask, counted)
-        deal.accepted = tuple(s for s in counted if s in set(taken))
-    game.robber_promised = tuple((s, ask.kind) for s in deal.accepted)
+    spared = spare_for(game, mover, gate, ask, counted, open_)
+    deal.accepted = tuple(s for s in counted if s in spared)
+    game.robber_promised = tuple({**bound, **spared}.items())
     game.open_deal = deal
 
 
@@ -1346,9 +1467,12 @@ def close_deal(game: "Game", target: int, victim: int | None) -> None:
     deal = game.open_deal
     game.open_deal = None
     game.robber_promised = ()
+    state = game._state
+    hit_carried(state, game.carried_deals, target, victim)
+    game.deal_payments = [d for d in game.deal_payments if d.kept]
+    game.carried_deals = []
     if deal is None:
         return
-    state = game._state
     deal.hex, deal.victim = target, victim
     on = occupants(state, target)
     kept, broken = [], []
@@ -1390,15 +1514,67 @@ class _Honouring:
         return getattr(object.__getattribute__(self, "gate"), name)
 
 
+def payment_pick(game: "Game", gate: object, mover: int, deal: Deal, responses: Sequence) -> int | None:
+    """Which of `responses` to the deal's payment offer `mover` executes as
+    the deal's payment: the first spared promiser's acceptance of the deal's
+    own exchange (`Deal.offered` for `Deal.resource`) that its hand still
+    covers, where its value dealer still pays it (`ValueDealer.pays_back`,
+    the payment floor `give_back` chose the card at); a mover without one
+    pays whoever it spared. `None` for no such answer: any other answer is
+    an ordinary taker of its offer, for its trading to pick. The payment is
+    approved here and nowhere else, so the trading's own floor and rules,
+    which the deal already cleared before the steal, are not asked again."""
+    from .trading import RESPONSE_ACCEPT
+
+    if deal.offered is None:
+        return None
+    exchange = _swap(deal.resource, deal.offered)
+    if not holds(game._state, mover, deal.offered):
+        return None
+    dealer = getattr(gate, "deal_dealer", None)
+    pays = getattr(dealer, "pays_back", None)
+    for i, r in enumerate(responses):
+        if (r.kind == RESPONSE_ACCEPT and r.seat in deal.kept and r.bundle is not None
+                and tuple(r.bundle) == exchange
+                and (pays is None or pays(game, mover, r.seat, deal.resource, deal.offered))):
+            return i
+    return None
+
+
+class _Paying:
+    """The mover's gate for the deal's offer: it picks a spared promiser's
+    acceptance as the deal's payment (`payment_pick`) and any other answer
+    as `gate` would. Every other name is `gate`'s."""
+
+    __slots__ = ("gate", "game", "deal")
+
+    def __init__(self, gate: object, game: "Game", deal: Deal) -> None:
+        object.__setattr__(self, "gate", gate)
+        object.__setattr__(self, "game", game)
+        object.__setattr__(self, "deal", deal)
+
+    def pick(self, view, responses):
+        from .trading import default_pick
+
+        paid = payment_pick(self.game, self.gate, view.perspective, self.deal, responses)
+        if paid is not None:
+            return paid
+        own = getattr(self.gate, "pick", None)
+        return own(view, responses) if own is not None else default_pick(self.gate, view, responses)
+
+    def __getattr__(self, name: str):
+        return getattr(object.__getattribute__(self, "gate"), name)
+
+
 def settle_deals(game: "Game") -> None:
     """Once the mover's turn is open to trading, each deal whose robber move
     spared a counted promiser goes to the table as an ordinary offer
     (`hexset.trading.resolve_offer`): the asked card for the one the mover
     offers back (`deal_return`). The spared promisers answer by honouring
     the deal or not (`_Honouring`), every other seat as it answers any
-    offer, and the mover takes whichever answer its own trading picks, a
-    promiser's or not. A spared promiser that does not take it is
-    `Deal.rejected`."""
+    offer, and the mover takes a promiser's acceptance as the payment
+    (`payment_pick`), any other answer as its own trading picks. A spared
+    promiser that does not take it is `Deal.rejected`."""
     from .game import Phase
     from .trading import Offer, resolve_offer
 
@@ -1421,6 +1597,7 @@ def settle_deals(game: "Game") -> None:
         able = {s for s in deal.kept if holds(game._state, s, deal.resource)}
         said: dict[int, str] = {}
         answering = list(gates)
+        answering[deal.mover] = _Paying(gate, game, deal)
         for s in deal.kept:
             answering[s] = _Honouring(gates[s], game, deal, said)
         trades = resolve_offer(game, answering, Offer(deal.mover, _swap(deal.resource, back)))
@@ -1442,6 +1619,6 @@ __all__ = [
     "register_robber_model", "robber_model", "candidate_hexes", "weights_on", "softmax", "hit_chances",
     "targeted", "toward", "promise_value", "default_answer", "answer", "deal_params_of", "Dealing", "Deal", "default_ask",
     "default_accept", "default_return", "keep_promises", "holds", "run_deal_event", "close_deal",
-    "settle_deals", "blacklist", "closed", "MOVERS", "deal_seed", "Answerer", "register_answerer", "answerer_for",
+    "settle_deals", "payment_pick", "turn_deals", "spare_for", "hit_carried", "blacklist", "closed", "MOVERS", "deal_seed", "Answerer", "register_answerer", "answerer_for",
     "STEAL_SAMPLES", "value_net", "ValueDealer", "PromiseModel", "register_promise_model", "promise_model",
 ]

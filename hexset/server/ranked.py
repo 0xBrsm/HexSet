@@ -98,16 +98,26 @@ def entrant(client: dict) -> tuple[str, str | None]:
     return client["id"], client.get("version")
 
 
+def _bot_id(bot: dict) -> str:
+    """A bot seat's id, from its journal entry: `bot:<name>`. A model
+    journalled before entries dropped the version (`<name>-<version>`) is
+    the same bot as its name now, so its meetings still count."""
+    name, version = bot["name"], bot.get("version")
+    if version and name.endswith(f"-{version}"):
+        name = name[: -len(version) - 1]
+    return f"bot:{name}"
+
+
 def _bot_entrant(bot: dict) -> tuple[str, str | None]:
     """A bot seat's pair-cap unit, from its journal entry (`name`, `version`)."""
-    return f"bot:{bot['name']}", bot.get("version")
+    return _bot_id(bot), bot.get("version")
 
 
 def _player(seat_client: dict | None, bot: dict | None) -> str | None:
     """Who a ranked seat is for the meeting counts: a client by its id, a bot
-    by its entry name."""
+    by its id (`_bot_id`)."""
     if bot is not None:
-        return f"bot:{bot['name']}"
+        return _bot_id(bot)
     if seat_client and seat_client.get("id"):
         return seat_client["id"]
     return None
@@ -222,7 +232,10 @@ class RankedQueue:
 
     def _enter(self) -> None:
         """A ticket for each server entrant at each game type it is offered
-        at, where it has none waiting and no ranked game there in play."""
+        at, where it has none waiting at the version it plays there now and no
+        ranked game there in play. A waiting ticket at another version (its
+        model file was replaced), or at a game type it is no longer offered
+        at, is withdrawn: it would wait under the old version's pair cap."""
         entries = self.tables.config.ranked_entrants
         if not entries:
             return
@@ -230,13 +243,18 @@ class RankedQueue:
 
         catalogue = model_catalogue()
         with self._changed:
-            waiting = {(t.bot, t.game_type) for t in self._tickets.values() if t.bot and t.match is None}
+            waiting = {(t.bot, t.game_type): t for t in self._tickets.values() if t.bot and t.match is None}
         for entry in entries:
-            version = bot_profile(entry).get("version")
             for game_type in GAME_TYPES:
-                if entry not in catalogue.get(game_type, {}) or (entry, game_type) in waiting:
-                    continue
-                if self.tables.in_ranked_play(entry, game_type):
+                offered = entry in catalogue.get(game_type, {})
+                version = bot_profile(entry, game_type).get("version") if offered else None
+                held = waiting.get((entry, game_type))
+                if held is not None:
+                    if offered and held.client.get("version") == version:
+                        continue
+                    with self._changed:
+                        self._tickets.pop(held.id, None)
+                if not offered or self.tables.in_ranked_play(entry, game_type):
                     continue
                 client = {"id": f"bot:{entry}", **({"version": version} if version else {})}
                 ticket = Ticket(secrets.token_urlsafe(18), game_type, client, bot=entry)

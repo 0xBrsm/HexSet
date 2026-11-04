@@ -33,6 +33,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--rankings-min-games` | `10` | Ranking rows that played fewer games are not shown |
 | `--ranked-bot` | none | The opponent the [ranked queue](api.md#ranked-play) seats in a table's one seat no player fills, as the opponent picker names it; it never takes two seats at a table. Without one, a ranked table waits for players to fill it |
 | `--ranked-entrant` | none | A server bot, as the opponent picker names it, that plays [ranked games](api.md#ranked-play) itself: one at a time at each game type it is offered at, ranked as `bot:<name>`. Repeat for more; a name the server does not offer, or the `--ranked-bot`, stops it at start |
+| `--preset-modes` | none | `NAME=TYPE[,TYPE...]`: offer the preset `NAME` at these game types only, as a model file's `modes` declare its own; at other game types the picker leaves it out and seating it is a 400. Repeat for more presets; a name that is not a listed preset, or a game type the server does not deal, stops it at start. A preset not named is offered at every game type |
 | `--api-keys` | none | A JSON file of API keys, `{"<key>": {"name": "<holder>", "games_per_period": <n>}}`: a deal sent with one on `X-HexSet-Key` counts against that key's `games_per_period` (`0` is no limit) instead of its address's `--games-per-period`. Read at start |
 
 Behind a reverse proxy or tunnel, name its header with `--forwarded-header`,

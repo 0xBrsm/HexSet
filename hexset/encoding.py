@@ -66,6 +66,8 @@ __all__ = [
     "global_columns",
     "to_frame",
     "from_frame",
+    "SeatFrame",
+    "seat_frame",
     "encode_batch",
     "encode",
 ]
@@ -265,6 +267,54 @@ def to_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
     direction still type-checks and silently swaps whose number is whose."""
     players = len(values)
     return tuple(values[(seat + i) % players] for i in range(players))
+
+
+@dataclass(frozen=True)
+class SeatFrame:
+    """The seats a network's seat axis counts, `seats[0]` the perspective,
+    the rest in turn order after it, at a table dealt `dealt` seats.
+
+    A network built for every dealt seat counts them all (`to_frame`'s
+    rotation). One built for fewer seats than were dealt -- a two-seat net at
+    a table dealt four with two seats retired -- counts the live seats alone,
+    and a retired seat has no slot. Robber victims are counted the same way:
+    a seat's slot is its position here, and "no victim" is the slot after the
+    last (`relative`, `absolute`)."""
+
+    seats: tuple[int, ...]
+    dealt: int
+
+    def relative(self, seat: int) -> int:
+        """`seat`'s slot, or `len(seats)` for a seat outside the frame (the
+        table's "no victim", `dealt`)."""
+        return self.seats.index(seat) if seat in self.seats else len(self.seats)
+
+    def absolute(self, slot: int) -> int:
+        """The board seat in `slot`, or `dealt` ("no victim") past the last."""
+        return self.seats[slot] if slot < len(self.seats) else self.dealt
+
+    def to_board(self, values: Sequence[float]) -> tuple[float, ...]:
+        """A frame-ordered vector back in board-seat order over every dealt
+        seat, 0.0 for a seat outside the frame."""
+        out = [0.0] * self.dealt
+        for slot, seat in enumerate(self.seats):
+            out[seat] = float(values[slot])
+        return tuple(out)
+
+
+def seat_frame(game, seat: int, players: int) -> SeatFrame:
+    """`seat`'s frame for a network that counts `players` seats (`SeatFrame`):
+    every dealt seat when `players` is the dealt count, else the live seats,
+    which must number `players` and include `seat`."""
+    dealt = game._state.num_players
+    if players == dealt:
+        return SeatFrame(tuple((seat + i) % dealt for i in range(dealt)), dealt)
+    live = [s for s in range(dealt) if s not in game.locked]
+    if len(live) != players or seat not in live:
+        raise ValueError(f"a {players}-seat frame needs {players} live seats including {seat}; "
+                         f"this table deals {dealt} with live seats {live}")
+    k = live.index(seat)
+    return SeatFrame(tuple(live[(k + i) % players] for i in range(players)), dealt)
 
 
 def from_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:

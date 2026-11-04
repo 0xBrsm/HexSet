@@ -5,6 +5,127 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.25.0
+
+### Added
+
+- **Paired rollouts play contract-9 copies on the native engine.** Where the
+  native extension is built and the searching policy declares
+  `native_contract` (`hexn`'s `Policy9`, `DecisionPolicy` for a graph that
+  asks no double turn), `hexset.rollout.RolloutBatch` holds each world's
+  copy natively (`hexset.native.playout.NativeCopy`): built once per world,
+  forked per candidate, and played on with native legality, moves, chance
+  callbacks, observations and decision tensors. Every decision, playout
+  outcome and value read is bit for bit the one the Python engine gives; a
+  position the native engine refuses stays a Python copy.
+  `hexset.decisions.inside`, `decision_at` and `topology_of` and
+  `hexset.contract9.observation_row` state a position for a policy whether
+  it is a `Game` or a native copy.
+
+- **A committee of model files as one seat.** A file whose metadata names
+  `committee` (other `.onnx` files beside it, joined by `+`) is played as a
+  product-of-experts vote over itself and those members
+  (`hexset.clients.committee.Committee`): every legal move is scored by each
+  member's prior and the move with the highest mean log prior is played. The
+  committee's prior, which a search reads, is the product renormalised; its
+  values are the members' averaged seat by seat. The file itself carries the
+  seat's name, game types, player count, gate and search; members may be of
+  any contract, and a member naming a committee of its own, or one missing
+  beside the file, is refused at load.
+
+- **Contract 9d.1: each seat's production and bank rates.** `encode9(...,
+  "9d.1")` is contract 9d with ten columns appended to each seat token, 32
+  wide: the seat's expected cards a roll by resource at the dice's long-run
+  odds (`hexset.contract9.seat_production`: each building's hexes, a city
+  twice, nothing from the robber's hex) and its bank rate by resource
+  (`hexset.economy.trade_ratios`, over 4). Like 9d it is the two-seat
+  observation and is refused at another size; 9d's columns are unchanged,
+  so a 9d net can start from 9d.1's first 22. The native encoder writes it
+  byte for byte, and the server records `9d.1` as a known contract.
+
+- **Contract 9d reads a table dealt four with two seats retired by its live
+  seats.** A two-seat net now plays the table a duel is dealt at elsewhere,
+  four seats with two retired, as it plays a table dealt two: `encode9(...,
+  "9d")` reads the two live seats, the perspective first, and nothing of the
+  retired ones. `hexset.encoding.SeatFrame` and `seat_frame(game, seat,
+  players)` name the seats a network's seat axis counts: every dealt seat for
+  a net built for all of them, else the live seats. `hexset.decisions.
+  frame_for(game, seat, space)` gives a space's frame; `flat_index` and
+  `option_of` take an optional `frame`, so a robber victim is counted over the
+  live seats where the space is built for fewer seats than were dealt
+  ("no victim" is the slot after the last). `SeatFrame.to_board` turns a
+  frame-ordered value back into board-seat order with retired seats at zero,
+  and `hexset.clients.onnxbot`'s decision policy uses it. A `network` seat
+  accepts a net built for the table's live seats as well as its dealt ones.
+  A table with every seat live reads as before.
+
+- **Every gate hears how each round closed.** `trading.publish_round` calls
+  `observe_round(turn=, offer=, answers=, traded_with=)` on every gate that has
+  one when a round closes: the offer as broadcast, each answering seat's final
+  answer and the seat the actor traded with, or `None`, all public at the
+  table. The engine's round, the served table and a hosted `Seat` call it; a
+  `Seat` also passes on other seats' rounds its host reports
+  (`Seat.observed_round`). `watch` now reaches a `TradesBy` seat's trader as
+  well as its mover, so a trader may keep its own account of the game.
+
+- **A gate puts up "this for any card" itself.** A bundle in a gate's menu
+  that only gives goes up as an open offer, `Offer(actor, received, 1)`, the
+  answerer naming the card it gives back, at a table that takes open offers
+  (elsewhere it is not on the menu). It counts as one offer and is never
+  folded; `offer_slots` counts only a folded ask ("any card for", `any < 0`) as
+  the asks it stands for.
+
+- **Contract `9d` describes two-seat observations.** The reduced layout keeps
+  exact hands, perspective development-card facts and public next-roll odds,
+  and refuses tables with any other seat count. The encoder, record profiles
+  and server contract validation accept it alongside `9` and `9.1`.
+
+- **Optional native game lanes preserve the engine's decision and record contracts.**
+  `hexset.native` owns no-trade state, ledgers, rules, legality and contract-9
+  encoding for two or four seats. `hexset.gym.native` exposes immutable visible
+  requests and separate referee targets, applies complete decisions, and
+  retires a lane only after its mandatory whole-record keep callback returns.
+  Backend availability and supported state are checked before play; unsupported
+  configurations continue through the Python engine.
+
+- **Road-network queries use a native integer core when available.**
+  Longest trails, hypothetical extensions, distance to Longest Road and
+  network reach use the same rules and path ordering as the Python queries.
+  Installation builds the extension when a C++ compiler is available;
+  installations without it continue to use Python.
+
+- **A server offers a preset at chosen game types only.**
+  `--preset-modes NAME=TYPE[,TYPE...]` limits the preset `NAME` to those
+  game types, as a model file's `modes` limit the file: elsewhere the picker
+  and `GET /api/models` leave it out and seating it is a 400. A preset not
+  named is offered at every game type, as before.
+
+### Changed
+
+- **A native state copies its chance streams by generator state.**
+  `NativeState` and `NativeState.fork` copy each `random.Random` in the
+  game's `(rng, chance)` by its state rather than through a deep copy of
+  its state tuple; the streams are the same. The canonical-topology check
+  at import runs once per topology.
+
+### Fixed
+
+- **A checkpoint built for a game type's live seats spawns at a table dealt
+  more.** `onnxbot.spawn` refused a two-seat net at a duel table dealt four
+  with two retired, though the network seat plays it there. It now accepts a
+  checkpoint whose seat count the table's `game_type` plays
+  (`onnxbot.seats_fit`), as the seat's own check does at play.
+
+- **A duel's tree search scores over the two seats playing.** A duel is
+  dealt as four seats with two retired, and `hexset.mcts`'s `relative`
+  stance read every value over all four: an even game scored 1/3, a loss
+  -1/3, and a move the tree had not yet tried (scored 0) started below even,
+  at what a 25% win chance reads. It now reads over `live_seats` (the seats
+  less `Game.locked`): a duel scores `2p - 1`, 0 even, a loss -1, as does the
+  in-flight visit a wave counts against its edge. A table with no retired
+  seat scores exactly as before.
+
+
 ## 1.24.0
 
 ### Breaking

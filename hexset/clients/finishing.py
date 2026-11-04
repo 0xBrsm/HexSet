@@ -22,6 +22,8 @@ import numpy as np
 from hexset.actions import apply, legal_actions
 from hexset.game import Game, Phase, imagine, pending_free_roads, to_move
 
+__all__ = ["Finishing", "inside", "finished", "MAX_FINISHING_MOVES"]
+
 # A setup turn is one road after its settlement; a Road Building card two
 # roads after the card. The bound only guards a policy whose moves never
 # leave the decision.

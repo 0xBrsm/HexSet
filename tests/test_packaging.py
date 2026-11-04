@@ -21,7 +21,7 @@ PACKAGE_ROOTS = {"hexset": REPO_ROOT / "hexset"}
 # asked for -- passing here and failing from a clean checkout.
 NOT_IN_A_CLEAN_CHECKOUT = shutil.ignore_patterns(
     ".git", "*.egg-info", "build", "dist", "__pycache__", ".venv", "venv",
-    ".pytest_cache", "*.onnx",
+    ".pytest_cache", "*.onnx", "*.so", "*.pyd",
 )
 
 
@@ -36,7 +36,7 @@ def built_wheel(tmp_path_factory) -> Path:
     workspace = tmp_path_factory.mktemp("packaging")
     clean = workspace / "checkout"
     clean.mkdir()
-    for name in ("pyproject.toml", "README.md", "LICENSE"):
+    for name in ("pyproject.toml", "setup.py", "README.md", "LICENSE"):
         shutil.copy2(REPO_ROOT / name, clean / name)
     for name, root in PACKAGE_ROOTS.items():
         shutil.copytree(root, clean / name, ignore=NOT_IN_A_CLEAN_CHECKOUT)
@@ -111,3 +111,23 @@ def test_the_wheel_carries_nothing_from_outside_the_package(packaged_names):
     prefixes = tuple(f"{name}/" for name in PACKAGE_ROOTS)
     strays = sorted(n for n in packaged_names if not n.startswith(prefixes))
     assert not strays, f"unexpected files in the wheel: {strays}"
+
+
+def test_a_compiled_wheel_loads_native_queries_as_the_default(built_wheel, packaged_names, tmp_path):
+    if shutil.which("c++") is None and shutil.which("g++") is None:
+        pytest.skip("native wheel verification requires a C++ compiler")
+    assert any(name.startswith("hexset/_road_native.") and name.endswith((".so", ".pyd"))
+               for name in packaged_names), "compiler was available but the native build failed"
+    installed = tmp_path / "installed"
+    with zipfile.ZipFile(built_wheel) as archive:
+        archive.extractall(installed)
+    code = """import sys
+sys.path.insert(0, sys.argv[1])
+from hexset import roads
+assert roads._native is not None
+packed = roads._native.topology(((0, 1), (1, 2)), 3)
+assert roads._native.longest(packed, [0, 0], [-1, -1, -1], 0, None) == 2
+"""
+    result = subprocess.run([sys.executable, "-I", "-c", code, str(installed)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

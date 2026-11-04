@@ -322,7 +322,8 @@ def seat_at(bot: object, game: Game) -> None:
 
 def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> None:
     """`seen(game, actor, action, viewer)` on every part of `bot` that has
-    one, walked as `seat_at` walks it: `actor`'s `action` at `game`, before it
+    one, walked as `seat_at` walks it (a `TradesBy`'s mover and its trader):
+    `actor`'s `action` at `game`, before it
     is applied, as seen from `viewer`'s seat. What a bot that models the
     other seats from their moves (`hexset.clients.conditioned.Opponents`)
     learns from; other bots see nothing."""
@@ -331,6 +332,8 @@ def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> N
         return
     if isinstance(bot, TradesBy):
         watch(bot.mover, game, actor, action, viewer)
+        if bot.trader is not bot.mover:
+            watch(bot.trader, game, actor, action, viewer)
         return
     if isinstance(bot, Handoff):
         watch(bot.first, game, actor, action, viewer)
@@ -345,8 +348,10 @@ def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> N
 
 def watches(bot: object) -> bool:
     """Whether any part of `bot` has a `seen` (`watch`): a table asks no one else."""
-    if isinstance(bot, (Closes, TradesBy)):
+    if isinstance(bot, Closes):
         return watches(bot.mover)
+    if isinstance(bot, TradesBy):
+        return watches(bot.mover) or (bot.trader is not bot.mover and watches(bot.trader))
     if isinstance(bot, Handoff):
         return watches(bot.first) or watches(bot.second)
     return getattr(type(bot), "seen", None) is not None

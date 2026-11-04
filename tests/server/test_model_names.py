@@ -145,3 +145,31 @@ def test_a_file_may_declare_a_profile_held_to_a_clients_rules(models, capsys):
     assert api.bot_profile("mynet") == {"version": "1.0", "owner": "octocat",
                                             "url": "https://example.org/mynet", "description": "A small net."}
     assert api.bot_profile("test-trader") == {} and api.bot_profile("nothing") == {}
+
+
+def test_a_preset_is_offered_only_at_the_game_types_preset_modes_names(models, monkeypatch):
+    monkeypatch.setattr(api, "PRESET_MODES", {"test-trader": ("standard",)})
+    catalogue = model_catalogue()
+    assert "test-trader" in catalogue["standard"]
+    assert "test-trader" not in catalogue["duel-variant"]
+    others = set(api.registered_presets()) - {"test-trader"}
+    assert others <= set(catalogue["duel-variant"]), "a preset not named is offered everywhere"
+    assert "test-trader" in listed_models()
+    registry = new_tables()
+    with pytest.raises(ApiError, match="test-trader does not play duel-variant games"):
+        registry.handle("POST", "/api/games", {"bots": ["test-trader"], "game_type": "duel-variant"}, None)
+
+
+def test_preset_modes_are_held_to_listed_presets_and_dealt_game_types():
+    import argparse
+
+    from hexset.server.web import preset_modes
+
+    parser = argparse.ArgumentParser()
+    held = preset_modes(parser, ["test-trader=standard, standard"])
+    assert held == {"test-trader": ("standard",)}
+    for bad in ("test-trader", "test-trader=", "no-such-bot=standard", "test-trader=fiveseat"):
+        with pytest.raises(SystemExit):
+            preset_modes(parser, [bad])
+    with pytest.raises(SystemExit):
+        preset_modes(parser, ["test-trader=standard", "test-trader=duel-variant"])

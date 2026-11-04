@@ -187,6 +187,10 @@ def default_models_dir() -> Path:
 
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR") or default_models_dir())
 
+# Preset -> the game types it is offered at (the server's `--preset-modes`).
+# A preset not named here is offered at every game type.
+PRESET_MODES: dict[str, tuple[str, ...]] = {}
+
 # The base board seats four, so a game does too, whatever its claimed seats: a
 # served checkpoint hard-rejects a mismatched player count.
 MAX_SEATS = 4
@@ -469,7 +473,8 @@ def model_catalogue() -> dict[str, dict[str, Offered]]:
     """Game type -> entry -> what that entry seats there, for every
     `hexset.rules.GAME_TYPES` entry: every preset a runtime registered
     (`hexset.arena.registered_presets`, so the server's `--runtime`, and
-    catanatron where its extra is installed) at every type, then each
+    catanatron where its extra is installed) at every type, or at those
+    `PRESET_MODES` names for it (`--preset-modes`), then each
     `*.onnx` under `MODELS_DIR` under the `name` it declares, at the game
     types its `modes` declare (`hexset.clients.onnxmeta`; the standard game
     when it declares none). The filename plays no part, and the `version` it
@@ -483,7 +488,10 @@ def model_catalogue() -> dict[str, dict[str, Offered]]:
     every call, so a new file needs no restart."""
     catanatron_seatable()  # registers its preset where the extra is installed
     presets = {name: Offered(name, profile=tuple(preset_profile(name).items())) for name in registered_presets()}
-    catalogue = {kind: dict(presets) for kind in GAME_TYPES}
+    catalogue = {
+        kind: {name: offered for name, offered in presets.items() if kind in PRESET_MODES.get(name, (kind,))}
+        for kind in GAME_TYPES
+    }
     files: dict[tuple[str, str], list[tuple[Path, dict[str, str]]]] = {}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         try:

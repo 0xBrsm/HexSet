@@ -31,6 +31,7 @@ from hexset.trading import (
     RESPONSE_PASS,
     Offer,
     Response,
+    Trade,
     TradeParams,
     bundle,
 )
@@ -515,3 +516,18 @@ def test_the_hosts_open_offer_rule_survives_a_rebuilt_game():
     seat.allow_open_offers(False)
     seat.resync(observe(seat.game, 0))
     assert seat.game.open_offers is False
+
+
+def test_a_seat_reports_its_own_round_and_the_rounds_its_host_reports():
+    gate = Script((1, bundle(wood=-1, ore=1)), {})
+    gate.rounds = []
+    gate.observe_round = lambda **event: gate.rounds.append(event)
+    true = _main()
+    seat = Seat(observe(true, 0), 0, gate)
+    offered = seat.offer()
+    seat.close_round(None)
+    assert gate.rounds[0]["offer"] == offered and gate.rounds[0]["traded_with"] is None
+    theirs = Offer(2, bundle(ore=-1, sheep=1))
+    seat.observed_round(theirs, [Response(0, RESPONSE_PASS), Response(1, RESPONSE_ACCEPT, theirs.received)],
+                        Trade(2, 1, theirs.received))
+    assert gate.rounds[1] == {"turn": true.turns, "offer": theirs, "answers": {0: "pass", 1: "accept"}, "traded_with": 1}

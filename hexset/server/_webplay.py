@@ -897,6 +897,7 @@ class GameSession:
             publish_trade_event(
                 self.game, self._gates(), round_.hand_sizes, () if traded is None else (traded,)
             )
+            trading.publish_round(self.game, self._gates(), offer, round_.responses, traded)
         self.open_round = None
 
     def answer_round(self, seat: int, actor: int, received: Bundle, kind: str, bundle: Bundle | None) -> None:

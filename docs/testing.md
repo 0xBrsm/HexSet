@@ -8,6 +8,13 @@ pip install -e ".[test]"
 pytest
 ```
 
+Installation builds the optional C++ road-query extension when a compiler
+is available. A source checkout can build it with
+`python setup.py build_ext --inplace`. `tests/test_roads_native.py` compares
+its trails, extension paths and reach distances with the Python queries;
+it skips without the extension. The rest of the engine suite exercises
+whichever implementation is installed.
+
 ## Markers
 
 `pyproject.toml` sets `addopts = -m "not slow"`, so the default run skips

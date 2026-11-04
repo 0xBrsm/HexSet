@@ -31,6 +31,7 @@ from hexset.mcts import (
     calibrate_own,
     draws_hidden,
     lost_value,
+    live_seats,
     sampled_children,
     side_value,
     visit_policy,
@@ -870,7 +871,7 @@ def _select_as_arrays(search: Search, node: Node) -> int:
             search.rank_rows(node.totals, node.mover)
             if search.stance == "paranoid"
             else node.ranked
-        ) + lost_value(search.stance, node.totals.shape[1]) * node.virtual
+        ) + lost_value(search.stance, live_seats(node.game)) * node.virtual
     means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
     bonus = search.exploration * node.prior * np.sqrt(max(total, 1e-8)) / (1 + counts)
     return int(np.argmax(means + bonus))
@@ -893,3 +894,47 @@ def test_select_scores_edges_as_the_array_form_does(stance, against):
         node.totals = rng.normal(size=(n, 4)) * node.visits[:, None]
         node.ranked = rng.normal(size=n) * node.visits
         assert search._select(node) == _select_as_arrays(search, node)
+
+
+def a_duel(seed: int = 0):
+    """A duel as HexSet deals one: four seats, the last two retired."""
+    rng = random.Random(seed)
+    return start(random_base_board(rng), 4, rng, locked=(2, 3))
+
+
+@pytest.mark.parametrize("game,seats", [(a_duel, 2), (a_game, 4)])
+def test_relative_scores_read_over_the_seats_still_playing(game, seats):
+    search = Search(Stub(), stance="relative", rng=random.Random(1))
+    node = search._node(imagine(game(), search.rng))
+    me = node.mover
+    other = next(s for s in range(4) if s != me and s not in node.game.locked)
+    assert live_seats(node.game) == seats
+
+    def credited(vector):
+        node.ranked[:] = 0.0
+        search._credit(node, 0, np.asarray(vector, dtype=np.float64), 1)
+        return float(node.ranked[0])
+
+    even = [0.0] * 4
+    for s in range(4):
+        if s not in node.game.locked:
+            even[s] = 1.0 / seats
+    won, lost = [0.0] * 4, [0.0] * 4
+    won[me], lost[other] = 1.0, 1.0
+    # even is 0, so a move the tree has not tried starts at an even game
+    assert credited(even) == pytest.approx(0.0, abs=1e-12)
+    assert credited(won) == pytest.approx(1.0)
+    assert credited(lost) == pytest.approx(-1.0 / (seats - 1))
+    assert lost_value("relative", live_seats(node.game)) == pytest.approx(-1.0 / (seats - 1))
+
+
+def test_a_four_seat_game_credits_relative_as_before():
+    search = Search(Stub(), stance="relative", rng=random.Random(1))
+    node = search._node(imagine(a_game(), search.rng))
+    rng = np.random.default_rng(3)
+    for _ in range(50):
+        vector = rng.dirichlet(np.ones(4))
+        node.ranked[:] = 0.0
+        search._credit(node, 0, vector, 1)
+        before = (vector[node.mover] * 4 - float(vector.sum())) / 3
+        assert float(node.ranked[0]) == before

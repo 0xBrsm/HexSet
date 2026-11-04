@@ -392,6 +392,17 @@ def _two_sided(received: object) -> bool:
     return any(n > 0 for n in received) and any(n < 0 for n in received)
 
 
+def _gives_only(received: object) -> bool:
+    """Whether `received` is one integer count per resource with cards
+    moving only away from its proposer: an open offer, "this for any card",
+    when a gate's menu holds it (`offer`)."""
+    if not isinstance(received, (tuple, list)) or len(received) != NUM_RESOURCES:
+        return False
+    if any(isinstance(n, bool) or not isinstance(n, Integral) for n in received):
+        return False
+    return any(n < 0 for n in received) and all(n <= 0 for n in received)
+
+
 def embargoed(game: "Game", seat: int, other: int) -> bool:
     """Whether trading between `seat` and `other` is closed: either holds an
     embargo against the other (`Game.embargoes`)."""
@@ -914,12 +925,14 @@ def counter_menu(gate: object, view: "View", actor: int) -> list[tuple[int, Bund
     return known_candidates(view, [actor], params_of(gate).enumeration_cards)
 
 
-def _well_formed(view: "View", received: object) -> bool:
+def _well_formed(view: "View", received: object, open_offers: bool = False) -> bool:
     """Whether a gate-supplied bundle is one the actor can put to the table:
-    right width, integer counts, both sides nonempty and disjoint, and the
-    giving side covered by the actor's own hand. A menu is the gate's word;
-    this is the shape check the engine's own enumeration gives for free."""
-    if not _two_sided(received):
+    right width, integer counts, both sides nonempty and disjoint -- or, at a
+    table that takes open offers (`open_offers`), a giving side alone (an
+    open offer, `_gives_only`) -- and the giving side covered by the actor's
+    own hand. A menu is the gate's word; this is the shape check the
+    engine's own enumeration gives for free."""
+    if not (_two_sided(received) or (open_offers and _gives_only(received))):
         return False
     hand = view.known[view.perspective]
     return all(max(-n, 0) <= int(h) for n, h in zip(received, hand))
@@ -953,6 +966,12 @@ def offer(
     (`offer_slots`), all of them go into `already_offered`, and the gate asks
     for that card no more this turn (`Game.open_asks`). At a table that takes
     no open offers (`Game.open_offers` false) the one-for-one goes up as it is.
+
+    A gate may also put an open offer up itself: a bundle in its menu that
+    only gives ("this for any card") goes up as `Offer(actor, received, 1)`,
+    the answerer naming the one card it gives back, at a table that takes
+    open offers; elsewhere it is not on the menu. It counts as one offer and
+    is never folded.
     """
     from ..game import Phase  # local: avoids a game/trading import cycle
 
@@ -988,7 +1007,8 @@ def offer(
         candidates = [
             (them, tuple(received))
             for them, received in menu(gate, view, others, turn=game.turns, already_offered=struck)
-            if _well_formed(view, received) and (tuple(received) not in struck or struck is offered)
+            if _well_formed(view, received, game.open_offers)
+            and (tuple(received) not in struck or struck is offered)
             and admitted(tuple(received))
         ]
         if not candidates:
@@ -1008,6 +1028,8 @@ def offer(
         return None
     if already_offered is not None:
         already_offered.add(received)
+    if _gives_only(received):
+        return Offer(me, received, 1)
     params = params_of(gate)
     # A planned gate's menu is its plan's next fragment, which a look ahead
     # never folds, so it is not asked again for one.
@@ -1052,9 +1074,10 @@ def _open_asks(open_: bool, received: Bundle, slots_left: int | None, pick, offe
 
 def offer_slots(game: "Game", offered: Offer) -> int:
     """How many of its actor's offers this turn `offered` counts as: the
-    asks an open ask stands for (`offer`), else one."""
+    asks an open ask ("any card for", `any < 0`) stands for (`offer`), else
+    one."""
     opened = game.open_asks.get(offered.actor)
-    if offered.any and opened is not None and opened[0] == game.turns:
+    if offered.any < 0 and opened is not None and opened[0] == game.turns:
         return len(opened[2])
     return 1
 
@@ -1383,7 +1406,28 @@ def resolve_offer(
     finished_fn = getattr(gates[me], "trade_round_finished", None)
     if finished_fn is not None:
         finished_fn(game.state(me), offer, responses, trade, turn=game.turns)
+    publish_round(game, gates, offer, responses, trade)
     return [] if trade is None else [trade]
+
+
+def publish_round(game: "Game", gates: Sequence[object], offer: Offer, responses: Sequence[Response],
+                  trade: Trade | None) -> None:
+    """Tell every gate with `observe_round` how a round closed, in public
+    facts only: `observe_round(turn=, offer=, answers=, traded_with=)`, the
+    offer as broadcast, each answering seat's final answer (`"accept"`,
+    `"counter"`, `"pass"`) and the seat the actor traded with on it, or
+    `None`. Every seat at a table sees all of it, so a bot may keep its own
+    account of how each seat answers each other. Called by the engine's
+    round (`resolve_offer`), the served table and a hosted `Seat`, once per
+    round."""
+    observers = [observe for gate in gates
+                 if gate is not None and (observe := getattr(gate, "observe_round", None)) is not None]
+    if not observers:
+        return
+    answers = {int(r.seat): r.kind for r in responses}
+    traded_with = None if trade is None else int(trade.b if trade.a == offer.actor else trade.a)
+    for observe in observers:
+        observe(turn=game.turns, offer=offer, answers=answers, traded_with=traded_with)
 
 
 def trade_round(

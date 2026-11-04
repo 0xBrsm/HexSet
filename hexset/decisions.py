@@ -59,6 +59,7 @@ import numpy as np
 from .actions import Action, ActionSpace, ActionType, apply, legal_actions
 from .board.terrain import NUM_RESOURCES
 from .contract9 import incidences
+from .encoding import SeatFrame, seat_frame
 from .game import Game, Phase, may_act, pending_free_roads, to_move
 from .trading import params_of
 from .state import MAX_ROADS, NO_OWNER, can_place_settlement, placeable_roads, road_count
@@ -78,6 +79,7 @@ __all__ = [
     "apply_option",
     "key",
     "tensors",
+    "frame_for",
     "locate",
     "flat_index",
     "double_pairs",
@@ -88,6 +90,9 @@ __all__ = [
     "ARRAYS",
     "arrays",
     "atomic",
+    "inside",
+    "decision_at",
+    "topology_of",
     "Plans",
 ]
 
@@ -352,11 +357,54 @@ class Decision:
     discard: np.ndarray         # (K, 2 * NUM_RESOURCES) int8: kept, then given
 
 
-def flat_index(space: ActionSpace, action: Action, seat: int, players: int) -> int:
-    """`action`'s slot in the flat space, its robber victim seat-relative."""
-    if action.type is ActionType.MOVE_ROBBER and action.b < players:
-        action = Action(action.type, action.a, (action.b - seat) % players)
+def flat_index(space: ActionSpace, action: Action, seat: int, players: int,
+               frame: SeatFrame | None = None) -> int:
+    """`action`'s slot in the flat space, its robber victim seat-relative:
+    its slot in `frame` (`hexset.encoding.SeatFrame`), by default every one of
+    `players` seats from `seat`. A frame of live seats is how a net built for
+    fewer seats than were dealt counts them (`frame_for`)."""
+    if action.type is ActionType.MOVE_ROBBER:
+        frame = frame or SeatFrame(tuple((seat + i) % players for i in range(players)), players)
+        action = Action(action.type, action.a, frame.relative(action.b))
     return space.index(action)
+
+
+def frame_for(game: Game, seat: int, space: ActionSpace) -> SeatFrame:
+    """The frame `space` counts `seat`'s robber victims in at `game`: every
+    dealt seat, or the live ones where `space` is built for fewer seats than
+    the table deals (`hexset.encoding.seat_frame`)."""
+    if not isinstance(game, Game):
+        return game.frame(seat, space.num_players)
+    return seat_frame(game, seat, space.num_players)
+
+
+def inside(game: Game) -> bool:
+    """Whether `game` stands inside a decision begun a move at a time: a setup
+    road, or a Road Building card's free roads still owed. `tensors` refuses
+    such a position; `atomic` states it. A native playout copy
+    (`hexset.native.playout.NativeCopy`) answers for itself."""
+    if not isinstance(game, Game):
+        return game.inside()
+    return game.phase is Phase.SETUP_ROAD or bool(pending_free_roads(game))
+
+
+def decision_at(game: Game, seat: int, space: ActionSpace, *, double_turn: bool = True) -> Decision:
+    """`seat`'s decision at `game` as a contract-9 net is asked it: `atomic`
+    inside a decision begun a move at a time, else `tensors`. A native
+    playout copy states it from its own state, without a double turn."""
+    if not isinstance(game, Game):
+        return atomic(game, seat, space) if game.inside() else game.tensors(seat, space)
+    if inside(game):
+        return atomic(game, seat, space)
+    return tensors(game, seat, space, double_turn=double_turn)
+
+
+def topology_of(game: Game):
+    """The board topology `game` is played on (a native playout copy keeps
+    its source game's)."""
+    if not isinstance(game, Game):
+        return game.topology
+    return game._state.board.topology  # the board's geometry, public at every seat
 
 
 def tensors(game: Game, seat: int, space: ActionSpace, *, double_turn: bool = True) -> Decision:
@@ -366,6 +414,7 @@ def tensors(game: Game, seat: int, space: ActionSpace, *, double_turn: bool = Tr
     setup turn alone, `double` false (`options`)."""
     state = game._state
     players = state.num_players
+    frame = frame_for(game, seat, space)
     topology = state.board.topology
     pairs = incidences(topology)
     flat = np.zeros(space.size, dtype=np.bool_)
@@ -390,7 +439,7 @@ def tensors(game: Game, seat: int, space: ActionSpace, *, double_turn: bool = Tr
             if action.type is ActionType.PLAY_ROAD_BUILDING:
                 playable = True
                 continue
-            flat[flat_index(space, action, seat, players)] = True
+            flat[flat_index(space, action, seat, players, frame)] = True
         if playable:
             sets = _road_building(game)
             rb = np.asarray([tuple(r) + (-1,) * (2 - len(r)) for r in sets], dtype=np.int16).reshape(-1, 2)
@@ -402,7 +451,7 @@ def locate(decision: Decision, option: Option, game: Game, seat: int, space: Act
     double turn the index is `first * len(incidences) + second`."""
     players = game._state.num_players
     if not isinstance(option, Compound):
-        index = flat_index(space, option, seat, players)
+        index = flat_index(space, option, seat, players, frame_for(game, seat, space))
         if not decision.flat[index]:
             raise ValueError(f"{option} is not among the decision's actions")
         return DecisionKind.FLAT, index
@@ -448,14 +497,15 @@ def double_pairs(topology) -> np.ndarray:
 
 
 def option_of(decision: Decision, kind: int, index: int, pairs, seat: int, space: ActionSpace,
-              players: int) -> Option:
+              players: int, frame: SeatFrame | None = None) -> Option:
     """The option `(kind, index)` names in `decision` (`locate` the other way):
     an action, its robber victim back in board seats, or a `Compound`. `pairs`
-    is the board's `contract9.incidences`."""
+    is the board's `contract9.incidences`; `frame` as `flat_index` takes it."""
     if kind == DecisionKind.FLAT:
         action = space.decode(index)
-        if action.type is ActionType.MOVE_ROBBER and action.b < players:
-            action = Action(action.type, action.a, (action.b + seat) % players)
+        if action.type is ActionType.MOVE_ROBBER:
+            frame = frame or SeatFrame(tuple((seat + i) % players for i in range(players)), players)
+            action = Action(action.type, action.a, frame.absolute(action.b))
         return action
     if kind == DecisionKind.SETUP:
         return Compound(CompoundKind.SETUP, setup_parts(*pairs[index]))
@@ -518,11 +568,13 @@ def atomic(game: Game, seat: int, space: ActionSpace) -> Decision:
     alone (robber victims seat-relative, as `tensors` states them): how a
     position inside a decision begun a move at a time -- a setup road or a
     free road owed, which `tensors` refuses -- is asked."""
-    players = game._state.num_players
+    native = not isinstance(game, Game)
+    players = game.dealt if native else game._state.num_players
+    frame = frame_for(game, seat, space)
     flat = np.zeros(space.size, dtype=np.bool_)
-    for action in legal_actions(game, seat):
-        flat[flat_index(space, action, seat, players)] = True
-    return Decision(flat, np.zeros(len(incidences(game._state.board.topology)), dtype=np.bool_), False,
+    for action in (game.legal(seat) if native else legal_actions(game, seat)):
+        flat[flat_index(space, action, seat, players, frame)] = True
+    return Decision(flat, np.zeros(len(incidences(topology_of(game))), dtype=np.bool_), False,
                     np.zeros((0, 2), dtype=np.int16), np.zeros((0, 2 * NUM_RESOURCES), dtype=np.int8))
 
 
@@ -567,7 +619,7 @@ class Plans:
             return plan[2][0]
         if len(options) == 1:
             return options[0]
-        if game.phase is Phase.SETUP_ROAD or pending_free_roads(game):
+        if inside(game):
             return finish(game, seat, tuple(options))
         choice = decide(game, seat)
         if len(self._plans) > self.LIMIT:

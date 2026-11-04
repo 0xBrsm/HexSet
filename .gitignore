@@ -6,6 +6,8 @@ venv/
 *.egg-info/
 dist/
 build/
+*.so
+*.pyd
 *.log
 .env
 

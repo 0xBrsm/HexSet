@@ -5,6 +5,11 @@ from functools import lru_cache
 
 from .state import MAX_ROADS, NO_OWNER, GameState, road_count
 
+try:
+    from . import _road_native as _native
+except ImportError:
+    _native = None
+
 __all__ = [
     "MIN_LONGEST_ROAD",
     "ROADS_TO_TAKE_CAP",
@@ -23,6 +28,26 @@ MIN_LONGEST_ROAD = 5
 ROADS_TO_TAKE_CAP = 4
 
 
+_NATIVE_TOPOLOGIES: dict[int, tuple[object, object]] = {}
+
+
+def _native_topology(topology):
+    """Pack immutable adjacency once, without holding a live position."""
+    held = _NATIVE_TOPOLOGIES.get(id(topology))
+    if held is not None and held[0] is topology:
+        return held[1]
+    packed = _pack_native_topology(topology)
+    if len(_NATIVE_TOPOLOGIES) >= 4096:
+        _NATIVE_TOPOLOGIES.pop(next(iter(_NATIVE_TOPOLOGIES)))
+    _NATIVE_TOPOLOGIES[id(topology)] = (topology, packed)
+    return packed
+
+
+@lru_cache(maxsize=8)
+def _pack_native_topology(topology):
+    return _native.topology(topology.edges, topology.num_vertices)
+
+
 def longest_road(state: GameState, player: int, extra_edge: int | None = None) -> int:
     """Length of the player's longest continuous route: a longest trail, not
     a longest simple path, since a route may revisit a junction but not reuse
@@ -31,6 +56,13 @@ def longest_road(state: GameState, player: int, extra_edge: int | None = None) -
 
     `extra_edge` counts one more road as the player's -- the length the route
     would have if that edge were built -- without touching the state."""
+    if _native is not None:
+        return _native.longest(_native_topology(state.board.topology), state.edge_owner, state.vertex_owner,
+                               player, extra_edge)
+    return _longest_road_python(state, player, extra_edge)
+
+
+def _longest_road_python(state: GameState, player: int, extra_edge: int | None = None) -> int:
     topology = state.board.topology
     owned = [e for e in range(topology.num_edges) if state.edge_owner[e] == player]
     if extra_edge is not None and extra_edge not in owned:
@@ -79,6 +111,18 @@ def longest_with_new_roads(state: GameState, seat: int, roads: int,
     `longest_road`. Exponential in the edges within reach, as
     `longest_road` is in the roads owned. A `paths` list is filled with the
     new edges of each `longest[j]`'s route."""
+    if _native is not None:
+        result = _native.with_new(_native_topology(state.board.topology), state.edge_owner, state.vertex_owner,
+                                  seat, roads, paths is not None)
+        if paths is not None:
+            best, paths[:] = result
+            return best
+        return result
+    return _longest_with_new_roads_python(state, seat, roads, paths)
+
+
+def _longest_with_new_roads_python(state: GameState, seat: int, roads: int,
+                                  paths: list | None = None) -> list[int]:
     topology = state.board.topology
     edges = topology.edges
     owner_of = state.vertex_owner
@@ -195,6 +239,9 @@ def _roads_to_take(topology, seat: int, beat: int, budget: int,
     roads in it, so `k` new roads cannot reach `beat` while the seat owns
     fewer than `beat - k`; the search starts at the first `k` that could,
     and deepens one road at a time, stopping at the first that does."""
+    if _native is not None:
+        return _native.to_take(_native_topology(topology), edge_owner, vertex_owner, seat, beat, budget,
+                               ROADS_TO_TAKE_CAP)
     owned = edge_owner.count(seat)
     probe = _Roads(topology, edge_owner, vertex_owner)
     for k in range(max(1, beat - owned), budget + 1):
@@ -221,6 +268,8 @@ def reach_all(state: GameState) -> tuple[tuple[int, ...], ...]:
 @lru_cache(maxsize=1 << 14)
 def _reach_all(topology, edge_owner: tuple[int, ...], vertex_owner: tuple[int, ...],
                players: int) -> tuple[tuple[int, ...], ...]:
+    if _native is not None:
+        return _native.reach(_native_topology(topology), edge_owner, vertex_owner, players, MAX_ROADS)
     edges = topology.edges
     out = []
     for seat in range(players):

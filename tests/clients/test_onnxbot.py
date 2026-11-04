@@ -414,3 +414,18 @@ def test_bots_spawned_from_one_rollout_file_with_pools_share_one_pool(tmp_path):
     finally:
         pools.close()
 
+
+
+def test_a_checkpoint_built_for_a_game_types_live_seats_fits_a_table_dealt_more():
+    """A two-seat net sits at a table dealt four with two retired where the game
+    type plays two live seats (duel-variant; standard plays two to four); with
+    no game type, or a seat count the type does not play, it is refused; every
+    dealt count fits itself."""
+    from hexset.clients.onnxbot import seats_fit
+
+    assert seats_fit(2, 4, "duel-variant")
+    assert seats_fit(4, 4, "duel-variant") and seats_fit(4, 4, None)
+    assert not seats_fit(2, 4, None)
+    assert seats_fit(2, 4, "standard") and seats_fit(3, 4, "standard")
+    assert not seats_fit(3, 4, "duel-variant")
+    assert not seats_fit(4, 2, "duel-variant")

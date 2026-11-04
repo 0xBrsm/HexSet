@@ -450,8 +450,17 @@ class Seat:
         if finished is not None:
             finished(self.game.state(self.seat), offer, list(self._responses), trade,
                      turn=self.game.turns)
+        trading.publish_round(self.game, [self.gate], offer, list(self._responses), trade)
         self._responses = []
         self.held = None
+
+    def observed_round(self, offer: Offer, responses: Sequence[Response], trade: Trade | None = None) -> None:
+        """Another seat's round closed at the host's table: `offer` as it was
+        broadcast, every seat's final answer (`responses`, ours among them)
+        and the exchange the host executed on it, or `None`. Passed to the
+        gate's `observe_round` (`trading.publish_round`), as this seat's own
+        rounds are when they close."""
+        trading.publish_round(self.game, [self.gate], offer, list(responses), trade)
 
     def answer(self, offer: Offer) -> Response:
         """This seat's answer to another seat's offer (`offer.received` signed

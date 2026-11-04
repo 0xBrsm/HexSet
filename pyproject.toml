@@ -1,7 +1,7 @@
 [project]
 name = "hexset"
 # Keep in sync with hexset.__version__; checked by tests/test_versions.py.
-version = "1.24.0"
+version = "1.25.0"
 description = "A Catan rules engine with batched training environments, reproducible evaluation, and browser play"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -72,6 +71,7 @@ include = ["hexset", "hexset.*"]
 # The browser frontend must also be present in installed wheels.
 [tool.setuptools.package-data]
 "hexset.server" = ["static/*.html", "static/*.svg", "static/*.png", "static/*.webmanifest"]
+"hexset.native" = ["*.hpp", "*.cpp"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

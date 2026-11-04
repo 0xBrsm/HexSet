@@ -25,6 +25,36 @@ or knights `1 / (1 + n)`, 0 out of reach), so one unit reads the same on every
 token: per resource, `bank + pool + Σ hand.least` is 19 cards on every view
 whose ledger is consistent (`View.pool` pads where it is not).
 
+**Contract 9d is the two-seat observation**, defined for a table dealt to two
+seats and refused at any other size. Across a table of two every card flow
+is public and named except a steal, and a steal shows its card to the one
+opponent, so each seat's hand is exact: the hand is one block, with no
+bounds and no residual pool. The one hidden thing is the development deck.
+A seat token holds only what both seats see, the same for each: the hand, the
+development cards held, bought this turn and their ages, points, the award
+distances (1 for the holder), a discard owed, pieces left, and whether the
+seat opened the snake (the setup place, one bit). What only the perspective knows is the table's: its development cards
+by kind and which it can play, beside the cards it has not seen by kind and
+whether the mover has played one this turn. Nothing the other columns already
+fix is read: not the bank (19 of each less the two exact hands), the deck
+(the unseen less the opponent's held), nor the opponent's bounds by kind (its
+held, bought and the unseen fix them). Points and pieces left, which the board
+could be counted for, stay as the seat's summaries, and the turn count with
+them. The table's rules are the table's constants and are not read. The next roll's odds sit
+where they act: each hex carries the chance its number is the next roll
+(`hex_features`: terrain, the number, that chance, the robber), under
+independent dice its pips over 36 and under balanced dice the dice deck's
+odds for the seat rolling next, read off the public rolls
+(`hexset.chance.DiceDeck`); the table carries the seven's chance, the one
+roll that is no hex. The number stays so hexes sharing one read as
+producing together. Seat tokens are 22 wide, the table 20.
+
+**Contract 9d.1** is 9d with each seat's economy appended to its token, both
+public: its production by resource (`seat_production`, the cards a roll
+yields it at the dice's long-run odds, a city twice, nothing from the
+robber's hex) and its bank rate by resource (`hexset.economy.trade_ratios`,
+over 4). 9d's columns stay put; seat tokens are 32 wide.
+
 """
 
 from __future__ import annotations
@@ -40,19 +70,30 @@ from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import dev_count
-from .encoding import PLAYABLE_KINDS, knights_needed_all, to_frame
-from .game import Game, Phase, roll_odds
+from .board.ports import BASE_TRADE_RATIO
+from .economy import trade_ratios
+from .encoding import PLAYABLE_KINDS, knights_needed_all, seat_frame, to_frame
+from .game import Game, Phase, ROLL_ODDS, roll_odds
 from .roads import reach_all, roads_to_take_all
 from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, NO_OWNER, Building, GameState, pile_size
 from .victory import LARGEST_ARMY_VP, LONGEST_ROAD_VP
 from .view import View
 
 __all__ = [
+    "observation_row",
     "CONTRACT",
     "CONTRACTS",
     "features",
     "SEAT_COLUMNS_91",
     "TABLE_COLUMNS_91",
+    "SEAT_COLUMNS_9D",
+    "SEAT_COLUMNS_9D1",
+    "DUEL_CONTRACTS",
+    "seat_production",
+    "TABLE_COLUMNS_9D",
+    "HEX_COLUMNS_9D",
+    "hex_features",
+    "next_roll_odds",
     "SEAT_FEATURES",
     "TABLE_FEATURES",
     "HEX_FEATURES",
@@ -68,7 +109,9 @@ __all__ = [
 ]
 
 CONTRACT = "9"
-CONTRACTS = ("9", "9.1")
+CONTRACTS = ("9", "9.1", "9d", "9d.1")
+# The two-seat contracts (`seat_frame`: a table of two, or more with all but two retired).
+DUEL_CONTRACTS = ("9d", "9d.1")
 
 # One unit, one scale (module docstring).
 CARD_SCALE = 10.0
@@ -132,22 +175,82 @@ TABLE_FEATURES = sum(width for _, width in _TABLE_BLOCKS)
 SEAT_COLUMNS_91 = _columns((*_SEAT_BLOCKS, ("live", 1)))
 TABLE_COLUMNS_91 = _columns((*_TABLE_BLOCKS, ("winning_points", 1), ("discard_limit", 1),
                              ("friendly_robber", 1), ("balanced_dice", 1), ("roll_odds", 11)))
+# 9d, the two-seat contract (module docstring): a seat token is what both
+# seats see, the perspective's own development cards are the table's, and
+# nothing another column fixes is read.
+_SEAT_BLOCKS_9D: tuple[tuple[str, int], ...] = (
+    ("opened", 1),          # opened the setup snake: `game.first`
+    ("on_turn", 1),
+    ("me", 1),
+    ("hand", NUM_RESOURCES),
+    ("dev_held", 1),
+    ("dev_new", 1),         # of those, bought this turn: not playable yet
+    ("dev_oldest", AGE_SLOTS),
+    ("points", 1),          # buildings and awards, over the game's winning points
+    ("to_longest_road", 1),  # 1 for the holder
+    ("to_largest_army", 1),  # 1 for the holder
+    ("must_discard", 1),
+    ("pieces", 3),          # settlements, cities, roads left to build
+)
+_TABLE_BLOCKS_9D: tuple[tuple[str, int], ...] = (
+    ("dev_mine", NUM_DEV_CARDS),           # the perspective's cards by kind, bought this turn included
+    ("dev_playable", len(PLAYABLE_KINDS)),  # of those, the ones it may play now
+    ("dev_pool", NUM_DEV_CARDS),           # the cards it has not seen, by kind: the deck and the opponent's
+    ("dev_played", 1),      # the mover has played a development card this turn
+    ("turn", 1),
+    ("setup", 1),
+    ("rolled", 1),
+    ("robber", 1),
+    ("seven", 1),           # the next roll's chance of a seven
+)
+SEAT_COLUMNS_9D = _columns(_SEAT_BLOCKS_9D)
+TABLE_COLUMNS_9D = _columns(_TABLE_BLOCKS_9D)
+SEAT_FEATURES_9D = sum(width for _, width in _SEAT_BLOCKS_9D)
+TABLE_FEATURES_9D = sum(width for _, width in _TABLE_BLOCKS_9D)
+# 9d.1 appends each seat's economy to its token, both public: its production by
+# resource (`seat_production`: expected cards a roll at the dice's long-run
+# odds, a city twice, nothing from the robber's hex) and its bank rate by
+# resource (`hexset.economy.trade_ratios`, over 4). 9d's columns stay put.
+_SEAT_BLOCKS_9D1: tuple[tuple[str, int], ...] = (*_SEAT_BLOCKS_9D, ("production", NUM_RESOURCES),
+                                                 ("rates", NUM_RESOURCES))
+SEAT_COLUMNS_9D1 = _columns(_SEAT_BLOCKS_9D1)
+SEAT_FEATURES_9D1 = sum(width for _, width in _SEAT_BLOCKS_9D1)
 
 
 def features(contract: str = CONTRACT) -> tuple[int, int]:
     """Seat and table widths for an observation contract; old columns stay put."""
     if contract not in CONTRACTS:
         raise ValueError(f"unknown observation contract {contract!r}: {CONTRACTS}")
-    return (SEAT_FEATURES, TABLE_FEATURES) if contract == "9" else (SEAT_FEATURES + 1, TABLE_FEATURES + 15)
+    if contract == "9":
+        return SEAT_FEATURES, TABLE_FEATURES
+    if contract == "9.1":
+        return SEAT_FEATURES + 1, TABLE_FEATURES + 15
+    if contract == "9d.1":
+        return SEAT_FEATURES_9D1, TABLE_FEATURES_9D
+    return SEAT_FEATURES_9D, TABLE_FEATURES_9D
 
 
 # A hex: the five producing terrains one-hot (the desert none), its pips, the robber.
 HEX_FEATURES = NUM_RESOURCES + 2
+# 9d's hex: the terrains, its number over 12, the chance its number is the
+# next roll, the robber.
+HEX_COLUMNS_9D = {"terrain": slice(0, NUM_RESOURCES), "number": NUM_RESOURCES, "odds": NUM_RESOURCES + 1,
+                  "robber": NUM_RESOURCES + 2}
 # A vertex: its port one-hot (generic, then one per resource), its building's
 # points (1 a settlement, 2 a city).
 VERTEX_FEATURES = 1 + NUM_RESOURCES + 1
 
 assert SEAT_FEATURES == 39 and TABLE_FEATURES == 20
+assert SEAT_FEATURES_9D == 22 and TABLE_FEATURES_9D == 20
+
+
+def hex_features(contract: str = CONTRACT) -> int:
+    """A hex token's width: `HEX_FEATURES` (terrain, pips, the robber); 9.1
+    appends the number; 9d reads terrain, the number, the next roll's odds
+    and the robber (`HEX_COLUMNS_9D`)."""
+    if contract not in CONTRACTS:
+        raise ValueError(f"unknown observation contract {contract!r}: {CONTRACTS}")
+    return HEX_FEATURES if contract == "9" else HEX_FEATURES + 1
 
 
 @dataclass(frozen=True)
@@ -181,11 +284,13 @@ class Layout9:
 @lru_cache(maxsize=8)
 def layout(players: int, num_hexes: int, num_vertices: int, num_edges: int, contract: str = CONTRACT) -> Layout9:
     """The flat layout for a board of this size seating `players`."""
+    if contract in DUEL_CONTRACTS and players != 2:
+        raise ValueError(f"contract {contract} is the two-seat observation; this table seats {players}")
     seat_width, table_width = features(contract)
     shapes = {
         "seats": (players, seat_width),
         "table": (table_width,),
-        "hexes": (num_hexes, HEX_FEATURES + int(contract == "9.1")),
+        "hexes": (num_hexes, hex_features(contract)),
         "vertices": (num_vertices, VERTEX_FEATURES),
         "vertex_owner": (num_vertices,),
         "road_owner": (num_edges,),
@@ -314,8 +419,158 @@ def _reach_closeness(reach: tuple[tuple[int, ...], ...]) -> np.ndarray:
     return out
 
 
+def next_roll_odds(game: Game) -> dict[int, float]:
+    """Each sum's chance on the next roll to come, by whoever throws it: the
+    seat on turn until it has rolled (`rolled`), then the seat after it.
+    `game.roll_odds` for that roller: `ROLL_ODDS` under independent dice, the
+    dice deck's odds under balanced dice. A sum with no card left is absent."""
+    state = game._state
+    roller = game.current_player
+    if rolled(game):
+        n = state.num_players
+        roller = next((s for s in ((roller + i) % n for i in range(1, n + 1)) if s not in game.locked), roller)
+    dice = state.dice
+    return dict(ROLL_ODDS if dice is None else dice.odds(roller))
+
+
+def _pointers(state: GameState, rows: Sequence[int], players: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every pointer seat-relative (`vertex_owner`, `road_owner`), and each
+    row's reach closeness: the board's part, the same under every contract."""
+    relabel = np.full(players + 1, -1, dtype=np.int64)    # NO_OWNER (-1) reads the last entry
+    for row, seat in enumerate(rows):
+        relabel[seat] = row
+    vertex_owner = relabel[np.asarray(state.vertex_owner, dtype=np.int64)]
+    road_owner = relabel[np.asarray(state.edge_owner, dtype=np.int64)]
+    reach = _reach_closeness(reach_all(state))[list(rows)]
+    assert NO_OWNER == -1
+    return vertex_owner, road_owner, reach
+
+
+def seat_production(state: GameState, seat: int) -> list[float]:
+    """`seat`'s expected cards a roll by resource at the dice's long-run odds
+    (pips over 36): a settlement takes each adjacent producing hex once, a city
+    twice, and the robber's hex gives nothing. It changes only when the seat
+    builds or the robber moves."""
+    board = state.board
+    topology = board.topology
+    out = [0.0] * NUM_RESOURCES
+    for v, (owner, kind) in enumerate(zip(state.vertex_owner, state.vertex_building)):
+        if owner != seat:
+            continue
+        for h in topology.vertex_hexes[v]:
+            terrain = int(board.terrain[h])
+            if terrain < NUM_RESOURCES and h != state.robber:
+                out[terrain] += kind * pips(board.tokens[h]) / 36.0
+    return out
+
+
+def _encode9d(game: Game, perspective: int, contract: str = "9d") -> Observation9:
+    """`game` as `perspective` may know it, in contract 9d (9d.1 appends each
+    seat's economy): a table of two. The table may be dealt two seats, or more
+    with all but two retired: its live seats are the two
+    (`encoding.seat_frame`), and a retired seat is not read."""
+    state = game._state
+    if not 0 <= perspective < state.num_players:
+        raise ValueError(f"no such player: {perspective}")
+    try:
+        frame = seat_frame(game, perspective, 2)
+    except ValueError as e:
+        raise ValueError(f"contract {contract} is the two-seat observation: {e}") from None
+    players = 2
+    board = state.board
+    rows = frame.seats
+    view = View.from_game(game, perspective)
+    unseen = view.unseen_dev_cards()
+    roads = roads_to_take_all(state)
+    knights = knights_needed_all(state, perspective, unseen[DevCard.KNIGHT])
+    mover = game.current_player
+    quotas = game.discard_quota
+    awards = (state.longest_road_holder, state.largest_army_holder)
+    played_now = game.dev_card_played
+    opponent = rows[1]
+    # The opponent's hand: what the view certifies plus the residual pool,
+    # which at two seats is its uncertified cards by resource (every card is
+    # in the bank, in my hand, or in its).
+    hands = {perspective: list(view.known[perspective]),
+             opponent: [k + p for k, p in zip(view.known[opponent], view.pool)]}
+
+    dealt = state.num_players
+    settlements, cities, building = [0] * dealt, [0] * dealt, [0] * dealt
+    for owner, kind in zip(state.vertex_owner, state.vertex_building):
+        if owner >= 0:
+            building[owner] += kind
+            if kind == _SETTLEMENT:
+                settlements[owner] += 1
+            elif kind == _CITY:
+                cities[owner] += 1
+
+    economy = contract == "9d.1"
+    seats = np.zeros((players, SEAT_FEATURES_9D1 if economy else SEAT_FEATURES_9D), dtype=np.float32)
+    c = SEAT_COLUMNS_9D1 if economy else SEAT_COLUMNS_9D
+    for i, s in enumerate(rows):
+        cards = dev_count(state, s)
+        points = building[s] + (LONGEST_ROAD_VP if awards[0] == s else 0) + (LARGEST_ARMY_VP if awards[1] == s else 0)
+        seats[i, c["opened"]] = float(s == game.first)
+        seats[i, c["on_turn"]] = float(s == mover)
+        seats[i, c["me"]] = float(s == perspective)
+        seats[i, c["hand"]] = np.asarray(hands[s], dtype=np.float32) / CARD_SCALE
+        seats[i, c["dev_held"]] = cards / CARD_SCALE
+        seats[i, c["dev_new"]] = (cards - pile_size(state.dev_cards[s])) / CARD_SCALE
+        seats[i, c["dev_oldest"]] = _ages(state, s)
+        seats[i, c["points"]] = points / state.rules.winning_points
+        seats[i, c["to_longest_road"]] = _closeness(roads[s])
+        seats[i, c["to_largest_army"]] = _closeness(knights[s])
+        seats[i, c["must_discard"]] = (quotas[s] if quotas else 0) / CARD_SCALE
+        seats[i, c["pieces"]] = [(MAX_SETTLEMENTS - settlements[s]) / PIECE_SCALE,
+                                 (MAX_CITIES - cities[s]) / PIECE_SCALE,
+                                 (MAX_ROADS - state.edge_owner.count(s)) / PIECE_SCALE]
+        if economy:
+            seats[i, c["production"]] = seat_production(state, s)
+            seats[i, c["rates"]] = [r / BASE_TRADE_RATIO for r in trade_ratios(state, s)]
+
+    mine = [state.dev_cards[perspective][k] + state.new_dev_cards[perspective][k] for k in range(NUM_DEV_CARDS)]
+    played = played_now and perspective == mover
+    playable = [0 if played else state.dev_cards[perspective][kind] for kind in PLAYABLE_KINDS]
+    odds = next_roll_odds(game)
+    table = np.zeros(TABLE_FEATURES_9D, dtype=np.float32)
+    t = TABLE_COLUMNS_9D
+    table[t["dev_mine"]] = np.asarray(mine, dtype=np.float32) / CARD_SCALE
+    table[t["dev_playable"]] = np.asarray(playable, dtype=np.float32) / CARD_SCALE
+    table[t["dev_pool"]] = np.asarray(unseen, dtype=np.float32) / CARD_SCALE
+    table[t["dev_played"]] = float(bool(played_now))
+    table[t["turn"]] = game.turns / TURN_SCALE
+    table[t["setup"]] = float(game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD))
+    table[t["rolled"]] = float(rolled(game))
+    table[t["robber"]] = float(game.phase in (Phase.DISCARD, Phase.ROBBER))
+    table[t["seven"]] = odds.get(7, 0.0)
+
+    template = _template(board)
+    h = HEX_COLUMNS_9D
+    hexes = np.zeros((board.num_hexes, hex_features("9d")), dtype=np.float32)
+    hexes[:, h["terrain"]] = template.hexes[:, :NUM_RESOURCES]
+    hexes[:, h["number"]] = np.asarray(board.tokens, dtype=np.float32) / 12.0
+    hexes[:, h["odds"]] = [odds.get(int(token), 0.0) for token in board.tokens]
+    if state.robber >= 0:  # `OFF_BOARD` marks no hex
+        hexes[state.robber, h["robber"]] = 1.0
+    vertices = template.vertices.copy()
+    vertices[:, -1] = np.asarray(state.vertex_building, dtype=np.float32) / POINT_SCALE
+    vertex_owner, road_owner, reach = _pointers(state, rows, state.num_players)
+    return Observation9(seats, table, hexes, vertices, vertex_owner, road_owner, reach)
+
+
+def observation_row(game: Game, perspective: int, contract: str = CONTRACT) -> np.ndarray:
+    """`flatten(encode9(game, perspective, contract))`: the row a contract-9
+    net reads. A native playout copy (`hexset.native.playout.NativeCopy`)
+    encodes itself, to the same bytes."""
+    if not isinstance(game, Game):
+        return game.observation(perspective, contract)
+    return flatten(encode9(game, perspective, contract))
+
+
 def encode9(game: Game, perspective: int, contract: str = CONTRACT) -> Observation9:
-    """`game` as `perspective` may know it, in contract 9."""
+    """`game` as `perspective` may know it, in contract 9 (9.1, or 9d and 9d.1 at two live seats)."""
+    if contract in DUEL_CONTRACTS:
+        return _encode9d(game, perspective, contract)
     seat_width, table_width = features(contract)
     state = game._state
     players = state.num_players
@@ -324,7 +579,6 @@ def encode9(game: Game, perspective: int, contract: str = CONTRACT) -> Observati
     board = state.board
     topology = board.topology
     rows = to_frame(range(players), perspective)          # row i is board seat rows[i]
-    row_of = {seat: i for i, seat in enumerate(rows)}
     view = View.from_game(game, perspective)
     unseen = view.unseen_dev_cards()
     roads = roads_to_take_all(state)
@@ -409,13 +663,7 @@ def encode9(game: Game, perspective: int, contract: str = CONTRACT) -> Observati
         hexes[state.robber, NUM_RESOURCES + 1] = 1.0
     vertices = template.vertices.copy()
     vertices[:, -1] = np.asarray(state.vertex_building, dtype=np.float32) / POINT_SCALE
-    relabel = np.full(players + 1, -1, dtype=np.int64)    # NO_OWNER (-1) reads the last entry
-    for seat, row in row_of.items():
-        relabel[seat] = row
-    vertex_owner = relabel[np.asarray(state.vertex_owner, dtype=np.int64)]
-    road_owner = relabel[np.asarray(state.edge_owner, dtype=np.int64)]
-    reach = _reach_closeness(reach_all(state))[list(rows)]
-    assert NO_OWNER == -1
+    vertex_owner, road_owner, reach = _pointers(state, rows, players)
     return Observation9(seats, table, hexes, vertices, vertex_owner, road_owner, reach)
 
 

@@ -424,7 +424,7 @@ registered with ([guide.md](guide.md)):
                                  "mynet-1.0d": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
 ```
 
-A preset is offered at every game type. A model file plays only the game types
+A preset is offered at every game type, or at those the server's `--preset-modes` names for it. A model file plays only the game types
 its `modes` declare, and the standard game alone when it declares none; files
 may share a name as long as their versions differ. `bots` and `/api/bot` take
 an entry, and one offered only at another game type is a 400.

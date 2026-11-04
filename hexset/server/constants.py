@@ -78,4 +78,4 @@ def profile_value(field: str, value: object) -> str | None:
 #
 # Every other value, and a file with no `contract` key at all, is refused by
 # name at load.
-RECORD_CONTRACTS = frozenset({"6", "7", "8", "8.1", "9", "9.1"})
+RECORD_CONTRACTS = frozenset({"6", "7", "8", "8.1", "9", "9.1", "9d", "9d.1"})

@@ -89,7 +89,7 @@ def test_the_served_contracts_are_the_record_ones_and_contract_9():
     from hexset.server.constants import RECORD_CONTRACTS
 
     assert CONTRACT_VERSION == "8.1" and CONTRACT == "9"
-    assert RECORD_CONTRACTS == {"6", "7", "8", "8.1", "9", "9.1"}
+    assert RECORD_CONTRACTS == {"6", "7", "8", "8.1", "9", "9.1", "9d", "9d.1"}
     assert _metadata(STUB9)["contract"] == "9"
     assert _metadata(STUB8)["contract"] == "8"
     assert _metadata(STUB7)["contract"] == "7"

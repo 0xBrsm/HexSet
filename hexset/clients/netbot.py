@@ -47,12 +47,16 @@ __all__ = [
 
 
 def _check_players(game: Game, players: int) -> None:
+    """A network counts every dealt seat or, built for fewer, the live seats
+    alone (`hexset.encoding.seat_frame`): a two-seat net plays a table dealt
+    four with two retired. Any other count is refused."""
     # true state: `num_players` is a fixed, public board property.
     num_players = game.state(0, hidden=False).num_players
-    if num_players != players:
+    live = num_players - len(game.locked)
+    if players not in (num_players, live):
         raise ValueError(
             f"network was trained for {players} players, "
-            f"not {num_players}"
+            f"not {num_players}" + (f" ({live} live)" if live != num_players else "")
         )
 
 

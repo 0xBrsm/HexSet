@@ -302,3 +302,88 @@ def test_open_asks_are_on_by_default_and_reach_the_offers_left():
     asks = (WOOD_ORE, SHEEP_ORE, BRICK_ORE)
     made = offer(game, [_Asker(asks, budget=None), None, None, None], set(), slots_left=None)
     assert made.any == -1 and offer_slots(game, made) == 3
+
+
+GIVE_WOOD = (-1, 0, 0, 0, 0)
+
+
+def test_a_menus_giving_side_alone_goes_up_as_this_for_any_card_counting_as_one_offer():
+    """A bundle that only gives is an open offer the gate puts up itself:
+    `Offer(actor, received, 1)`, one offer, never folded, struck for the
+    turn like any other; the next pick is the gate's next ask."""
+    from hexset.trading import offer_slots
+    game, offered = _asking(), set()
+    gates = [_Asker((GIVE_WOOD, WOOD_ORE, SHEEP_ORE)), None, None, None]
+    made = offer(game, gates, offered, slots_left=3)
+    assert made == Offer(0, GIVE_WOOD, any=1) and offer_slots(game, made) == 1 and GIVE_WOOD in offered
+    following = offer(game, gates, offered, slots_left=2)
+    assert following == Offer(0, (0, 0, 0, 0, 1), any=-1)      # the ore asks still fold as before
+
+
+class _Lister(_Asker):
+    """`_Asker` with every ask not yet offered on its menu at once, best first."""
+
+    def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+        struck = {tuple(b) for b in already_offered}
+        return [(counterparties[0], a) for a in self.asks if a not in struck]
+
+
+def test_a_table_taking_no_open_offers_never_gets_this_for_any_card():
+    """Off the menu at such a table: the gate's next pick goes up instead."""
+    game = _asking()
+    game.open_offers = False
+    made = offer(game, [_Lister((GIVE_WOOD, WOOD_ORE)), None, None, None], set(), slots_left=1)
+    assert made == Offer(0, WOOD_ORE)
+
+
+def test_a_giving_side_the_hand_does_not_cover_is_not_on_the_menu():
+    game = _asking()
+    made = offer(game, [_Asker(((0, 0, 0, -1, 0),)), None, None, None], set(), slots_left=1)
+    assert made is None
+
+
+def test_this_for_any_card_executes_the_counter_naming_the_card_given_back():
+    game = _game((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    state = game.state(0, hidden=False)
+    gates = [_Values(ore=3.0, wood=1.0), _Values(wood=2.0, ore=1.0), None, None]
+    trades = resolve_offer(game, gates, Offer(0, GIVE_WOOD, any=1))
+    assert [t.received for t in trades] == [(-1, 0, 0, 0, 1)]
+    assert state.hands[0][ORE] == 1 and state.hands[0][WOOD] == 0
+
+
+class _Watching(_Values):
+    """`_Values` keeping every round `observe_round` reports and every move `seen`."""
+
+    def __init__(self, **price):
+        super().__init__(**price)
+        self.rounds, self.moves = [], []
+
+    def observe_round(self, **event):
+        self.rounds.append(event)
+
+    def seen(self, game, actor, action, viewer):
+        self.moves.append((actor, action))
+
+
+def test_every_gate_hears_how_a_round_closed_in_public_facts():
+    game = _game((0, Resource.WHEAT, 1), (1, Resource.ORE, 1))
+    gates = [_Watching(ore=3.0, wheat=1.0), _Watching(wheat=2.0, ore=1.0), _Watching(), _Watching()]
+    offered = Offer(0, (0, 0, 0, -1, 1))
+    resolve_offer(game, gates, offered)
+    for g in gates:
+        assert len(g.rounds) == 1
+        event = g.rounds[0]
+        assert event["offer"] == offered and event["turn"] == game.turns and event["traded_with"] == 1
+        assert event["answers"][1] == "accept" and set(event["answers"]) == {1, 2, 3}
+
+
+def test_watch_reaches_a_trading_seats_trader_as_well_as_its_mover():
+    from hexset.actions import Action, ActionType
+    from hexset.bots.base import TradesBy, watch, watches
+    mover, trader = _Watching(), _Watching()
+    seat = TradesBy(mover, trader)
+    assert watches(seat) and watches(TradesBy(object(), trader))
+    game = _game()
+    move = Action(ActionType.MOVE_ROBBER, 3)
+    watch(seat, game, 2, move, 0)
+    assert mover.moves == [(2, move)] and trader.moves == [(2, move)]

@@ -75,10 +75,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import hexset
-from hexset.arena import RUNTIME_HELP, load_runtime
+from hexset.arena import RUNTIME_HELP, load_runtime, registered_presets
 from hexset.board.board import BOARD_MODES
+from hexset.rules import GAME_TYPES
 
-from . import _journal as journal, mcptools
+from . import _journal as journal, api, mcptools
 from .rankings import load_ranker
 from .api import (
     CODE_ALPHABET,
@@ -87,6 +88,7 @@ from .api import (
     Config,
     Origin,
     Tables,
+    catanatron_seatable,
     load_api_keys,
     listed_models,
     model_options,
@@ -454,6 +456,30 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def preset_modes(parser: argparse.ArgumentParser, given: list[str]) -> dict[str, tuple[str, ...]]:
+    """`--preset-modes NAME=TYPE[,TYPE...]` as preset -> game types, each
+    held to a preset the loaded runtimes list and to game types the server
+    deals; anything else stops the server at start."""
+    catanatron_seatable()  # its preset is registered on import
+    presets = registered_presets()
+    held: dict[str, tuple[str, ...]] = {}
+    for item in given:
+        name, sep, kinds = item.partition("=")
+        name = name.strip()
+        types = tuple(dict.fromkeys(kind.strip() for kind in kinds.split(",") if kind.strip()))
+        if not sep or not name or not types:
+            parser.error(f"--preset-modes: {item!r} is not NAME=TYPE[,TYPE...]")
+        if name not in presets:
+            parser.error(f"--preset-modes: no preset named {name}; one of {presets}")
+        unknown = [kind for kind in types if kind not in GAME_TYPES]
+        if unknown:
+            parser.error(f"--preset-modes: no game type {', '.join(unknown)}; one of {sorted(GAME_TYPES)}")
+        if name in held:
+            parser.error(f"--preset-modes: {name} given twice")
+        held[name] = types
+    return held
+
+
 def main(argv: list[str] | None = None) -> None:
     """`python -m hexset.server.web`: serve the board and the API over HTTP
     until interrupted."""
@@ -540,12 +566,18 @@ def main(argv: list[str] | None = None) -> None:
              "in the server's own process). Other models ignore it.",
     )
     parser.add_argument(
+        "--preset-modes", action="append", default=[], metavar="NAME=TYPE[,TYPE...]",
+        help="Offer the preset NAME at these game types only, as a model file's `modes` "
+             "declare its own. Repeat for more presets. Default: every preset at every game type.",
+    )
+    parser.add_argument(
         "--rankings-min-games", type=int, default=Config.rankings_min_games, metavar="N",
         help=f"Ranking rows that played fewer games are not shown "
              f"(default: {Config.rankings_min_games}).",
     )
     args = parser.parse_args(argv)
     load_runtime(*args.runtime)
+    api.PRESET_MODES.update(preset_modes(parser, args.preset_modes))
     entrants = tuple(dict.fromkeys(args.ranked_entrant))
     unknown = [name for name in entrants if name not in listed_models()]
     if unknown:

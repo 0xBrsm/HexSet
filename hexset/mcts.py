@@ -39,6 +39,7 @@ __all__ = [
     "Node",
     "STANCE_ROWS",
     "lost_value",
+    "live_seats",
     "side_value",
     "calibrate_own",
     "Decision",
@@ -282,6 +283,16 @@ def lost_value(stance: str, seats: int) -> float:
     return float(STANCE_ROWS[stance](won_by_other, 0)[0])
 
 
+def live_seats(game: Game) -> int:
+    """The seats still playing `game`: its seats less those retired at the
+    deal (`Game.locked`). A duel is dealt as four seats with two retired, so
+    its scores read over two: `relative` is then `2p - 1`, 0 an even game,
+    and `lost_value` -1. Over the board's four seats, 0 would read a 25%
+    win chance, below even, and every move the tree has not tried would
+    start there."""
+    return game.num_players - len(game.locked)
+
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -361,7 +372,8 @@ class Search:
 
     `exploration` is PUCT's c_puct; the values it trades against are the
     stance's reading of win chances: [0, 1] for `own`, [-1/(seats-1), 1] for
-    `relative`, [-1, 1] for `paranoid`. `stance` is restricted to `STANCE_ROWS`'s keys, what this
+    `relative` over the seats still playing (`live_seats`: a duel dealt as four
+    seats reads [-1, 1], 0 even), [-1, 1] for `paranoid`. `stance` is restricted to `STANCE_ROWS`'s keys, what this
     tree's backup implements; anything else is refused at construction.
 
     `own_calibration = (a, b)` recalibrates, at every evaluated position, the
@@ -542,7 +554,7 @@ class Search:
         sided = self._sided(node.mover)
         if not sided and self.stance == "paranoid":
             totals = self.rank_rows(node.totals, node.mover) + lost_value(
-                self.stance, node.totals.shape[1]
+                self.stance, live_seats(node.game)
             ) * node.virtual
             means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
             bonus = self.exploration * node.prior * math.sqrt(max(total, 1e-8)) / (1 + counts)
@@ -551,7 +563,7 @@ class Search:
         # floats -- the same operations in the same order, so the same bits --
         # since a node's few edges cost less as a loop than as array calls.
         # A side's loss is one of `against` winning: 0, as for `own`.
-        lost = 0.0 if sided else lost_value(self.stance, node.totals.shape[1])
+        lost = 0.0 if sided else lost_value(self.stance, live_seats(node.game))
         root = math.sqrt(max(total, 1e-8))
         exploration = self.exploration
         best, best_score = 0, -math.inf
@@ -658,9 +670,13 @@ class Search:
         elif self.stance == "own":
             node.ranked[index] += visits * vector[node.mover]
         elif self.stance == "relative":
-            seats = vector.size
+            # Over the seats still playing (`live_seats`): a retired seat
+            # neither counts nor adds its column to the total.
+            seats = live_seats(node.game)
             if total is None:
                 total = float(vector.sum())
+            for retired in node.game.locked:
+                total -= float(vector[retired])
             node.ranked[index] += visits * (vector[node.mover] * seats - total) / (seats - 1)
 
     def _expand(self, nodes: Sequence[Node], seats: Sequence[int] | None = None) -> None:

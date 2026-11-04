@@ -21,6 +21,12 @@ Only the root branches. Below it the policy plays, and the policy never sees
 a world's coming rolls, so no choice in a playout plans around dice it could
 not know.
 
+Where the native engine is built and the policy can read it
+(`native_contract`, a contract-9 policy), each world's copy is held natively
+(`hexset.native.playout.NativeCopy`) from the candidate on: the same moves,
+the same chance streams and the same rows for the policy, at a fraction of
+the Python engine's cost per move.
+
 Every decision is kept in `PairedRollouts.decision_log` with what it was
 made from: the outcome of each candidate in each world, and the value head's
 read of each playout at the mover's turn starts `marks` turns on. Fewer
@@ -45,6 +51,7 @@ import numpy as np
 from .actions import Action, apply, legal_actions
 from .chance import Balanced, Live
 from .game import Game, Phase, imagine, is_over, to_move
+from .native.playout import NativeCopy, copyable, held
 from .victory import public_victory_points
 from .view import HoldReading
 
@@ -387,13 +394,28 @@ def play_lanes(
     return RolloutBatch.from_tasks(policy, tasks, moves, seat, start, marks).advance(horizon)
 
 
+def _to_move(game) -> int:
+    return game.to_move() if type(game) is NativeCopy else to_move(game)
+
+
+def _legal(game) -> tuple[Action, ...]:
+    return game.legal() if type(game) is NativeCopy else tuple(legal_actions(game))
+
+
+def _apply(game, action: Action) -> None:
+    if type(game) is NativeCopy:
+        game.apply(action)
+    else:
+        apply(game, action)
+
+
 def _stops(game: Game, seat: int, start: int, horizon: int | None) -> bool:
     if is_over(game):
         return True
     return (
         horizon is not None
         and game.turns - start >= horizon
-        and to_move(game) == seat
+        and _to_move(game) == seat
         and game.phase is Phase.ROLL
     )
 
@@ -463,12 +485,21 @@ class RolloutBatch:
         return batch
 
     def add_tasks(self, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action]) -> tuple[int, ...]:
-        """Append paired copies for new worlds or moves; return their indices."""
+        """Append paired copies for new worlds or moves; return their indices.
+        A world the native engine can hold for this policy (`copyable`) is
+        copied once and held natively, each move's copy a fork of it."""
         copies = []
+        contract = getattr(self.policy, "native_contract", None)
         for world, seed in tasks:
-            for move in moves:
-                copy = paired_copy(world, seed, self.seat)
-                apply(copy, move)
+            base = paired_copy(world, seed, self.seat)
+            native = held(base) if contract is not None and copyable(base, contract, self.policy.space) else None
+            for k, move in enumerate(moves):
+                if native is not None:
+                    copy = native.fork()
+                    copy.apply(move)
+                else:
+                    copy = base if k == 0 else paired_copy(world, seed, self.seat)
+                    apply(copy, move)
                 copies.append(copy)
         return self.add(copies)
 
@@ -507,7 +538,7 @@ class RolloutBatch:
                if self.reached[i] < len(self.marks)
                and not is_over(self.games[i])
                and self.games[i].turns - self.start >= self.marks[self.reached[i]]
-               and to_move(self.games[i]) == self.seat
+               and _to_move(self.games[i]) == self.seat
                and self.games[i].phase is Phase.ROLL]
         if not due:
             return
@@ -535,7 +566,7 @@ class RolloutBatch:
         live = [i for i in selected if not self.blocked[i] and self.counts[i] < STEP_LIMIT
                 and not _stops(self.games[i], self.seat, self.start, horizon)]
         while live:
-            rows = [(self.games[i], to_move(self.games[i]), tuple(legal_actions(self.games[i]))) for i in live]
+            rows = [(self.games[i], _to_move(self.games[i]), _legal(self.games[i])) for i in live]
             moving = [(i, row) for i, row in zip(live, rows) if row[2]]
             self.counts[live] += 1
             for i, row in zip(live, rows):
@@ -543,7 +574,7 @@ class RolloutBatch:
                     self.blocked[i] = True
             chosen = self.policy.act_rows([row for _, row in moving])
             for (i, _), action in zip(moving, chosen):
-                apply(self.games[i], action)
+                _apply(self.games[i], action)
                 self.scores[i] = np.nan
             live = [i for i, _ in moving if self.counts[i] < STEP_LIMIT
                     and not _stops(self.games[i], self.seat, self.start, horizon)]

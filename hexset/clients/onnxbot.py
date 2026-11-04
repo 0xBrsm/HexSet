@@ -10,7 +10,9 @@ records are subsets of it), run by `V2Policy`, or contract 9, the contract-9
 observation and a decision's arrays in, the decision out, run by
 `DecisionPolicy`. Either way the graph masks, chooses and states its answer
 in HexSet's action contract, and the runner only supplies what the graph
-declares and reads the answer back. Anything else is refused at load.
+declares and reads the answer back. Anything else is refused at load. A
+file that names a `committee` of member files beside it is played as their
+product vote (`hexset.clients.committee`), led by itself.
 """
 
 from __future__ import annotations
@@ -28,13 +30,13 @@ from hexset import contract9, decisions as D
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
 from hexset.clients.netbot import NetworkBot, bot_for, declared_closer, declared_trader, rollouts_for, searcher_for
-from hexset.encoding import from_frame
-from hexset.game import Game, Phase, pending_free_roads
+from hexset.game import Game
 from hexset.lockstep import forward
 from hexset.mcts import Search
 from hexset.rollout import RolloutPool, SharedPools
 from hexset.clients.onnxmeta import modes_of
 from hexset.clients.batching import coalesce, coalesce_rows
+from hexset.clients.committee import Committee, members_of
 from hexset.clients.finishing import Finishing
 from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
@@ -194,12 +196,6 @@ DECISION_INPUTS = ("observation",) + D.ARRAYS
 _PER_ROW = ("observation", "flat", "setup")
 
 
-def _inside(game: Game) -> bool:
-    """Whether `game` stands inside a decision begun a move at a time (a setup
-    road or a free road owed), which `hexset.decisions.tensors` refuses."""
-    return game.phase is Phase.SETUP_ROAD or bool(pending_free_roads(game))
-
-
 class DecisionPolicy:
     """A graph that answers a seat's whole decision, as a
     `hexset.clients.policy.Policy` (structurally; it inherits nothing).
@@ -248,6 +244,13 @@ class DecisionPolicy:
         self.has_prior = "prior" in {o.name for o in session.get_outputs()}
         self._plans = D.Plans()
 
+    @property
+    def native_contract(self) -> str | None:
+        """The contract a playout may hold its copies natively for
+        (`hexset.native.playout`): the graph's, unless it reads the double
+        turn as one decision, which a native copy does not state."""
+        return None if "double_rows" in self.inputs else self.contract
+
     def _feed(self, rows: Sequence[tuple[Game, int]], decisions: Sequence["D.Decision | None"]) -> dict:
         """Every input the graph declares, for `rows` and their `decisions`
         (`None` for a row asked nothing but its value)."""
@@ -255,7 +258,7 @@ class DecisionPolicy:
         arrays = None
         for name in self.inputs:
             if name == "observation":
-                feed[name] = np.stack([contract9.flatten(contract9.encode9(game, seat, self.contract)) for game, seat in rows])
+                feed[name] = np.stack([contract9.observation_row(game, seat, self.contract) for game, seat in rows])
             else:
                 if arrays is None:
                     arrays = D.arrays(decisions, self.space, self.topology)
@@ -276,16 +279,14 @@ class DecisionPolicy:
         return result if grouped is None else {key: value[grouped.inverse] for key, value in result.items()}
 
     def _decision(self, game: Game, seat: int) -> "D.Decision":
-        if _inside(game):
-            return D.atomic(game, seat, self.space)
-        return D.tensors(game, seat, self.space, double_turn="double_rows" in self.inputs)
+        return D.decision_at(game, seat, self.space, double_turn="double_rows" in self.inputs)
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
-        """`value`, turned to board-seat order (`hexset.encoding.from_frame`)."""
+        """`value`, turned to board-seat order (`hexset.encoding.SeatFrame.to_board`)."""
         if not rows:
             return []
         value = self._run(self._feed(rows, [None] * len(rows)), ["value"])["value"]
-        return [tuple(float(v) for v in from_frame(value[i], seat)) for i, (_, seat) in enumerate(rows)]
+        return [D.frame_for(game, seat, self.space).to_board(value[i]) for i, (game, seat) in enumerate(rows)]
 
     def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
         """One move per row: the plan's next, or the first of the decision
@@ -317,8 +318,9 @@ class DecisionPolicy:
         decisions = [self._decision(game, seat) for game, seat in rows]
         got = self._run(self._feed(rows, decisions), ["decision"])["decision"]
         incidences = contract9.incidences(self.topology)
-        return [D.option_of(decision, int(kind), int(index), incidences, seat, self.space, self.players)
-                for decision, (_, seat), (kind, index) in zip(decisions, rows, got)]
+        return [D.option_of(decision, int(kind), int(index), incidences, seat, self.space, self.players,
+                            D.frame_for(game, seat, self.space))
+                for decision, (game, seat), (kind, index) in zip(decisions, rows, got)]
 
     def _finish(self, choose, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
         """A position inside a decision with no plan: the graph's decision
@@ -344,11 +346,12 @@ class DecisionPolicy:
         got = self._run(self._feed([(game, seat) for game, seat, _ in rows], decisions), ["prior", "value"])
         out = []
         for i, (game, seat, options) in enumerate(rows):
-            index = [D.flat_index(self.space, option, seat, self.players) for option in options]
+            frame = D.frame_for(game, seat, self.space)
+            index = [D.flat_index(self.space, option, seat, self.players, frame) for option in options]
             weights = got["prior"][i][index].astype(np.float64)
             total = weights.sum()
             prior = weights / total if total > 0 else np.full(len(index), 1.0 / len(index))
-            out.append((prior, tuple(float(v) for v in from_frame(got["value"][i], seat))))
+            out.append((prior, frame.to_board(got["value"][i])))
         return out
 
 
@@ -486,6 +489,9 @@ def _load_cached(
         policy = V2Policy(session, space)
     if finish_decisions_config(meta):
         policy = Finishing(policy)
+    members = members_of(meta)
+    if members:
+        policy = Committee([policy, *(_member(path, name, topology, device, threads) for name in members)])
     if search.searches and not getattr(policy, "has_prior", True):
         raise ValueError(
             f"{path} asks to be searched (`search` {meta.get('search')}) but declares no `prior`"
@@ -511,6 +517,19 @@ def _load_cached(
         robber_tip=robber_tip_config(meta),
         modes=modes_of(meta),
     )
+
+
+def _member(path: str, name: str, topology: Topology, device: str, threads: int | None):
+    """The policy of the committee member `name`, the file of that name beside
+    `path` (`hexset.clients.committee`), loaded as any file is. A member that
+    declares a committee of its own is refused."""
+    member = os.path.join(os.path.dirname(os.path.abspath(path)), name)
+    if not os.path.isfile(member):
+        raise ValueError(f"{path} names the committee member {name!r}, which is not beside it")
+    loaded = load(member, topology, device, threads)
+    if isinstance(loaded.policy, Committee):
+        raise ValueError(f"{path}'s committee member {name!r} declares a committee of its own")
+    return loaded.policy
 
 
 def _required_int(meta: dict[str, str], key: str, path: str) -> int:
@@ -585,6 +604,19 @@ def network_bot(
     return bot_for(load(path, board.topology, device, threads), rng=rng, own_calibration=own_calibration)
 
 
+def seats_fit(trained: int, dealt: int, game_type: str | None = None) -> bool:
+    """Whether a checkpoint trained for `trained` seats can sit at a table
+    dealt `dealt`: every dealt seat, or, where the table's `game_type` plays
+    fewer live seats than it deals (the rest retired at the deal), exactly
+    that many (`hexset.clients.netbot`'s seat check reads the same at play)."""
+    if trained == dealt:
+        return True
+    from hexset.rules import GAME_TYPES
+
+    kind = GAME_TYPES.get(game_type) if game_type is not None else None
+    return kind is not None and trained < dealt and kind.plays(trained)
+
+
 def spawn(
     path: str,
     board,
@@ -615,12 +647,14 @@ def spawn(
     `trader` or `closer` no loaded runtime registers
     (`netbot.declared_trader`, `netbot.declared_closer`) and,
     where the caller passes the table's `players`, a checkpoint trained for
-    another player count, and where it passes the table's `game_type` (a
+    another player count (`seats_fit`: a checkpoint built for the live seats
+    a `game_type` plays at a table dealt more, as a duel dealt four with two
+    retired, fits), and where it passes the table's `game_type` (a
     `hexset.rules.GAME_TYPES` name), one whose `modes` do not include it."""
     from hexset.arena import closed, traded
 
     loaded = load(path, board.topology, device, threads)
-    if players is not None and players != loaded.players:
+    if players is not None and not seats_fit(loaded.players, players, game_type):
         raise ValueError(
             f"{path} was trained for {loaded.players} players, not this table's {players}"
         )

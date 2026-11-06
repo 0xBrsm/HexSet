@@ -18,7 +18,7 @@ import random
 from hexset.gym import LaneEnv
 
 rng = random.Random(0)
-env = LaneEnv(players=4, seed=0, lanes=4, deal=8, action_cap=40, records=True)
+env = LaneEnv(players=4, seed=0, lanes=4, deal=8, action_cap=40)
 episodes = []
 while env.running:
     requests = env.requests()
@@ -44,8 +44,8 @@ actions. A missing answer (`None`) is played by the seat's configured bot;
 an unanswered seat without a bot raises `ValueError`, as does an illegal
 action, before any lane advances. Finished games return as `Episode` objects
 with per-seat decision histories, every cleared exchange and an `Outcome`.
-With `records=True`, `episode.record` holds a `hexset.record.Record` for
-replay.
+Every game is recorded: `episode.record` holds its `hexset.record.Record`
+for replay.
 
 During a seven's discards several seats owe at once. `discard_order="seat"`
 (the default) asks the lowest owing seat first; `discard_order="random"`
@@ -112,20 +112,25 @@ import random
 from hexset.bench.versus import BotPolicy, compete_batched
 from hexset.bots import RandomBot
 
-policies = {0: BotPolicy(lambda board: RandomBot(random.Random(0))),
-            1: BotPolicy(lambda board: RandomBot(random.Random(1)))}
+policies = {0: BotPolicy(lambda board: RandomBot(random.Random(0)),
+                         seat_spawn=lambda board, rng: RandomBot(rng)),
+            1: BotPolicy(lambda board: RandomBot(random.Random(1)),
+                         seat_spawn=lambda board, rng: RandomBot(rng))}
 verdict = compete_batched(
     policies, games=8, players=4, seed=0, lanes=4, action_cap=40,
+    journal="batched.games.jsonl",
 )
 print(verdict.metrics())
 ```
 
 This is an interface example, not a strength comparison. The runner seed
-controls game generation, not sampling inside a runtime. `BotPolicy` builds
-one bot per board and policy ID and keeps it, with its random generator, in
-an LRU cache of 256 boards (`capacity`); a bot shared across games makes its
-draws depend on lane count and request order. For scheduling-independent
-sampling, key randomness by game index, seat and decision step.
+controls game generation, not sampling inside a runtime. The lanes build
+each seat a bot of its own for the game, off `seat_spawn(board, rng)` with
+the stream `hexset.arena.seat_key` names for that game and seat, or off
+`spawn(board)` without one, so a bot that draws from `rng` plays the same
+moves at any lane count. `BotPolicy`'s own `act` and `gate`, for a caller
+with no lanes, share one bot per board in an LRU cache of 256 boards
+(`capacity`).
 
 A batch policy implements `act(requests)` and returns one action per
 request; an optional `gate(game, seat)` returns that seat's trade gate.
@@ -137,8 +142,8 @@ the checkpoint's network trade gate, and without one the seat never trades.
 `games`, and plays each board under both seatings. The `Verdict` holds
 standings, Wilson intervals, board-level win-rate and victory-point
 intervals, and the count of truncated games; `metrics()` flattens it
-([evaluation.md](evaluation.md#intervals)). `episodes=True, records=True`
-keeps every episode, with its record, in `verdict.episodes`.
+([evaluation.md](evaluation.md#intervals)). `episodes=True` keeps every
+episode, with its record, in `verdict.episodes`.
 
 ## Model runtimes
 

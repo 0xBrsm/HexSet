@@ -401,7 +401,7 @@ def profiled_bot():
     from hexset.arena import PRESETS, register_preset, unregister_preset
 
     register_preset("profiled", PRESETS["test-trader"],
-                    profile={"version": "2.11.1", "owner": "octocat", "description": "A rules bot."})
+                    profile={"version": "1.0", "owner": "octocat", "description": "A rules bot."})
     yield "profiled"
     unregister_preset("profiled")
 
@@ -410,7 +410,7 @@ def test_a_presets_profile_is_held_to_a_clients_rules(profiled_bot):
     from hexset.arena import PRESETS, preset_profile, register_preset
 
     held = preset_profile(profiled_bot)
-    assert held == {"version": "2.11.1", "owner": "octocat", "description": "A rules bot."}
+    assert held == {"version": "1.0", "owner": "octocat", "description": "A rules bot."}
     for profile in ({"name": "x"}, {"url": "ftp://example.org"}, {"owner": 7}, {"description": "x" * 101}):
         with pytest.raises(ValueError):
             register_preset("badly-profiled", PRESETS["test-trader"], profile=profile)
@@ -419,18 +419,18 @@ def test_a_presets_profile_is_held_to_a_clients_rules(profiled_bot):
 
 def test_a_bots_profile_is_listed_journalled_and_shown_in_its_rankings_row(tmp_path, profiled_bot):
     def rank(games):
-        rows = [{"name": "rehex", "id": f"bot:{profiled_bot}", "games": 12}]
+        rows = [{"name": "mybot", "id": f"bot:{profiled_bot}", "games": 12}]
         return {"boards": [{"key": "all", "title": "All", "columns": [], "rows": rows}]}
 
     tables = new_tables(games_dir=str(tmp_path), ranker=rank, ranked_bot=profiled_bot)
     listed = tables.handle("GET", "/api/models", {}, None)["game_types"]["duel-variant"][profiled_bot]
-    assert listed["version"] == "2.11.1" and listed["owner"] == "octocat"
+    assert listed["version"] == "1.0" and listed["owner"] == "octocat"
 
     tables.deal_ranked("duel-variant", [{"id": "a" * 64, "kind": "api"}], profiled_bot, 1, [None])
     header = json.loads(next(tmp_path.glob("*.jsonl")).read_text().splitlines()[0])
     [bot] = header["bots"].values()
-    assert bot == {"name": profiled_bot, "spec": profiled_bot, "version": "2.11.1"}
+    assert bot == {"name": profiled_bot, "spec": profiled_bot, "version": "1.0"}
 
     tables.rankings.wait()
     [row] = tables.handle("GET", "/api/rankings", {}, None)["boards"][0]["rows"]
-    assert (row["name"], row["version"], row["owner"], row["url"]) == ("rehex", "2.11.1", "octocat", None)
+    assert (row["name"], row["version"], row["owner"], row["url"]) == ("mybot", "1.0", "octocat", None)

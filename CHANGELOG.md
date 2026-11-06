@@ -5,6 +5,21 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.26.1
+
+### Fixed
+
+- **The docs' examples run as written.** The guide's first example plays its
+  games through `compete` with a `journal` (the removed `play_game` is gone
+  from it), and the `compete`, `LaneEnv` and `compete_batched` examples in the
+  guide, `docs/evaluation.md` and `docs/training.md` no longer pass the removed
+  `records` argument and name the `journal` a run requires. `docs/training.md`
+  describes the lanes building each seat its own bot per game, from
+  `seat_spawn` and the seat's stream.
+- **Examples name example bots.** The `/api/models` example in `docs/api.md`
+  and the handoff example in `docs/guide.md` use `mybot` and `policy.onnx`.
+
+
 ## 1.26.0
 
 ### Added

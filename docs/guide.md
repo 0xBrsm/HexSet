@@ -9,29 +9,31 @@ Gymnasium adapters are [training.md](training.md); the server is
 
 ## Run a game
 
-`deal_game` builds a game from a seed and a game index; `play_game` seats one
-bot per seat and steps the game until it is over or `action_cap` actions have
-been taken:
+`compete` plays games and keeps each one, its record included, in the journal
+it is given; nothing plays a game without one. Four games of four random
+seats, rotating every entrant through every seat:
 
 ```python
-import random
+from hexset.arena import Entrant, compete
+from hexset.game import UNSTRUCTURED_TURN_CAP
 
-from hexset.arena import deal_board, deal_game, play_game
-from hexset.bots import RandomBot
-
-board = deal_board(seed=0, index=0)
-game = deal_game(seed=0, index=0, players=4, board=board)
-rng = random.Random(0)
-bots = [RandomBot(rng) for _ in range(4)]
-finished = play_game(game, bots)
+tournament = compete(
+    [Entrant(f"random-{i}", kind="random") for i in range(4)],
+    games=4,
+    seed=0,
+    turn_cap=UNSTRUCTURED_TURN_CAP,
+    journal="random.games.jsonl",
+)
+record = tournament.records[0]
 ```
 
 A game is over when a seat wins or when `game.turns` reaches the game's
 `turn_cap` (default `hexset.game.MAX_TURNS`, 300 turns summed over all
-seats), which ends it with `won_by` `None`. `play_game`'s `action_cap`
-defaults to `hexset.arena.MAX_ACTIONS` (20000). `play_game` raises nothing at
-the turn cap; `compete` raises `Exhausted`, and `compete_batched` counts
-the game in `Verdict.exhausted`, with neither side winning.
+seats), which ends it with `won_by` `None`. `compete` raises `Exhausted` at
+the turn cap, and `compete_batched` counts the game in `Verdict.exhausted`,
+with neither side winning. Random seats run past `MAX_TURNS` in most games,
+hence `UNSTRUCTURED_TURN_CAP` (3000) above. `action_cap` defaults to
+`hexset.arena.MAX_ACTIONS` (20000).
 
 `deal_board(seed, index)` is the board `deal_game` deals for that
 `(seed, index)`; passing it explicitly lets a bot that needs the board be
@@ -103,7 +105,7 @@ refused.
 
 ### Handoffs
 
-`handoff:14:heximax|mcts:it50.onnx@128` plays Heximax's moves through round
+`handoff:14:mybot|mcts:policy.onnx@128` plays `mybot`'s moves through round
 14 -- each seat's own turns 1 to 14 and every decision it makes in those
 rounds -- and the search's from round 15 on (`hexset.bots.Handoff`,
 `hexset.bots.handed_off`). The round is read off `Game.turns`, so every seat
@@ -122,7 +124,7 @@ seats a lineup takes out of trading (below):
 
 | Mode | Trading |
 | --- | --- |
-| `"round"` (default) | The engine runs offer-and-answer rounds. `play_game`, `compete`, `LaneEnv` and every bench command use it |
+| `"round"` (default) | The engine runs offer-and-answer rounds. `compete`, `LaneEnv` and every bench command use it |
 | `"auto"` | The engine's exhaustive clearing house deals until nothing clears, ranking candidates by `Game.trade_rule`: `"egalitarian"` (default) maximises the smaller of the two gains, `"nash"` their product, `"actor"` the actor's own. Research only |
 | `"external"` | The engine runs nothing; a served session runs the same rounds across requests |
 
@@ -203,7 +205,7 @@ tournament = compete(
     seed=0,
     worker_initializer=register_example,
     action_cap=40,
-    records=True,
+    journal="example.games.jsonl",
 )
 ```
 
@@ -309,9 +311,9 @@ The shared pieces:
 ## Inspect behaviour
 
 Take records from the run that produces the score.
-`compete(..., records=True)` returns them in `Tournament.records`, in game
-order; `compete_batched(..., episodes=True, records=True)` attaches one to
-each episode. `hexset.record.write(path, records)` appends them as JSON lines
+Every game is recorded: `compete` returns the records in
+`Tournament.records`, in game order, and keeps them in its journal;
+`compete_batched(..., episodes=True)` attaches one to each episode. `hexset.record.write(path, records)` appends them as JSON lines
 and `read(path)` yields them back. `replay(record)` replays every action,
 checking legality, the chance stream and the recorded result, and returns the
 final position; `replay_to(record, ply)` returns the position after `ply`

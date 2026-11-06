@@ -415,12 +415,12 @@ with the `name`, `version` and `commit` a model file declares, and the
 registered with ([guide.md](guide.md)):
 
 ```json
-{"models": ["rehex", "mynet-1.0", "mynet-1.0d"],
- "game_types": {"standard": {"rehex": {"version": "2.11.1", "owner": "octocat",
-                                       "description": "A rules-based reflex agent for 4p and duels."},
+{"models": ["mybot", "mynet-1.0", "mynet-1.0d"],
+ "game_types": {"standard": {"mybot": {"version": "1.0", "owner": "octocat",
+                                       "description": "A rules bot for every game type."},
                              "mynet-1.0": {"name": "mynet", "version": "1.0", "commit": "0123abcd"}},
-                "duel-variant": {"rehex": {"version": "2.11.1", "owner": "octocat",
-                                           "description": "A rules-based reflex agent for 4p and duels."},
+                "duel-variant": {"mybot": {"version": "1.0", "owner": "octocat",
+                                           "description": "A rules bot for every game type."},
                                  "mynet-1.0d": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
 ```
 

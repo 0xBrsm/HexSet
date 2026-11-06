@@ -107,7 +107,7 @@ entrants = [Entrant("control-a", kind="random"),
             Entrant("control-b", kind="random")]
 settings = dict(seed=7, workers=1, action_cap=40, antithetic=True)
 before = experiment.provenance(entrants)
-result = compete(entrants, games=2, records=True, **settings)
+result = compete(entrants, games=2, journal="result.games.jsonl", **settings)
 document = experiment.result_document(
     result, entrants, run_provenance=before, **settings,
 )

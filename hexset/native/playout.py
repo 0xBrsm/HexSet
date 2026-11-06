@@ -13,8 +13,8 @@ drawing chance from a copy of the same streams.
 
 A copy is native only where `copyable` says the position and the policy's
 contract are supported; otherwise a playout keeps its Python copy. A
-contract-9d (two-seat) policy is held natively at a two-seat table and at one
-dealt more seats with all but two retired, where it counts the live seats
+two-seat policy (contract 9d, 9d.1 or 11d) is held natively at a two-seat
+table and at one dealt more seats with all but two retired, where it counts the live seats
 alone (`hexset.encoding.seat_frame`). Setting the environment variable
 `HEXSET_NATIVE_PLAYOUTS=0` keeps every copy the Python engine's, to compare the
 two engines on the same games; native copies are the default.
@@ -35,9 +35,9 @@ from .state import NativeState, available
 __all__ = ["NativeCopy", "copyable", "held"]
 
 #: The contracts the native engine encodes (`hexset.native.supported`).
-_CONTRACTS = ("9", "9.1", "9d", "9d.1")
+_CONTRACTS = ("9", "9.1", "9d", "9d.1", "11d")
 #: The two-seat contracts, read at a table's two live seats.
-_DUEL = ("9d", "9d.1")
+_DUEL = ("9d", "9d.1", "11d")
 #: Set to "0" to keep every playout copy the Python engine's (module docstring).
 SWITCH = "HEXSET_NATIVE_PLAYOUTS"
 
@@ -58,8 +58,8 @@ def copyable(game: Game, contract: str | None, space: ActionSpace) -> bool:
     """Whether a playout copy of `game` may be held natively for a policy
     that reads `contract` over `space`: the native extension is built and
     not switched off (`SWITCH`), the contract is one it encodes, and the
-    policy counts every dealt seat, or is a two-seat (9d) policy at a table
-    with two live seats. Whether the position itself is a supported
+    policy counts every dealt seat, or is a two-seat (9d or 11d) policy at a
+    table with two live seats. Whether the position itself is a supported
     no-trade one is `held`'s to find out."""
     if contract not in _CONTRACTS or os.environ.get(SWITCH) == "0" or not available():
         return False

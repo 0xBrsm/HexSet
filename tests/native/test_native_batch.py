@@ -29,11 +29,11 @@ def lane(game, index=0, cap=100):
                                   action_cap=cap, cast=tuple(range(game.num_players)))
 
 
-def batch(games, *, cap=100, keep=lambda completion: None, **kwargs):
+def batch(games, *, cap=100, keep=lambda completion: None, contract=None, **kwargs):
     lanes = [lane(game, i, cap) for i, game in enumerate(games)]
     return NativeBatch(lanes, space=space_for(games[0]),
         pairs=contract9.incidences(games[0]._state.board.topology),
-        contract="9d" if games[0].num_players == 2 else "9",
+        contract=contract or ("9d" if games[0].num_players == 2 else "9"),
         planned_indices=range(len(games)+1), keep=keep, **kwargs)
 
 
@@ -223,6 +223,16 @@ class NativeBatchProtocols(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed"):
             group.advance([chosen])
         self.assertFalse(group.lanes[0].tape.actions)
+
+    def test_contract_11d_requests_read_as_python_at_a_two_seat_table(self):
+        games = [position(2), position(2)]
+        self.assertTrue(supported(games[0], "11d"))
+        group = batch(games, contract="11d")
+        for request, game in zip(group.requests(), games):
+            expected = contract9.flatten(contract9.encode9(game, request.seat, "11d"))
+            nine = contract9.flatten(contract9.encode9(game, request.seat, "9d"))
+            self.assertNotEqual(len(expected), len(nine))
+            self.assertEqual(request.observation.tobytes(), expected.tobytes())
 
     def test_preflight_fallback_before_native_import(self):
         game = position(2)

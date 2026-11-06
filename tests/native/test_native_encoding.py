@@ -113,6 +113,8 @@ class NativeEncoding(unittest.TestCase):
                     self.assert_row(game, native, seat, contract)
                     if contract == "9d":
                         self.assertEqual(len(encode9(native, seat, contract)), 828)
+                    if contract == "11d":
+                        self.assertEqual(len(encode9(native, seat, contract)), 1000)
             edge = native.core.placement_queries(0)["roads"][0]
             native.core.place_road(0, edge)
             updated = native.restore_referee()
@@ -194,6 +196,7 @@ class NativeEncoding(unittest.TestCase):
             with self.assertRaises(ValueError): encode9(native, seat)
         with self.assertRaises(ValueError): encode9(native, 0, "unknown")
         with self.assertRaises(ValueError): encode9(native, 0, "9d")
+        with self.assertRaises(ValueError): encode9(native, 0, "11d")
 
 
 if __name__ == "__main__":

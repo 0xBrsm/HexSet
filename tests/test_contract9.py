@@ -587,3 +587,100 @@ def test_9d1_appends_each_seats_production_and_bank_rates_to_9d():
                 producing += bool(b.seats[row, C1["production"]].sum() > 0)
             seen += 1
     assert seen > 100 and ported > 10 and producing > 50
+
+
+# --- contract 11d: two seat tokens of their own widths, no table ---------------
+
+
+def test_11d_is_two_tokens_and_the_board_block():
+    """11d holds my token (35) then the opponent's (27), end to end, the
+    board block (the turn count, the seven's chance, rolled) as its table, 17-wide
+    hexes and 9d's vertices and links: 1,000 floats at the standard board,
+    refused at any table that is not two live seats."""
+    from hexset.contract9 import BOARD_COLUMNS_11D as B, MY_COLUMNS_11D as M, OTHER_COLUMNS_11D as O
+
+    assert contract9.features("11d") == (62, 3) and hex_features("11d") == 17
+    lay = layout(2, 19, 54, 72, "11d")
+    assert lay.width == 35 + 27 + 3 + 19 * 17 + 54 * 7 + 54 + 72 + 2 * 54 == 1000
+    assert lay.shapes["seats"] == (62,) and lay.shapes["table"] == (3,)
+    assert max(c.stop for c in M.values()) == 35 and max(c.stop for c in O.values()) == 27
+    assert set(B) == {"turn", "seven", "rolled"} and not set(B) & {*M, *O}
+    public = ("hand", "points", "to_longest_road", "to_largest_army", "pieces", "production", "rates")
+    assert [M[name] for name in public] == [O[name] for name in public]
+    assert {"me", "on_turn", "opened", "must_discard", "dev_new", "dev_played", "setup", "robber"}.isdisjoint({*M, *O})
+    for players in (3, 4):
+        with pytest.raises(ValueError, match="two-seat"):
+            layout(players, 19, 54, 72, "11d")
+    with pytest.raises(ValueError, match="two-seat"):
+        encode9(a_game(), 0, "11d")
+    for game in duel_positions(count=2, steps=60):
+        for p in range(2):
+            o = encode9(game, p, "11d")
+            assert o.seats.shape == (62,) and o.table.shape == (3,) and o.hexes.shape == (19, 17)
+            flat = flatten(o)
+            assert flat.shape == (1000,)
+            for name, piece in lay.slices.items():
+                np.testing.assert_array_equal(flat[piece].reshape(lay.shapes[name]), getattr(o, name))
+
+
+def test_11d_reads_each_column_as_9d1_and_9d_read_it():
+    """Every 11d column holds the bytes 9d.1 or 9d holds for it: the public
+    columns of each seat's token, the opponent's development cards held and
+    their ages, my development cards and the unseen from 9d's table, and the
+    board block's turn, seven and rolled from 9d's table too; the board part bit for bit, and each hex's
+    number one-hot over 2-6 and 8-12 (none for the desert) in place of its
+    number over 12. At a table of two and at one dealt
+    four with two retired."""
+    from hexset.contract9 import (
+        BOARD_COLUMNS_11D as B, HEX_COLUMNS_11D as H2, MY_COLUMNS_11D as M, OTHER_COLUMNS_11D as O,
+        SEAT_COLUMNS_9D1 as C1,
+    )
+
+    public = ("hand", "points", "to_longest_road", "to_largest_army", "pieces", "production", "rates")
+    from_table = ("dev_mine", "dev_playable", "dev_pool")
+    seen = 0
+    for game in [*duel_positions(count=3, steps=300), *retired_duel_positions(count=2, steps=300)]:
+        live = [s for s in range(game._state.num_players) if s not in game.locked]
+        for p in live:
+            nine, one, two = encode9(game, p, "9d"), encode9(game, p, "9d.1"), encode9(game, p, "11d")
+            mine, other = two.seats[:35], two.seats[35:]
+            for name in public:
+                assert mine[M[name]].tobytes() == one.seats[0, C1[name]].tobytes(), name
+                assert other[O[name]].tobytes() == one.seats[1, C1[name]].tobytes(), name
+            for name in ("dev_held", "dev_oldest"):
+                assert other[O[name]].tobytes() == one.seats[1, C1[name]].tobytes(), name
+            for name in from_table:
+                assert mine[M[name]].tobytes() == nine.table[T9D[name]].tobytes(), name
+            for name in ("turn", "seven", "rolled"):
+                assert two.table[B[name]].tobytes() == nine.table[T9D[name]].tobytes(), name
+            for name in ("vertices", "vertex_owner", "road_owner", "reach"):
+                assert getattr(two, name).tobytes() == getattr(nine, name).tobytes(), name
+            for name in ("terrain", "odds", "robber"):
+                assert two.hexes[:, H2[name]].tobytes() == nine.hexes[:, H9D[name]].tobytes(), name
+            tokens = game._state.board.tokens
+            numbers = np.asarray([[t == n for n in (2, 3, 4, 5, 6, 8, 9, 10, 11, 12)] for t in tokens], dtype=np.float32)
+            assert two.hexes[:, H2["number"]].tobytes() == numbers.tobytes()
+            assert (two.hexes[:, H2["number"]].sum(1) == [float(t != 0) for t in tokens]).all()
+            seen += 1
+    assert seen > 100
+
+
+def test_11d_reads_no_constant_column():
+    """Every 11d column takes more than one value across random duels."""
+    from hexset.contract9 import HEX_COLUMNS_11D as H2, MY_COLUMNS_11D as M, OTHER_COLUMNS_11D as O
+
+    from hexset.contract9 import BOARD_COLUMNS_11D as B
+
+    rows, tables, hexes = [], [], []
+    for game in duel_positions(count=10, steps=700, every=3):
+        for p in range(2):
+            o = encode9(game, p, "11d")
+            rows.append(o.seats)
+            tables.append(o.table)
+            hexes.append(o.hexes)
+    s, t, h = np.stack(rows), np.stack(tables), np.concatenate(hexes)
+    assert not [name for name, cols in B.items() if (np.ptp(t[:, cols], axis=0) == 0).any()]
+    mine, other = s[:, :35], s[:, 35:]
+    assert not [name for name, cols in M.items() if (np.ptp(mine[:, cols], axis=0) == 0).any()]
+    assert not [name for name, cols in O.items() if (np.ptp(other[:, cols], axis=0) == 0).any()]
+    assert not [name for name, col in H2.items() if (np.ptp(h[:, col], axis=0) == 0).any()]

@@ -31,7 +31,7 @@ describes.
 of the game's existing Chance streams. It preserves the original Chance
 callbacks and their Recording events. `encode9(state, perspective, contract)`
 returns a fresh writable float32 observation for that perspective. Supported
-contracts are `9`, `9.1`, and the two-seat `9d` and `9d.1`, each byte for byte
+contracts are `9`, `9.1`, and the two-seat `9d`, `9d.1` and `11d`, each byte for byte
 as `hexset.contract9` encodes it; referee snapshots and true victory points
 are separate from visible observations.
 
@@ -48,9 +48,9 @@ of this page is the bridge it drives.
 
 Paired rollouts (`hexset.rollout`) hold each world's copy natively where they
 can (`hexset.native.playout.NativeCopy`): the extension is built, the
-searching policy reads one of the four contracts above (`native_contract`)
-over every dealt seat, or reads contract 9d or 9d.1 at a table with two live
-seats, and the position is a supported no-trade one. A table dealt four with
+searching policy reads one of the five contracts above (`native_contract`)
+over every dealt seat, or reads a two-seat contract (9d, 9d.1 or 11d) at a
+table with two live seats, and the position is a supported no-trade one. A table dealt four with
 two seats retired is such a table: the copy counts its live seats alone, the
 perspective first (`hexset.encoding.seat_frame`), as the Python engine does.
 A copy answers what the Python engine answers for the same position: the same
@@ -59,8 +59,8 @@ drawing chance from a copy of the same streams. A position the native engine
 refuses keeps its Python copy. `HEXSET_NATIVE_PLAYOUTS=0` in the environment
 keeps every copy a Python one, to compare the two engines on the same games.
 
-Batched requests (below) count every dealt seat, so they take contract 9d at
-a two-seat table only.
+Batched requests (below) count every dealt seat, so they take the two-seat
+contracts at a two-seat table only.
 
 ## Batched requests
 

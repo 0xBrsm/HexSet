@@ -376,12 +376,13 @@ def available():
 
 def supported(game, contract="9"):
     """Check the supported no-trade referee shape before choosing a backend.
-    Batched lanes (`hexset.gym.native`) count every dealt seat, so contract 9d
-    is supported at a two-seat table only; a playout copy holds it at a table
-    dealt more with two live seats too (`hexset.native.playout.copyable`)."""
-    if not available() or contract not in ("9", "9.1", "9d", "9d.1"):
+    Batched lanes (`hexset.gym.native`) count every dealt seat, so the
+    two-seat contracts (9d, 9d.1, 11d) are supported at a two-seat table
+    only; a playout copy holds them at a table dealt more with two live
+    seats too (`hexset.native.playout.copyable`)."""
+    if not available() or contract not in ("9", "9.1", "9d", "9d.1", "11d"):
         return False
-    if contract in ("9d", "9d.1") and game.num_players != 2:
+    if contract in ("9d", "9d.1", "11d") and game.num_players != 2:
         return False
     try:
         capture_referee(game)

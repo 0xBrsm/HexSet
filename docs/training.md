@@ -511,7 +511,7 @@ seat for a network that reads every seat the same way: each seat as a token
 (the perspective first, the others in turn order), the board as hexes and
 vertices, a building's or road's owner as a pointer to its seat's token.
 `flatten` lays it out as one float32 row (`layout`), and `observation_row`
-does both. Four contracts are served (`contract9.CONTRACTS`):
+does both. Five contracts are served (`contract9.CONTRACTS`):
 
 | Contract | Seats | Seat token | Table | Hex |
 | --- | --- | --- | --- | --- |
@@ -519,6 +519,7 @@ does both. Four contracts are served (`contract9.CONTRACTS`):
 | `9.1` | any | 40 | 35 | 8 |
 | `9d` | 2 | 22 | 20 | 8 |
 | `9d.1` | 2 | 32 | 20 | 8 |
+| `11d` | 2 | 35 and 27 | 3 | 17 |
 
 `hexset.contract9.encode9(game, seat, contract="9.1")` and
 `layout(players, hexes, vertices, edges, contract="9.1")` provide 40-feature
@@ -545,7 +546,14 @@ table token. Each hex carries the chance its number is the next roll, and
 the table the seven's. `9d.1` appends each seat's production by resource
 (`seat_production`: the cards a roll yields it at the dice's long-run odds,
 a city twice, nothing from the robber's hex) and its bank rate by resource
-over 4. The module docstring of `hexset.contract9` gives every column.
+over 4. `11d` is two-seat too, with each fact where it belongs: my token
+(35 wide) holds the public seat columns 9d.1 reads plus my development
+cards, those I can play and the cards I have not seen; the opponent's
+token (27 wide) holds the same public columns plus its development cards
+held and their ages; the table is a board block of the turn count, the
+next roll's chance of a seven and whether the dice have been thrown; and a
+hex reads its number one-hot over 2-6 and 8-12 (`NUMBERS_11D`). The module
+docstring of `hexset.contract9` gives every column.
 
 A two-seat network sits at a duel dealt four seats with two retired. It
 reads the table over the live seats alone (`hexset.encoding.SeatFrame`,

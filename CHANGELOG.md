@@ -5,6 +5,40 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.28.0
+
+### Added
+
+- **Contract 11d: two seat tokens of their own widths and a board block.**
+  `encode9(..., "11d")` is the two-seat observation, 1,000 floats on the
+  standard board, refused at any table that is not two live seats. Each fact
+  sits where it belongs: private facts on my seat token, facts about a place
+  on that place's token, public facts about the whole game on the board
+  block. `seats` is my token then the opponent's, end to end, and `table` is
+  the board block (`features("11d") == (62, 3)`). Both tokens open with the
+  same 21 public columns, as 9d.1 reads them: the hand by resource, points
+  over the winning points, the two award distances, pieces left, production
+  and bank rates. The opponent's token adds its development cards held and
+  their ages (27 wide, `OTHER_COLUMNS_11D`); mine adds my development cards
+  by kind, those I may play and the cards I have not seen by kind, as 9d's
+  table reads them (35 wide, `MY_COLUMNS_11D`). The board block holds the
+  turn count, the next roll's chance of a seven and whether the dice have
+  been thrown this turn (`BOARD_COLUMNS_11D`). The seat order, whose turn
+  it is, the snake opener, a discard owed, the cards bought this turn, a
+  card played this turn, the setup and robber phases are not read. A hex
+  is 17 wide (`HEX_COLUMNS_11D`): terrain, its number one-hot over 2-6 and
+  8-12 (`NUMBERS_11D`, none for the desert) in place of the number over 12,
+  the next roll's odds and the robber; vertices, owner pointers and reach
+  are 9d's. The native encoder writes it byte for byte, and the server
+  records `11d` as a known contract. A contract's minor version only
+  appends columns, so an earlier checkpoint loads into it; 11d removes and
+  changes columns, so it takes a new major number.
+
+- **Native playouts hold an 11d policy at a four-dealt duel table.** A
+  contract 11d policy searching at a table dealt four with two seats
+  retired plays its rollout copies on the native engine, as 9d and 9d.1 do
+  (`hexset.native.playout.copyable`).
+
 ## 1.27.0
 
 ### Added

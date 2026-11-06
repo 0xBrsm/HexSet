@@ -3,12 +3,12 @@
 HexSet loads ONNX checkpoints through `hexset.clients.onnxbot` (the
 `clients` extra). A checkpoint provides metadata, the inputs it declares and
 named outputs. Its `contract` metadata names the graph's shape, and the
-loader serves eight (`hexset.server.constants.RECORD_CONTRACTS`):
+loader serves nine (`hexset.server.constants.RECORD_CONTRACTS`):
 
 | Contract | Graph | Run by |
 | --- | --- | --- |
 | `6`, `7`, `8`, `8.1` | A **record graph**: the record of one position in, one action out ([record inputs](#record-inputs)) | `onnxbot.V2Policy` |
-| `9`, `9.1`, `9d`, `9d.1` | A **decision graph**: the contract-9 observation and the decision's arrays in, a whole decision out ([decision graphs](#decision-graphs-contract-9)) | `onnxbot.DecisionPolicy` |
+| `9`, `9.1`, `9d`, `9d.1`, `11d` | A **decision graph**: the contract-9 observation and the decision's arrays in, a whole decision out ([decision graphs](#decision-graphs-contract-9)) | `onnxbot.DecisionPolicy` |
 
 A file with no `contract` key, or any other value, is refused at load, naming
 the contracts this server serves. Changing the value alone does not make a
@@ -28,8 +28,8 @@ ONNX `metadata_props` values are strings. Unknown keys are ignored.
 
 | Key | Meaning | Default or validation |
 | --- | --- | --- |
-| `contract` | The graph's shape (table above) | Required: one of the eight |
-| `players` | Seat count the graph was trained for | Required integer. A decision graph of contract `9d` or `9d.1` must say `2`. See [seat counts](#seat-counts) |
+| `contract` | The graph's shape (table above) | Required: one of the nine |
+| `players` | Seat count the graph was trained for | Required integer. A decision graph of contract `9d`, `9d.1` or `11d` must say `2`. See [seat counts](#seat-counts) |
 | `num_hexes` | Board hex count | Required integer |
 | `num_vertices` | Board vertex count | Required integer |
 | `num_edges` | Board edge count | Required integer |
@@ -133,7 +133,7 @@ raises there, naming the file; load the registering module with
 - a decision graph that declares an input HexSet does not supply, an input
   at a width HexSet does not supply it at, no per-row input, no `decision`
   or `value` output, or some but not all of the whole-option outputs;
-- a contract `9d` or `9d.1` graph whose `players` is not 2;
+- a contract `9d`, `9d.1` or `11d` graph whose `players` is not 2;
 - a `search` of `mcts` or `rollout` on a graph that declares no `prior`;
 - a `fragment_cards` wider than a declared `max_give_cards` under
   `fragment_trades`.
@@ -365,11 +365,16 @@ and per-seat reach. On the standard board:
 | `9.1` | 4 | 40 | 35 | 8 | 1067 |
 | `9d` | 2 | 22 | 20 | 8 | 828 |
 | `9d.1` | 2 | 32 | 20 | 8 | 848 |
+| `11d` | 2 | 35 and 27 | 3 | 17 | 1000 |
 
 `9.1` appends a live-seat flag to each seat token, and the table's rules and
 next-roll odds to the table token. `9d` is the two-seat observation, defined
 only for two seats: each hand is exact, and only the development deck is
 hidden. `9d.1` appends each seat's production and bank rates to its token.
+`11d` is also two-seat: my token (35 wide) and the opponent's (27 wide)
+have widths of their own, the table is a board block of three columns (the
+turn count, the next roll's chance of a seven, whether the dice have been
+thrown), and a hex reads its number one-hot.
 [training.md](training.md#decision-observations) and the module docstring
 of `hexset.contract9` give every column.
 

@@ -13,10 +13,13 @@ learning algorithm through those interfaces; neural-network training and
 checkpoint export live in the sibling HexN project.
 
 HexSet ships no playing bots. Its entrants are `random` (uniform over legal
-actions), `retired` (an empty seat), the `network:` and `mcts:` checkpoint
-kinds, which need a model runtime, and `catanatron`, Catanatron's alpha-beta
-player seated at a HexSet table as an external reference (optional extra).
-Every other bot is registered in process or joins over the API.
+actions), `retired` (an empty seat), the `network:`, `mcts:` and `rollout:`
+checkpoint kinds (one forward per decision, PUCT search, paired rollouts),
+which need a model runtime, and `catanatron`, Catanatron's alpha-beta player
+seated at a HexSet table as an external reference (optional extra). The
+`coalition:` and `handoff:` wrappers seat any of them as a coalition member
+or hand a seat from one bot to another at a round. Every other bot is
+registered in process or joins over the API.
 
 ## Documentation
 
@@ -29,11 +32,12 @@ Start with [guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md);
 | [guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md) | Running games, trade rounds, implementing and registering a bot, records, bench commands, the public interface |
 | [hosted.md](https://github.com/0xBrsm/HexSet/blob/main/docs/hosted.md) | A bot seat at a table hosted elsewhere: the observed game it plays forward |
 | [mcp.md](https://github.com/0xBrsm/HexSet/blob/main/docs/mcp.md) | MCP tools and their semantics |
-| [onnx.md](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md) | The ONNX model contract, and checking a file against it |
+| [native.md](https://github.com/0xBrsm/HexSet/blob/main/docs/native.md) | Native game lanes: the optional C++ core, batched native requests, native playout copies |
+| [onnx.md](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md) | The ONNX model contract: record and decision graphs, metadata, committees, and checking a file against it |
 | [server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md) | Running the server: configuration, Docker, saved games, the rankings |
 | [testing.md](https://github.com/0xBrsm/HexSet/blob/main/docs/testing.md) | Markers, optional extras, a complete check |
-| [trading.md](https://github.com/0xBrsm/HexSet/blob/main/docs/trading.md) | Trading's three parts: the table's rules, a gate's own `TradeParams`, the shared protocol |
-| [training.md](https://github.com/0xBrsm/HexSet/blob/main/docs/training.md) | Batched collection, model runtimes, PettingZoo and Gymnasium adapters |
+| [trading.md](https://github.com/0xBrsm/HexSet/blob/main/docs/trading.md) | Trading's three parts: the table's rules, a gate's own `TradeParams`, the shared protocol; open offers and robber deals |
+| [training.md](https://github.com/0xBrsm/HexSet/blob/main/docs/training.md) | Batched collection, the driver, model runtimes, search, decision observations, PettingZoo and Gymnasium adapters |
 | [worlds.md](https://github.com/0xBrsm/HexSet/blob/main/docs/worlds.md) | Cached votes over sampled worlds |
 
 ## Your own bots
@@ -64,7 +68,8 @@ Gymnasium wrapper. `hexset.arena.load_runtime("mybots")` is the same import in
 code; `register_spec` adds a parsed spelling (`mybot:depth=3`) beside a
 preset. A name means one bot: registering a different one under a taken name
 raises `ValueError`, HexSet's own names (`random`, `retired`, `catanatron`)
-and prefixes (`network:`, `mcts:`, `catanatron:`, `coalition:`, `handoff:`) are refused, and
+and prefixes (`network:`, `mcts:`, `rollout:`, `catanatron:`, `coalition:`,
+`handoff:`) are refused, and
 `unregister_*` frees a name ([docs/guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md#implement-a-bot)).
 
 **Over the API.** A bot in any language joins a served table as a player
@@ -82,14 +87,18 @@ Requires Python 3.11 or later. From the repository root:
 pip install -e .
 ```
 
-The base installation requires only NumPy. Install extras for the interfaces
-you use:
+The base installation requires only NumPy. Installation also builds two
+optional C++17 extensions, a road-query core and the native game core
+([native.md](https://github.com/0xBrsm/HexSet/blob/main/docs/native.md)); where
+no compiler is found it goes on without them and the Python engine plays
+every game. Install extras for the interfaces you use:
 
 | Extra | Provides |
 | --- | --- |
 | `.[server]` | ONNX Runtime for embedded model opponents |
 | `.[clients]` | ONNX Runtime for standalone model clients |
 | `.[gym]` | Gymnasium and PettingZoo environments |
+| `.[lanes]` | greenlet, so `hexset.lockstep` runs its lanes as greenlets on one core instead of pinned threads |
 | `.[catanatron]` | Catanatron integration, pinned to a specific Git commit |
 | `.[export]` | ONNX and ONNX Runtime libraries; no training or export command is included |
 | `.[browser]` | Playwright, for the browser tests; the browser itself is `playwright install chromium` |
@@ -138,7 +147,7 @@ secret between participants. Reads with a seat token filter hidden
 information.
 
 A server started with `--ranker` also shows rankings at `/rankings`, linked
-from the New game dialog. Only ranked games count: tables the server deals
+from the game page's menu. Only ranked games count: tables the server deals
 from a queue that API clients and models join, never the page. The server
 only shows them: the function `--ranker` names makes them from every ranked
 game
@@ -157,7 +166,8 @@ Configuration, Docker, journals and recovery are in
 | `hexset/catanatron/` | Seats a Catanatron `Player` as a bot at a HexSet table: board, state and action translation |
 | `hexset/server/` | HTTP and MCP server, sessions, journals, and static browser UI |
 | `hexset/clients/` | Runtime-independent policy, trade, and search interfaces; ONNX inference; bot clients |
-| `hexset/gym/` | Lane, PettingZoo, and Gymnasium environments |
+| `hexset/gym/` | Lane, driver, PettingZoo, and Gymnasium environments |
+| `hexset/native/` | The optional C++ game core and its Python bindings: native state, batched requests, playout copies |
 | `tests/` | Engine and integration tests |
 | `models/` | ONNX opponents the server's picker lists; empty as shipped |
 | `docs/` | The documents indexed above |

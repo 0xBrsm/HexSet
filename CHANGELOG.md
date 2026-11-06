@@ -5,6 +5,25 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.26.2
+
+### Fixed
+
+- **The web page's comments and the server tests use example bot names.**
+  `index.html`'s comments and the rankings and model-name tests name
+  `mybot` and `rulesbot` instead of bots a runtime supplies.
+
+- **The docs describe the engine as it is.** `docs/onnx.md` covers every
+  served contract (record graphs 6 to 8.1, decision graphs 9 to 9d.1), every
+  metadata key the loader reads with its load error or fallback, committees
+  and opponent models. `docs/training.md` adds the driver, paired rollouts
+  and the two-seat observations, `docs/evaluation.md` the seed policy, run
+  journals and search decision logs, and `docs/trading.md` open offers and
+  robber deals; the guide, README, api, hosted, native, server and testing
+  docs are brought up to date with the code, and no doc names a bot HexSet
+  does not ship.
+
+
 ## 1.26.1
 
 ### Fixed

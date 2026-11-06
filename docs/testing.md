@@ -8,12 +8,18 @@ pip install -e ".[test]"
 pytest
 ```
 
-Installation builds the optional C++ road-query extension when a compiler
-is available. A source checkout can build it with
-`python setup.py build_ext --inplace`. `tests/test_roads_native.py` compares
-its trails, extension paths and reach distances with the Python queries;
-it skips without the extension. The rest of the engine suite exercises
-whichever implementation is installed.
+Installation builds two optional C++17 extensions when a compiler is
+available: the road-query extension `hexset._road_native` and the native
+game core `hexset._native_core` ([native.md](native.md)). A source checkout
+can build both with `python setup.py build_ext --inplace`.
+`tests/test_roads_native.py` compares the road extension's trails, extension
+paths and reach distances with the Python queries, and skips without it. The
+native core's suite, `tests/native/`, compares its state, legal moves,
+encodings, batched requests and playout copies with the Python engine, and
+skips without the core; `tests/test_native_optional.py` checks that the
+package works without it, and `tests/gym/test_driver.py` plays the same
+games on Python and native lanes where the core is built. The rest of the
+engine suite exercises whichever implementation is installed.
 
 ## Markers
 
@@ -38,6 +44,7 @@ absent, so a bare `pytest` passes without the extras and covers less.
 | `export` | The tests that build ONNX graphs with `onnx` |
 | `catanatron` | The reference-opponent adapter, `tests/catanatron/`, at the pinned revision |
 | `gym` | The PettingZoo and Gymnasium environments, `tests/gym/` |
+| `lanes` | `greenlet`: `tests/test_lockstep.py` runs every lockstep test on greenlet lanes as well as thread lanes |
 
 `tests/test_packaging.py` builds a wheel offline and skips without
 `setuptools`.

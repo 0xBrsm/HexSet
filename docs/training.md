@@ -78,19 +78,92 @@ favour the games that finish first. `cohort(games)` re-arms a bounded
 environment with more games, keeping the ones in flight. `first_game` and
 `stride` set the game indices for resumed or sharded runs (worker `w` of `K`:
 `first_game=w, stride=K`), and `games_started()` is the `first_game` to
-resume from.
+resume from. `indices` deals exactly the games it lists, in that order, and
+nothing else, such as a resumed cohort's missing games; each is the same
+game it is under any other deal. `hexset.gym.lanes.episode_entry(episode)`
+is a finished `Episode` as one journal line (`hexset.gamelog.append`): its
+index and seed, the policy ID in each seat, how it ended, its cleared trades
+and its record.
 
 A `caster(game_index)` maps seats to policy IDs. `bots` maps IDs to bot
-factories taking the board; `gates` maps IDs to trade-gate factories taking
-`(game, seat)`. A bot-played seat is its own gate. Any other seat trades only
-through an explicit gate; without one it never trades. A gate whose
-`TradeParams.max_offers` is `0` opens no trade event on its turn.
+factories taking the board, or to a `BoardBots`; `gates` maps IDs to
+trade-gate factories taking `(game, seat)`. A bot-played seat is its own
+gate. Any other seat trades only through an explicit gate; without one it
+never trades. A gate whose `TradeParams.max_offers` is `0` opens no trade
+event on its turn.
+
+Every bot seat gets a bot of its own for its game (`BoardBots.fresh`): built
+by `seat_spawn(board, rng)` off `random.Random(seat_key(seed, index, seat))`
+where the `BoardBots` has one, else by `spawn(board)`. A game therefore
+draws the same numbers whatever the lane count or worker split. A bot whose
+class defines `seen` is shown every move of its lane
+([guide.md](guide.md#implement-a-bot)). A bot class with `choose_many`
+(`hexset.bots.ChoosesMany`) is asked once a tick for every lane where one of
+its bots is to move, so one batched forward serves them all; the network bot
+(`NetworkBot.choose_many`) asks its policy once per policy per tick.
 
 `board` takes a fixed board or a function from game index to board (`None`
-for the default deal). A bot serves every lane on its board, so with a fixed
-board one bot serves every lane; before each action the environment calls
-`seat_at(game)` on every gate in that lane. `hexset.casting` provides
-rotation, pairing and policy-ID swapping casters.
+for the default deal). A caller's gate may serve several lanes, so before
+each action the environment calls `seat_at(game)` on every gate in that
+lane. `hexset.casting` provides rotation, pairing and policy-ID swapping
+casters.
+
+### One loop over Python and native lanes
+
+`hexset.gym.driver.Driver(env, seats, keep=...)` plays a `LaneEnv`'s games
+with the caller's seats answering their policy IDs. Each tick it collects one
+request per live lane, asks each seat's `choose_many(requests)` once for all
+of its rows, in lane order, and applies the answers. An answer is an object
+with `action` (an action, or a `Compound` for a decision) and `decision`
+(the `(DecisionKind, index)` it chose, or `None` for an atomic answer). Bot
+seats are played inside the environment. Every finished game goes to
+`keep(episode)` before its lane is dealt again, and `keep` must return only
+once the game is retained; `on_decision(request, answer)` sees each answered
+decision; `play()` ticks until every dealt game is kept.
+
+```python
+import random
+
+from hexset import gamelog
+from hexset.gym import LaneEnv
+from hexset.gym.driver import Driver
+from hexset.gym.lanes import episode_entry
+
+
+class Answer:
+    def __init__(self, action):
+        self.action, self.decision = action, None
+
+
+class Uniform:
+    def choose_many(self, requests):
+        return [Answer(random.Random(r.draw).choice(r.options)) for r in requests]
+
+
+env = LaneEnv(players=4, seed=0, lanes=4, deal=8, action_cap=40)
+driver = Driver(env, {0: Uniform()},
+                keep=lambda episode: gamelog.append("driver.games.jsonl", episode_entry(episode)),
+                lanes="auto")
+episodes = driver.play()
+```
+
+`request.draw` is the decision's sampling key (`hexset.gym.driver.draw_key`),
+a function of the seed, game index, seat and step, so a policy that samples
+from it alone plays each game the same however games are batched or
+sharded. `Driver.targets()` holds the referee's labels for the tick's rows
+(every seat's true points, the turn count), never part of a request.
+
+`lanes` is `"python"` (the default), `"native"` or `"auto"`. Native lanes
+import each dealt game into the optional C++ core ([native.md](native.md))
+and refill from the same dealer in the same order, so a game is the same
+function of `(seed, index)` on either kind and keeps the same record. They
+need the native extension, a bounded deal, and every seat asked for whole
+decisions (`decisions=`) and reading one contract-9 observation natively
+(the seat's `native_contract`), with no bot, watcher or trade gate. `"auto"`
+takes them where that holds and the Python lanes otherwise, as in the
+example above, whose seat reads no observation. A native request carries no
+`Game`; `hexset.gym.driver.observations(requests, contract)` reads each
+row's observation from the native buffer or, on a Python lane, encodes it.
 
 ### Collector practice
 
@@ -152,7 +225,11 @@ episode, with its record, in `verdict.episodes`.
 `act_rows`, `value_rows` and `score_rows` over live positions and seat
 perspectives: actions, per-seat values in board-seat order, and priors
 aligned with each row's supplied options. An ONNX graph's dense action prior
-is converted to that order by its adapter.
+is converted to that order by its adapter. A policy that chooses whole
+decisions may also keep `plans` (`hexset.decisions.Plans`), the rest of each
+decision it chose, played a move at a time, and list a decision's whole
+options with their probabilities (`option_rows`, `has_options`), which
+paired rollouts search over.
 
 A checkpoint carries `policy`, `space` and `players`. How it bargains is its
 `trade_params` (a `hexset.trading.TradeParams`), or the loose `trade_floor`
@@ -167,13 +244,13 @@ positions directly.
 `bot_for(rng=...)` seeds the gate's protocol and its sampled worlds;
 `searcher_for(rng=...)` seeds the search and a separate gate stream derived
 from it. Neither seeds sampling inside the model runtime, which the training
-application controls. The ONNX implementation is
-`hexset.clients.onnxbot.V2Policy`, loaded by `onnxbot.load(path, topology)`;
-the [ONNX contract](onnx.md) gives the record tensors and output
-requirements.
+application controls. The ONNX implementations are
+`hexset.clients.onnxbot.V2Policy` for a record graph and `DecisionPolicy` for
+a decision graph, both loaded by `onnxbot.load(path, topology)`; the
+[ONNX contract](onnx.md) gives their inputs and outputs.
 
-A driver registers an ONNX loader for the `network:` and `mcts:` entrants
-explicitly:
+A driver registers an ONNX loader for the `network:`, `mcts:` and `rollout:`
+entrants explicitly:
 
 ```python
 from hexset.clients.netbot import register_entrants
@@ -217,11 +294,73 @@ holds all `simulations` visits at the root's value. A descent in flight
 counts against its edge as a lost visit, valued at the stance's reading of
 a game another seat won (`hexset.mcts.lost_value`: -1/3 for `relative` at
 four seats), so a wave spreads over the edges whatever the sign of their
-means. `k` defaults to 1
+means. Values read over the seats still playing (`hexset.mcts.live_seats`),
+so a duel dealt four seats with two retired reads `relative` over two: 0 is
+an even game and a loss is -1. `k` defaults to 1
 and reaches `searcher_for` and `onnxbot.searcher` as a keyword and the arena
 as `mcts:<path>@<simulations>w<wave>:k=<n>`. `Search(hidden=False)` roots on
 the true state instead: the omniscient search, an analysis tool that nothing
 seating a bot passes.
+
+`Search(decisive=p)` plays a root without searching it where the prior on
+one of its moves is at least `p`: that move is credited with the whole
+budget at the root's own value, as a root with one legal move is
+(`mcts:<path>@128:decisive=<p>`). `Search.decide(game)` searches one
+position and appends a `hexset.mcts.Decision` to `decision_log`: the
+options, prior, root value, visits and mean values, the choice, whether it
+searched, and the CPU time spent; `choose` is `decide`'s most-visited move.
+
+### Searching by paired rollouts
+
+`hexset.rollout.PairedRollouts(policy, worlds=32, top=3)` decides a position
+by playing its candidate moves out on shared chance. The candidates are the
+policy's own move (`act_rows`), then its other moves by prior, `top` in all.
+Each is played out in `worlds` worlds, each world sampled from the mover's
+own view as an MCTS world is, with its development deck in an order of its
+own and its dice and steal streams split so the n-th roll and the n-th steal
+are the same in every candidate's copy. After the candidate, the policy plays
+every seat, one forward per decision, to the game's end or `horizon` turns
+on. A playout that ends scores 1 where the mover won and 0 otherwise; one
+stopped short is scored by the value head's chance for the mover, read from
+the mover's own frame. The candidate with the highest mean score is played,
+the earlier candidate on a tie, so the policy's own move first. Where a
+move does not change how a world plays out, the shared chance cancels, so a
+few dozen worlds separate moves that independent playouts would not.
+
+- A root with one legal move, or under `decisive` one whose prior on one move
+  is at least `decisive`, plays the policy's own move with no playout.
+  `full_setup=True` (`rollout:...:setup=full`) exempts every opening root
+  from `decisive`.
+- A policy that lists whole options (`option_rows`) is searched over whole
+  decisions at a root that opens one (a setup turn, the double turn, a Road
+  Building card, a discard): each candidate is the whole decision, applied
+  in every world before the playout, and the one chosen is played a move at
+  a time with no further search. A decision graph that answers
+  `hexset.decisions.OPTION_OUTPUTS` lists them ([onnx.md](onnx.md#outputs)).
+- Where the search plays another move than the policy's own, the policy's
+  plan for the rest of its decision is dropped (`Plans.drop`).
+- `decision_log` keeps every `hexset.rollout.Decision`: each candidate's
+  outcome in each world, the value head's read of each playout at the
+  mover's turn starts `MARKS` turns on, the cost, and the choice. Reading
+  the marks draws nothing and changes no game.
+- `pool=RolloutPool(load_policy, workers)` plays the worlds out in worker
+  processes beside the searching one, each loading its own copy of the
+  policy; the worlds and their seeds are still drawn in the searching
+  process, so the decision is the one made without the pool.
+  `SharedPools` keeps one pool per file for every bot spawned from it
+  (`onnxbot.spawn(..., workers=, pools=)`). A worker that dies breaks the
+  pool, and later decisions play its worlds in the searching process.
+- `hexset.rollout.RolloutBatch` holds playout copies that can be advanced
+  to later horizons (`advance(horizon, indices)`) without replaying their
+  prefix, for comparing horizons on the same copies.
+- Where the native core is built and the policy reads a contract-9
+  observation natively, each world's copy is held natively from the
+  candidate on ([native.md](native.md#playout-copies)).
+
+`hexset.clients.netbot.rollouts_for(checkpoint, worlds=, top=, decisive=,
+horizon=, full_setup=)` builds one with the checkpoint's own trade gate
+(`GatedRollouts`); the arena's `rollout:` entrant and a file's
+`search=rollout` metadata do the same.
 
 ### The network trade gate
 
@@ -332,7 +471,21 @@ the opponents' bots are their own gates and trade with each other where they
 implement it; the learner has no gate and takes no part. A learner that
 trades uses `LaneEnv` with a gate.
 
-## Rule-conditioned decision observations
+## Decision observations
+
+`hexset.contract9.encode9(game, seat, contract)` encodes a position from one
+seat for a network that reads every seat the same way: each seat as a token
+(the perspective first, the others in turn order), the board as hexes and
+vertices, a building's or road's owner as a pointer to its seat's token.
+`flatten` lays it out as one float32 row (`layout`), and `observation_row`
+does both. Four contracts are served (`contract9.CONTRACTS`):
+
+| Contract | Seats | Seat token | Table | Hex |
+| --- | --- | --- | --- | --- |
+| `9` | any | 39 | 20 | 7 |
+| `9.1` | any | 40 | 35 | 8 |
+| `9d` | 2 | 22 | 20 | 8 |
+| `9d.1` | 2 | 32 | 20 | 8 |
 
 `hexset.contract9.encode9(game, seat, contract="9.1")` and
 `layout(players, hexes, vertices, edges, contract="9.1")` provide 40-feature
@@ -348,7 +501,25 @@ Under `9.1` a
 seat's public points are divided by its game's victory target. Building
 points on vertices retain their unit scale. Board mode is not an input:
 the observation already states the dealt board. ONNX decision files select
-the encoding with their `contract` metadata; both contracts are served.
+the encoding with their `contract` metadata.
+
+`9d` is the two-seat observation, defined for a table of two and refused at
+any other size (`contract9.DUEL_CONTRACTS`). Across two seats every card flow
+is public except a steal, which shows its card to the one opponent, so each
+hand is exact and only the development deck is hidden. A seat token holds
+what both seats see; what only the perspective knows (its development cards
+by kind and which it can play, and the cards it has not seen) is on the
+table token. Each hex carries the chance its number is the next roll, and
+the table the seven's. `9d.1` appends each seat's production by resource
+(`seat_production`: the cards a roll yields it at the dice's long-run odds,
+a city twice, nothing from the robber's hex) and its bank rate by resource
+over 4. The module docstring of `hexset.contract9` gives every column.
+
+A two-seat network sits at a duel dealt four seats with two retired. It
+reads the table over the live seats alone (`hexset.encoding.SeatFrame`,
+`seat_frame`): the frame orders the live seats from the perspective, and
+`hexset.decisions.frame_for` gives a decision's frame, so its robber
+victims and value rows count the live seats only.
 
 `LaneEnv(deal_law=law)` asks `law(index)` for a
 `hexset.gym.distribution.Deal(game_type, locked, board_mode)` before setup.

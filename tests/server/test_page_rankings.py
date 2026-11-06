@@ -48,7 +48,7 @@ def rank(games: list[dict]) -> dict:
             {"name": "Ada", "id": "a" * 64, "rating": 1612.25, "games": 40, "wins": "63%",
              "version": "5.5", "owner": "octocat", "url": "https://example.org/ada",
              "description": "A language model playing through MCP."},
-            {"name": "rehex", "id": None, "rating": 1550, "games": 30, "pinned": True, "wins": "40%"},
+            {"name": "rulesbot", "id": None, "rating": 1550, "games": 30, "pinned": True, "wins": "40%"},
             {"name": "Me", "id": MINE, "rating": 1500, "games": 12, "wins": "50%"},
             {"name": "Newcomer", "id": None, "rating": 1490, "games": 9},
         ], "pairs": [{"a": "a" * 64, "b": MINE, "games": 5, "a_wins": 3, "b_wins": 2, "expected": 0.62,
@@ -109,7 +109,7 @@ def test_the_page_draws_each_board_and_marks_the_visitors_row(servers, browser):
         assert page.eval_on_selector_all("#board th", "(ths) => ths.map((th) => th.textContent)") == [
             "Name", "Rating", "Games", "Wins",
         ]
-        assert rows(page) == [["Ada", "1612.25", "40", "63%"], ["rehex", "1550", "30", "40%"],
+        assert rows(page) == [["Ada", "1612.25", "40", "63%"], ["rulesbot", "1550", "30", "40%"],
                               ["Me", "1500", "12", "50%"]]
         # A column of percentages is aligned as the numbers are.
         assert page.eval_on_selector_all(
@@ -118,7 +118,7 @@ def test_the_page_draws_each_board_and_marks_the_visitors_row(servers, browser):
         # A rating the ranker holds fixed carries a pin, beside the rating.
         assert page.eval_on_selector_all(
             "#board svg.pin", "(ps) => ps.map((p) => [p.closest('tr').cells[0].innerText, p.closest('td').cellIndex])",
-        ) == [["rehex", 1]]
+        ) == [["rulesbot", 1]]
         assert page.text_content("#board svg.pin title") == "Rating pinned"
         # A row's details show in a card above the table once it is clicked.
         assert not page.query_selector("#versus")
@@ -207,7 +207,7 @@ def test_two_rows_clicked_show_their_head_to_head_record(servers, browser):
             return page.eval_on_selector_all(
                 "#board tbody tr", "(trs) => trs.map((tr) => [tr.cells[0].innerText, tr.className.match(/side-[ab]/)?.[0] || ''])")
 
-        # only rows with an id can be picked: rehex here has none
+        # only rows with an id can be picked: rulesbot here has none
         assert page.eval_on_selector_all("#board tbody tr.pickable", "(trs) => trs.map((tr) => tr.cells[0].innerText)") == [
             "Ada", "Me"]
         assert page.text_content("#hint") == "Click a row for its details, or two to compare them head to head."
@@ -232,7 +232,7 @@ def test_two_rows_clicked_show_their_head_to_head_record(servers, browser):
         assert page.eval_on_selector_all(
             "#versus .shares .bar > div", "(ds) => ds.map((d) => [d.className, Math.round(parseFloat(d.style.width))])"
         ) == [["fill-a", 40], ["band-a", 22], ["band-b", 18], ["fill-b", 20]]
-        assert sides()[:3] == [["Ada", "side-a"], ["rehex", ""], ["Me", "side-b"]]
+        assert sides()[:3] == [["Ada", "side-a"], ["rulesbot", ""], ["Me", "side-b"]]
         # what the second click added fades in; the first pick stays put
         entering = "(els) => els.filter((e) => e.classList.contains('enter')).map((e) => e.className)"
         assert page.eval_on_selector_all("#versus, #versus *", entering) == ["score enter", "side b enter", "shares enter"]

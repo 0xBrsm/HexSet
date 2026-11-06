@@ -68,7 +68,7 @@ def test_a_file_is_offered_by_the_name_it_declares_not_its_filename(models):
 def test_files_that_name_nothing_are_not_offered(models, capsys):
     (models / "anonymous.onnx").write_bytes(named(version="1.0"))
     (models / "garbage.onnx").write_bytes(b"not a model")
-    (models / "rehex-ish.onnx").write_bytes(named(name="test-trader"))
+    (models / "mybot-ish.onnx").write_bytes(named(name="test-trader"))
     catalogue = model_catalogue()
     assert set(catalogue["standard"]) == set(catalogue["duel-variant"]) == set(api.registered_presets())
     assert catalogue["standard"]["test-trader"].spec == "test-trader", "a preset keeps its name"

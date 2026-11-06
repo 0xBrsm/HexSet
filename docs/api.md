@@ -415,18 +415,22 @@ with the `name`, `version` and `commit` a model file declares, and the
 registered with ([guide.md](guide.md)):
 
 ```json
-{"models": ["mybot", "mynet-1.0", "mynet-1.0d"],
+{"models": ["mybot", "mynet"],
  "game_types": {"standard": {"mybot": {"version": "1.0", "owner": "octocat",
                                        "description": "A rules bot for every game type."},
-                             "mynet-1.0": {"name": "mynet", "version": "1.0", "commit": "0123abcd"}},
+                             "mynet": {"name": "mynet", "version": "1.0", "commit": "0123abcd"}},
                 "duel-variant": {"mybot": {"version": "1.0", "owner": "octocat",
                                            "description": "A rules bot for every game type."},
-                                 "mynet-1.0d": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
+                                 "mynet": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
 ```
 
-A preset is offered at every game type, or at those the server's `--preset-modes` names for it. A model file plays only the game types
-its `modes` declare, and the standard game alone when it declares none; files
-may share a name as long as their versions differ. `bots` and `/api/bot` take
+A preset is offered at every game type, or at those the server's
+`--preset-modes` names for it. A model file plays only the game types its
+`modes` declare, and the standard game alone when it declares none. An entry
+is a model's `name` alone: one name is one bot, which may be one file at some
+game types and another at the rest, as `mynet` is above. Two files offering
+one name at one game type are neither offered there, and a file whose name
+is a registered preset's is not offered at all. `bots` and `/api/bot` take
 an entry, and one offered only at another game type is a 400.
 
 `mybot` in the routes above stands for a preset: it exists only on a server started with the runtime that

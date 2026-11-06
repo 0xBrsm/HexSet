@@ -67,8 +67,8 @@ other name is registered by a runtime ([Implement a bot](#implement-a-bot)).
 | `retired` | No player: the seat is retired at the deal, so a four-entrant lineup with two `retired` is a two-seat game |
 | `catanatron`, `catanatron:<key>=<value>[:...]` | Catanatron's alpha-beta player (`CatanatronBot`), depth 2; keys `depth`, `worlds`, `temperature`, `select`. Needs the `catanatron` extra |
 | `network:<path>` | A checkpoint, one forward per decision; `network:<path>@0` is the same checkpoint with trading off |
-| `mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>]]` | A checkpoint under PUCT search; defaults 128 simulations, wave 16, `k=1` |
-| `rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>]]` | A checkpoint deciding by paired rollouts of its own policy (`hexset.rollout.PairedRollouts`): its top moves played out on shared chance in sampled worlds; defaults 32 worlds, top 3, to the game's end |
+| `mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>][:decisive=<prior>]]` | A checkpoint under PUCT search; defaults 128 simulations, wave 16, `k=1`. `decisive` plays a root whose prior on one move reaches it without searching |
+| `rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full]]` | A checkpoint deciding by paired rollouts of its own policy (`hexset.rollout.PairedRollouts`): its top moves played out on shared chance in sampled worlds; defaults 32 worlds, top 3, to the game's end. `setup=full` searches every opening root whatever `decisive` says. A policy that lists whole decisions is searched over them ([paired rollouts](training.md#searching-by-paired-rollouts)) |
 | `coalition:<entrant>` | Any entrant as a coalition member (`hexset.bots.Coalition`): every `coalition:` seat at the table plays with the others against the rest. A test opponent ([Coalitions](#coalitions)) |
 | `handoff:<round>:<first>\|<second>` | `<first>`'s moves through round `<round>`, `<second>`'s after it (`hexset.bots.Handoff`), trading as `<first>` throughout ([Handoffs](#handoffs)) |
 
@@ -80,9 +80,28 @@ sampled from the mover's own `View` (the information-set read,
 [worlds.md](worlds.md)). `python -m hexset.bench.duel random catanatron`
 seats it directly.
 
-`network:` and `mcts:` build through the checkpoint loader the process
-registered with `hexset.clients.netbot.register_entrants`; without one they
-raise `ValueError` ([training.md](training.md#model-runtimes)).
+`network:`, `mcts:` and `rollout:` build through the checkpoint loader the
+process registered with `hexset.clients.netbot.register_entrants`; without
+one they raise `ValueError` ([training.md](training.md#model-runtimes)).
+
+### Lineup names
+
+Any entrant name takes three suffixes, outermost last:
+
+- `<entrant>~<trader>`: the seat moves as `<entrant>` and trades through
+  `<trader>`'s gate, a preset or spec (`hexset.bots.TradesBy`,
+  `Entrant.trader`). The trader is seeded without drawing from the seat's
+  generator, so the seat's moves are drawn as they would be alone.
+- `<entrant>^<deal spec>`: how the seat makes robber deals
+  (`Entrant.deals`, `hexset.deals.DealParams.parse`): comma-separated
+  `answer`, `ask`, `noblock`, `nosteal` and `key=value` settings, or `none`
+  ([robber deals](trading.md#robber-deals)). A seat without the suffix
+  answers asks and never asks.
+- `<entrant>!notrade`: the seat is out of player trading
+  ([below](#seats-out-of-trading)).
+
+`mybot~otherbot^answer,ask!notrade` reads all three. A coalition member
+trades through its own bot and takes no `~`.
 
 ### Coalitions
 
@@ -248,6 +267,10 @@ A module that registers its bots at import is a runtime:
 - `Entrant.options` holds settings only that kind's factory reads, as
   `(key, value)` pairs or a mapping, stored sorted by key so equal settings
   make equal entrants; `entrant.option(key, default)` reads one.
+- `Entrant.trader`, `Entrant.deals` and `Entrant.no_trade` are the three
+  lineup suffixes ([lineup names](#lineup-names)). `Entrant.game_type` is
+  the table's game type, set by whoever seats the entrant (the server sets
+  it from the table), for a kind that plays differently by game type.
 - An unknown name raises `ValueError` saying to import the runtime that
   registers it.
 
@@ -257,12 +280,11 @@ again does nothing, so a runtime imported twice is harmless.
 `unregister_entrant_kind`, `unregister_preset` and `unregister_spec` free a
 name. The names HexSet resolves itself (`random`, `retired`, `catanatron`, and
 the kinds `coalition` and `handoff`) and the prefixes it parses (`network:`,
-`mcts:`, `catanatron:`, `coalition:`, `handoff:`, and any prefix overlapping
-one) are refused. A
-runtime may name a preset `coalition` (`hexset.arena.coalition(inner,
-name)` builds the entrant). The kinds `network` and `mcts` are the
-exception: `register_entrants` replaces their factories, and the last call
-wins.
+`mcts:`, `rollout:`, `catanatron:`, `coalition:`, `handoff:`, and any prefix
+overlapping one) are refused. A runtime may name a preset `coalition`
+(`hexset.arena.coalition(inner, name)` builds the entrant). The kinds
+`network`, `mcts` and `rollout` are the exception: `register_entrants`
+replaces their factories, and the last call wins.
 
 ### Information sets
 
@@ -308,13 +330,36 @@ The shared pieces:
 - `hexset.actions.options_for`: the legal actions, raising `Stuck` if there
   are none.
 
+A bot may also take part in these, each optional:
+
+- **Watching the table.** A bot whose class defines `seen(game, actor,
+  action, viewer)` is shown every move of its game before it is applied,
+  from its own seat (`viewer`): its own moves, every other seat's, and each
+  part of a compound decision. The arena (`run_seated`), `LaneEnv` and a
+  hosted `Seat` call it through `hexset.bots.watch`, which walks a wrapped
+  seat's parts. A bot that models the other seats from their moves learns
+  from it; a bot without `seen` is asked nothing.
+- **Closing.** `hexset.bots.Closes(mover, closer)` plays `closer`'s move
+  wherever `closer.closing(game)` names a legal one, and `mover`'s
+  everywhere else; every trade hook stays the mover's. A closer is meant to
+  be narrow and deterministic, such as a rule that finds a finish the
+  mover's hand holds this turn. `hexset.arena.closed(bot, name, board, rng)`
+  builds one from a lineup name, and a checkpoint names one with its
+  `closer` metadata ([onnx.md](onnx.md#how-it-plays)).
+- **Choosing for many.** A bot class with a classmethod `choose_many(pairs)`
+  (`hexset.bots.ChoosesMany`) is asked once a tick by `LaneEnv` for every
+  one of its bots that is to move, `(bot, game)` pairs in lane order, and
+  returns what each `choose` would. Each bot keeps its own state and
+  streams, so a move does not depend on which bots are asked together.
+
 ## Inspect behaviour
 
 Take records from the run that produces the score.
 Every game is recorded: `compete` returns the records in
 `Tournament.records`, in game order, and keeps them in its journal;
-`compete_batched(..., episodes=True)` attaches one to each episode. `hexset.record.write(path, records)` appends them as JSON lines
-and `read(path)` yields them back. `replay(record)` replays every action,
+`compete_batched(..., episodes=True)` attaches one to each episode.
+`hexset.record.write(path, records)` appends them as JSON lines and
+`read(path)` yields them back. `replay(record)` replays every action,
 checking legality, the chance stream and the recorded result, and returns the
 final position; `replay_to(record, ply)` returns the position after `ply`
 actions, unchecked. A
@@ -324,7 +369,9 @@ replay reproduces the game without running any bot.
 Records hold game behaviour, not model activations, search trees or training
 examples; store those separately, keyed by game index and action step. A
 gate's private valuation of a trade cannot be recovered from the exchanged
-cards.
+cards. A searching seat's decisions, with what each candidate scored, are
+kept beside the record in the run's journal
+([search decision logs](evaluation.md#search-decision-logs)).
 
 ## Benchmark commands
 
@@ -336,7 +383,7 @@ Commands are modules under `hexset.bench`; each takes `--help`.
 | `baselines` | A lineup of named entrants (`--lineup`, required), with per-entrant and pooled win rates | `--games 40` |
 | `throughput` | Engine speed: `random` in every seat | `--games 200` |
 | `generate` | Replayable records of one bot in every seat (`--bot`, `--out`, both required) | `--games 100` |
-| `trade_census` | Executed trades by entrant label (`BotSummary` documents the fields); `--records` saves the games | `--games 96` |
+| `trade_census` | Executed trades by entrant label (`BotSummary` documents the fields); `--records` also appends every record to a flat file | `--games 96` |
 
 - Every command except `throughput` takes `--runtime <module>`
   (repeatable), imported first in every worker.
@@ -346,11 +393,18 @@ Commands are modules under `hexset.bench`; each takes `--help`.
 - `--workers` defaults to every core (`os.cpu_count()`), except
   `trade_census` (1). Set it explicitly on a shared machine.
 - `--games` must divide evenly over the seats so the rotation completes.
-- The four keep each game in a journal as it finishes (`--journal`), and
-  `--resume` plays only the games a journal lacks. Default journals: `duel`
-  beside its verdict (`--verdicts`, default `runs/eval`), `baselines` under
-  `runs/baselines`, `generate` beside `--out`, `trade_census` beside `--out`
-  or under `runs/census`. Paths are relative to the working directory.
+- All five keep each game in a journal as it finishes (`--journal`), and
+  every one but `throughput` takes `--resume`, which plays only the games a
+  journal lacks. Default journals: `duel` beside its verdict (`--verdicts`,
+  default `runs/eval`), `baselines` under `runs/baselines`, `generate`
+  beside `--out`, `trade_census` beside `--out` or under `runs/census`,
+  `throughput` in the working directory. Paths are relative to the working
+  directory.
+- All five take `--seed` (`--duel-seed` for `duel`), defaulting to the seed
+  policy's, with `--bypass-seed-policy REASON` and `--registration PATH`
+  ([the seed policy](evaluation.md#the-seed-policy)). `generate`'s games are
+  a dataset to fit on, so its seed is a training seed of the kind
+  `--seed-use` names (default `rl`).
 
 Batched model policies are evaluated with
 `hexset.bench.versus.compete_batched`, which uses the arena's boards and

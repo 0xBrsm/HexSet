@@ -22,7 +22,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--runtime` | none | Module imported first, so the bots it registers can be seated and listed (repeatable) |
 | `--device` | `cpu` | ONNX Runtime device; another value asks for `<DEVICE>ExecutionProvider` with CPU fallback |
 | `--rollout-workers` | `0` | Worker processes a seated model that searches by paired rollouts plays its worlds out in: one pool per model file, shared by every seat of it, started at its first seat and replaced when the file changes. `0` plays them in the server's own process; other models ignore it |
-| `--games-dir` | `$HEXSET_UI_GAMES_DIR` | Journal directory; an empty string disables journaling |
+| `--games-dir` | `$HEXSET_UI_GAMES_DIR` | Journal directory; an empty string takes the default. Every game is journalled |
 | `--forwarded-header` | none | The header a reverse proxy puts the client's address in (`CF-Connecting-IP`, `X-Forwarded-For`: its last entry); without it, the socket peer |
 | `--games-per-period` | `100` | New games one client address may deal per rolling `--period-days`, through the page, the API and MCP alike, counted across restarts from the journals; `0` is no limit |
 | `--period-days` | `30` | The window `--games-per-period` counts over |
@@ -51,8 +51,8 @@ Environment:
   (the directory holding `pyproject.toml`), else `models/` under the working
   directory.
 - `HEXSET_UI_GAMES_DIR`: the journal directory when `--games-dir` is
-  omitted; unset, `games` under the working directory; empty disables
-  journaling.
+  omitted; unset or empty, `games` under the working directory. No setting
+  turns journaling off.
 
 ## Docker
 
@@ -92,7 +92,7 @@ for its code, after a restart or otherwise:
 - a game evicted after 24 hours untouched is closed, and its code is a 404;
 - a journal that does not replay is closed, and its code is a 404.
 
-Without journaling there is no recovery.
+A game whose journal could not be written cannot be recovered.
 
 Rebuilt games keep their seats, names and client identities. Bot seats get
 fresh tokens and resume. A person's seat comes back claimed and without a
@@ -115,8 +115,8 @@ that function with every ranked game in the journal directory that ended,
 and serves what it returns. Only a table the ranked queue dealt
 ([api.md](api.md#ranked-play)) counts; a casual one never reaches the ranker.
 The rankings are served as `GET /api/rankings` ([api.md](api.md#rankings)),
-the MCP `rankings` tool, and a page at `/rankings` that the New game
-dialog links. The module only has to be importable, from the installed
+the MCP `rankings` tool, and a page at `/rankings` that the game page's
+menu links. The module only has to be importable, from the installed
 packages or `PYTHONPATH`.
 
 ```python
@@ -135,7 +135,7 @@ game that ended each time, played out or timed out, oldest first by when it
 ended, and keeps nothing between calls; a
 changed ranker takes effect from a restart, over the whole history. A ranker
 that raises, or returns anything but boards of this shape, is logged and the
-last good rankings stay up. Journaling off, it is handed no games.
+last good rankings stay up.
 
 A game, as `hexset.server.rankings.finished_game` reads it from its
 journal:

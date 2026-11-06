@@ -20,12 +20,40 @@ Editable installation places the extension beside the mounted Python source.
 The build is optional, so verify availability explicitly when native lanes are
 required; an installation without a working compiler still supports Python play.
 
+Installation builds two optional extensions. `hexset._road_native` answers
+the road-graph queries of `hexset.roads` (longest road, roads to take,
+reach) from packed integer adjacency, with no game state crossing the
+boundary; without it `hexset.roads` answers them in Python, with the same
+results. `hexset._native_core` is the game-state backend this page
+describes.
+
 `NativeState(game)` owns its state, common and seat-specific ledgers, and a copy
 of the game's existing Chance streams. It preserves the original Chance
 callbacks and their Recording events. `encode9(state, perspective, contract)`
 returns a fresh writable float32 observation for that perspective. Supported
-contracts are `9`, `9.1`, and the two-seat `9d`; referee snapshots and true
-victory points are separate from visible observations.
+contracts are `9`, `9.1`, and the two-seat `9d` and `9d.1`, each byte for byte
+as `hexset.contract9` encodes it; referee snapshots and true victory points
+are separate from visible observations.
+
+## The driver
+
+Most callers do not use the classes below directly.
+`hexset.gym.driver.Driver(env, seats, keep=..., lanes="python" | "native" |
+"auto")` plays a `LaneEnv`'s games on either lane kind with one `Request`
+type, and imports each dealt game into a native lane when `lanes="native"`
+([batched games](training.md#one-loop-over-python-and-native-lanes)). The rest
+of this page is the bridge it drives.
+
+## Playout copies
+
+Paired rollouts (`hexset.rollout`) hold each world's copy natively where they
+can (`hexset.native.playout.NativeCopy`): the extension is built, the
+searching policy reads one of the four contracts above over every dealt seat
+(`native_contract`), and the position is a supported no-trade one. A copy
+answers what the Python engine answers for the same position: the same legal
+moves, the same decision tensors and the same observation bytes, drawing
+chance from a copy of the same streams. A position the native engine refuses
+keeps its Python copy.
 
 ## Batched requests
 

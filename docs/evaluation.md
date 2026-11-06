@@ -46,6 +46,56 @@ side won, scored on the points it reached and counted in `Verdict.exhausted`.
 Raise the cap (`turn_cap`,
 `--turn-cap`) only for unstructured play such as random bots.
 
+### The seed policy
+
+A project that compares many runs can hold every run to a short list of
+seeds, so that runs pair game for game (`hexset.seeds`). A
+`seed-policy.json` names them:
+
+```json
+{"eval":  {"default": {"2": 2000, "*": 1000},
+           "screen": [1000, 2000],
+           "confirm": [3000, 4000]},
+ "train": {"rl": [0, 1, 2], "bc": [10, 11, 12]},
+ "analysis": [20, 21, 22]}
+```
+
+- `eval.default` is the seed a run takes when it names none, by the number
+  of playing seats, `"*"` for any other count. Every default is a screen
+  seed.
+- `eval.screen` seeds may be named freely. For more games, play more indices
+  on the same seed.
+- `eval.confirm` seeds are for a test registered before its data. A run on
+  one names its registration (`registration=`, `--registration PATH`), a
+  file that names the seed, and the file's SHA-256 is kept with the run.
+- `train` lists each kind of training's seeds. A training seed is never an
+  evaluation seed. A run that plays games to train or fit on names its kind
+  as its `seed_use` (`compete(seed_use="rl")`) and is held to that list.
+- `analysis` lists the seeds of randomness that plays no game: resampling, a
+  statistical null, a data split.
+
+The policy is found once per process: the file `HEXSET_SEED_POLICY` names,
+else the nearest `seed-policy.json` above the package, else the nearest one
+above the working directory. A host package may install one
+(`register_seed_policy`) or `require` one, so that a tree staged without its
+policy file refuses to play. With no policy and no requirement nothing is
+checked, and a run that names no seed plays seed 0.
+
+`compete` holds its `seed` to the policy and raises `SeedRefused` for one
+the policy does not allow. A reason given as `seed_bypass=` (on the command
+line `--bypass-seed-policy REASON`; `HEXSET_SEED_BYPASS` for code that takes
+neither) plays it anyway, prints a warning and keeps the reason in the
+journal. How the seed passed (the policy's digest, `screen`, `confirm` with
+its registration, or `bypassed` with the reason) is on the journal's source
+line. Every bench command that plays games takes `--seed` (`--duel-seed`
+for `duel`), whose default is the policy's, with `--bypass-seed-policy` and
+`--registration`.
+A tool that plays outside the arena, or seeds no game, holds its seed the
+same way: `seeds.add_arguments(parser)`, then `seeds.hold(args, seats,
+use=...)`, which returns the note to keep with its output. `seeds.suspend()`
+turns the policy off for a test suite, whose games are fixtures rather than
+runs, and for the processes it starts.
+
 ### Paired boards
 
 `compete(antithetic=True)` (the default) plays every board twice, the second
@@ -115,6 +165,55 @@ Path("result.json").write_text(json.dumps(document, indent=2, allow_nan=False))
 ```
 
 This run exercises the workflow; it measures no strength.
+
+### The run journal
+
+Every `compete` run keeps its games in its `journal` (`hexset.gamelog`), and
+none runs without one: a header line with the run's settings, a source line
+with its seed note, then one JSON line per game (its outcome, its record and
+every seat's search decisions), written and fsynced as the game finishes, in
+whatever order the workers finish them. A run that dies, is killed or raises
+keeps every game it finished.
+
+- `read_journal(path)` returns the header and every finished game by index,
+  readable while the run is still going; `journal_tournament(path)` is the
+  `Tournament` of the games so far.
+- A journal that already holds a run is refused unless `resume=True`, which
+  checks its header against this run's settings and plays only the indices
+  it lacks. Every game is a function of the seed and its index, so the
+  result is the run's own.
+- A resumed run may name more `games` than it began with: it plays the
+  indices after them on the same seed, an extension, which the journal's
+  source line records (`extended_to`). Fewer games is a different run.
+- A game that reaches the turn cap is written as an `exhausted` line before
+  `Exhausted` is raised; `read_journal` leaves it out.
+
+Every bench command that plays games keeps them in its `--journal`, and
+all but `throughput` resume with `--resume` ([guide.md](guide.md#benchmark-commands)).
+`compete_lanes` keeps a journal keyed by its own game keys, read by
+`read_lane_journal`; `read_game_journal` reads any game journal, its
+exhausted games included. A `LaneEnv` collector
+writes each finished `Episode` as one line with
+`hexset.gym.lanes.episode_entry`.
+
+### Search decision logs
+
+A seat that searches logs every decision it searched, not only the game's
+result. `hexset.mcts.Search.decide` and `hexset.rollout.PairedRollouts.decide`
+append each to the searcher's `decision_log`: the root's options, the
+policy's prior and value, what each option scored (MCTS visits and means;
+each rollout candidate's outcome in each world), the option chosen, the
+turn, phase, seat and public points, and the CPU time spent. A rollout
+decision also keeps the value head's read of each playout at later turns
+(`hexset.rollout.MARKS`), so fewer worlds, fewer candidates or a shorter
+horizon can be scored on the same playouts afterwards.
+
+`hexset.arena.search_logs(bot)` finds the logs behind a seat, through the
+wrappers it is dealt in (a trader, a veto, a dealer, a coalition, both
+halves of a handoff). `compete` writes them into each game's journal line
+under `searches`, and `read_journal` returns them on each `Outcome`. Which
+decisions gained, and at what cost, is then a read of the run, not a new
+run.
 
 | Field | Contents |
 | --- | --- |

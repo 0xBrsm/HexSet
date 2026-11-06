@@ -24,8 +24,13 @@ the same one.
 
 The table sets `Game.trade_mode` (`"round"`, the default propose-and-respond
 round; `"auto"`, the clearing house; `"external"`, a caller-driven round),
-`Game.counter_steps` (below), and for `"auto"` `Game.trade_rule`. It sets no
-per-turn budget and no card rule. Everything else about bargaining is one
+`Game.counter_steps` (below), and for `"auto"` `Game.trade_rule`. It also
+sets `Game.embargoes`, `(seat, against)` pairs each closing trade between two
+seats both ways (a lineup's `!notrade` puts a seat under one with every
+other, [guide.md](guide.md#seats-out-of-trading)), and `Game.open_offers`,
+whether an offer may leave cards for the answerer to name
+([open offers](#open-offers)). It sets no per-turn budget and no card
+rule. Everything else about bargaining is one
 seat's own `TradeParams`, binding nobody else: two seats at one table may
 carry different ones.
 
@@ -85,14 +90,21 @@ cleared inside, so a trade made after a build replays after that build.
 | `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `ENUMERATION_CARDS`. One side of a fragment is always a single card |
 | `gate_plies` | `0` | Plies rolled forward over the exchanged hand before it is valued |
 | `fit_offers` | `False` | Put first the offers and counters that fit what the counterparty has shown it wants and will give up (`fit`, off the public ledger); elsewhere the same choice as without it. Offers are planned only under `fragment_trades`, so there it orders both; under card caps or a responder price alone it orders counters |
+| `trade_floor_relative` | `False` | Read the floor relative to the table's points: `trade_floor` times the deciding seat's share of the table's victory points (its own, hidden cards counted, over its own and every other seat's public points), so a seat behind clears exchanges a seat ahead would refuse |
+| `gate_own_frame` | `True` | Value every position from this seat's own frame, whoever is to move: the frame that reads its development cards. Off, a position another seat is to move in is valued from that seat's frame, on a world sampled from this seat's belief |
+| `gate_frames` | `"one"` | On another seat's turn, the frames a position is valued from, this seat's entry of each averaged: `"one"` (the frame above), `"pair"` (this seat's and the mover's) or `"all"` (every seat's) |
+| `open_asks` | `True` | Put up one open ask in place of several one-for-one asks for the same card ([open offers](#open-offers)). A gate planning its offers (`fragment_trades`) offers its plan instead |
 
 `TradeParams` raises `ValueError` for a negative `max_offers`, floor, risk or
 threshold, a cap below 1, `max_fragments` outside 1..2, a negative
-`gate_plies`, and a `fragment_cards` wider than a declared `max_give_cards`
-under `fragment_trades`.
+`gate_plies`, a `gate_frames` other than the three, and a `fragment_cards`
+wider than a declared `max_give_cards` under `fragment_trades`. `gate_plies`,
+`gate_own_frame` and `gate_frames` are read by the network gate
+(`hexset.clients.netbot`); a bot that searches sets its own depth.
 
 One set ships: **`UNLIMITED`**, `TradeParams()`, with no card caps, a floor
-at zero, no response charge, no offer budget and no planning. Every gate that
+at zero, no response charge, no offer budget and no planning; it makes open
+asks. Every gate that
 declares nothing is read at it. A bot's own config lives with the bot: in its
 module for a Python bot, in its ONNX metadata for a checkpoint.
 
@@ -106,13 +118,20 @@ cap.
 
 `hexset.trading._engine` reads a gate's `candidates`, `offer`, `respond`,
 `respond_any`, `pick`, `consent_gain`, `allow_repeated_offer` and
-`trade_round_finished` by name (`HOOKS`, every hook a `TradeProtocol` can
-install). A missing hook falls back to the engine's menus (below),
+`trade_round_finished` by name (`hexset.trading.HOOKS`, every hook a
+`TradeProtocol` can install). A missing hook falls back to the engine's menus (below),
 `default_offer`, `default_respond`, `default_respond_any`, `default_pick`
 and `valued`. The engine also reads names the protocol never supplies, which
 stay the bot's own: the valuation (`gains_many`, else `accepts_many`, else
-`accepts`; and `estimate_many`), `trade_floor`, `trade_params`, `trade_now`
-and `observe_trade`.
+`accepts`; and `estimate_many`), `trade_floor`, `trade_params`, `trade_now`,
+`observe_trade` and `observe_round`.
+
+`observe_round(turn=, offer=, answers=, traded_with=)` is told how each round
+closed, in public facts only: the offer as broadcast, each answering seat's
+final answer (`"accept"`, `"counter"` or `"pass"`) and the seat the actor
+traded with, or `None`. Every seat sees all of it, so a bot may keep its own
+account of how each seat answers each other. `publish_round` calls it once
+per round, from the engine's round, the served table and a hosted `Seat`.
 
 `hooks_for(params)` says which hooks a parameter set needs.
 `install(gate, protocol)` binds those as instance attributes, deletes the
@@ -195,6 +214,30 @@ A `Record` keeps each shown offer or answer among the step's exchanges
 `fit(view, seat, received)` reads it for a gate: one point for giving `seat`
 a resource it wants, one for asking only for cards it has offered away,
 within the counts it offered.
+
+## Open offers
+
+An `Offer` may leave cards for the answerer to name: `Offer.any`, signed
+towards the actor like `received`. `any < 0` is an open ask, "any card for"
+the card `received` asks for; `any > 0` is "this for any card". An open offer
+cannot be accepted as it stands, only countered, and a counter to it is an
+ordinary one, which the actor picks or refuses like any other.
+
+- **Open asks.** A gate with `open_asks` on (the default) whose next offer is
+  a one-for-one, where at least one other of the offers it has left this turn
+  (its `max_offers`, else 8) is a one-for-one for the same card, puts up one
+  open ask in their place. It counts as as many offers as the asks it
+  replaces (`offer_slots`), and the gate asks for that card no more this
+  turn. A counter that brings the card for one the gate will not give is
+  countered with the card for one of those it offered.
+- **Give-only offers.** A bundle on a gate's menu that only gives goes up as
+  `Offer(actor, received, 1)`, the answerer naming the card it gives back.
+  It counts as one offer.
+
+`Game.open_offers` is the table's rule. A host whose offers name every card
+on both sides takes none (`Seat.allow_open_offers(False)`): there a gate's
+open ask goes up as the one-for-one it stands for, and a give-only bundle is
+not on the menu.
 
 ## An agreement binds
 
@@ -293,6 +336,70 @@ Entrant("c", kind="network", weights="models/policy.onnx", trade=MY_TRADE)
 `Entrant.trade=None` (the default) means the bot's own: the default a
 registered factory passes to `entrant.trade_params`, and the file's
 declaration for a checkpoint.
+
+## Robber deals
+
+A seat that has to move the robber, after its seven or its knight, may ask
+the table for one card of a resource it names (`hexset.deals.Ask`). A seat
+holding one may promise it, for one of two deals:
+
+- **no block** (`NO_BLOCK`): the robber goes on no hex where the payer has a
+  building, so the payer is neither blocked nor robbed this move;
+- **no steal** (`NO_STEAL`): the robber may stand on the payer's hexes, but
+  the payer is not the one robbed.
+
+A promise binds nobody. The mover sets aside the promises it does not count
+(from a seat its own view says cannot hold the card, from a seat it has
+blacklisted, or from one under an embargo with it), chooses which of the rest
+to spare for, and its robber move spares them (`Game.robber_promised`). Once
+the robber has moved and the turn is open to trading, it puts each deal's
+exchange to the table as an ordinary offer: the asked card for one of its
+own. A spared promiser honours the deal by taking it. One that does not, and
+one whose promise the mover's view said could not be kept, is blacklisted by
+that mover for the rest of the game. A payer hit anyway pays nothing. A seat under an embargo
+with the mover is out of its deals altogether. A game where no seat asks
+plays exactly as it would without deals. Every ask and what came of it is in
+`Game.deal_log` and the run's journal (`deals`).
+
+`DealParams` says how one seat deals; `DealParams.parse` reads the lineup
+suffix `^<spec>` ([guide.md](guide.md#lineup-names)):
+
+| Setting | Spec | Default | What it is |
+| --- | --- | --- | --- |
+| `answer` | `answer` | off | Promise when asked |
+| `ask` | `ask` | off | Ask when moving the robber |
+| `kinds` | `noblock`, `nosteal` | both | The deals it makes either way |
+| `model` | `model=<name>` | `plain` | The `RobberModel` it reads a mover's robber move with (`PlainMover`, or one a runtime registers, `register_robber_model`) |
+| `mover` | `mover=<plain\|value>` | `plain` | How it decides as the mover: `plain`, the default hooks below; `value`, `ValueDealer`, off its own value head |
+| `answerer` | `answerer=<name>` | none | A registered `Answerer` (`register_answerer`) that promises and pays for it, or `value`, its own value head; needs `answer` |
+| `pay` | `pay=<chance>` | 1 | The mover's chance that a spared promiser pays, where it has no promise model |
+| `promise` | `promise=<name>` | none | A registered `PromiseModel` (`register_promise_model`): how likely a holder is to promise, and a spared promiser to pay |
+| `ask_cost` | `cost=<win chance>` | 0 | What an ask costs the mover; `ValueDealer` asks only where the ask is worth more |
+| `pay_floor` | `payfloor=<win chance>` | 0 | The least a deal's exchange must gain the mover for `ValueDealer` to pay it once a promiser is spared; below it, it offers nothing back |
+
+`none` alone is a seat that neither answers nor asks. A seat whose gate
+names no `DealParams` answers both kinds and never asks
+(`hexset.deals.ANSWERING`); `hexset.deals.Dealing(bot, params)` attaches
+them to any bot, as the arena does for `Entrant.deals`.
+
+A seat answers only for the kinds it makes, only while it holds the card,
+and only as the mover's likeliest target (`targeted`): a deal buys off a
+hit, so a seat the mover is not coming for has nothing to buy. An ask may
+name the one seat the mover is coming for unless it pays (`Ask.to`; `None`
+is said to the table); the named seat then reads the robber as going on its
+hexes if it stays silent (`toward`). A gate answers for itself with
+`deal_answer(game, seat, ask, promised, model) -> bool`; otherwise
+`default_answer` prices the promise with the gate's own `gains_many`
+(`promise_value`).
+
+The mover's hooks, each with a default: `deal_ask(game, seat) -> Ask | None`
+(`default_ask`: the card the gate most wants for one of its own, where a
+one-for-one swap gains), `deal_accept(game, seat, ask, promised)`
+(`default_accept`: every promise but from the seats its own robber move
+would hit anyway) and `deal_return(game, seat, payers, resource)`
+(`default_return`: the card it offers back). `mover="value"` replaces all
+three with `ValueDealer`. A hosted seat makes and answers deals one request
+at a time ([hosted.md](hosted.md#robber-deals)).
 
 ## Where the protocol does not apply
 

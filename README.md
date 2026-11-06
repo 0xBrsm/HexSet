@@ -198,8 +198,7 @@ repository, and each carries its own licence; the set and their extras are
 declared in [pyproject.toml](https://github.com/0xBrsm/HexSet/blob/main/pyproject.toml). Catanatron is GPL-3.0. The
 browser interface in
 `hexset/server/static/index.html` loads no third-party scripts, stylesheets or
-web fonts; its system font stack names fonts on the user's device rather than
-bundling them.
+web fonts; its system font stack names fonts already on the user's device.
 
 CATAN and SETTLERS OF CATAN are trademarks of Catan GmbH and Catan Studio.
 HexSet is not affiliated with, endorsed by, or sponsored by either company.

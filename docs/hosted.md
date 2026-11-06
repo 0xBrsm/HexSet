@@ -85,7 +85,8 @@ deals=None)` wraps an observed game the client built. `gate` prices trades
 and defaults to the bot when it has `gains_many`; a seat with no gate offers
 nothing, passes every offer and promises nothing. `deals` is how the seat
 makes robber deals (`hexset.deals.DealParams`): by default it answers
-asks (`hexset.deals.ANSWERING`), and `DealParams()` promises nothing. `play` requires `drawn` for this seat's own purchase and takes
+asks (`hexset.deals.ANSWERING`), and `DealParams()` promises nothing.
+`play` requires `drawn` for this seat's own purchase and takes
 `surrendered`, the hidden seats' Monopoly losses in seat order.
 
 What `Seat` does for the client, because the engine's drivers do it at their

@@ -5,6 +5,16 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.26.3
+
+### Fixed
+
+- **The docs read plainly.** `docs/evaluation.md` puts the result
+  document's field table back under "Save an experiment", and the guide,
+  hosted, server, training and README text drop stock phrasing and broken
+  line wraps, as does the evaluation guide's section on search decision
+  logs.
+
 ## 1.26.2
 
 ### Fixed

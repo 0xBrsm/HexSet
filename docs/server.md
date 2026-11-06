@@ -47,9 +47,9 @@ Environment:
 
 - `HEXSET_UI_MODELS_DIR`: the directory scanned for `*.onnx` opponents, on
   every request, each listed by the name its metadata declares
-  ([onnx.md](onnx.md#serving-a-model)). Unset, it is `models/` beside `hexset/` in a source checkout
-  (the directory holding `pyproject.toml`), else `models/` under the working
-  directory.
+  ([onnx.md](onnx.md#serving-a-model)). Unset, it is `models/` beside
+  `hexset/` in a source checkout (the directory holding `pyproject.toml`),
+  else `models/` under the working directory.
 - `HEXSET_UI_GAMES_DIR`: the journal directory when `--games-dir` is
   omitted; unset or empty, `games` under the working directory. No setting
   turns journaling off.
@@ -132,8 +132,8 @@ def rank(games: list[dict]) -> dict:
 It is called on a thread of its own: once at start, and again after each
 ranked game that ends, so it never holds up play. It is handed every ranked
 game that ended each time, played out or timed out, oldest first by when it
-ended, and keeps nothing between calls; a
-changed ranker takes effect from a restart, over the whole history. A ranker
+ended, and keeps nothing between calls; a changed ranker takes effect from a
+restart, over the whole history. A ranker
 that raises, or returns anything but boards of this shape, is logged and the
 last good rankings stay up.
 
@@ -165,19 +165,20 @@ A board's `key` is unique and its `title` is text; `note` is optional. Rows
 are shown in the order given. Each row is a `name`, an optional `id` and
 `games`, and a value for any of the board's `columns`: text, a number,
 true/false or null (a column of numbers, or of percentages written as text
-such as `78%`, is right-aligned), and `pinned: true` for a rating the ranker holds
-fixed, a scale's reference, which the page marks with a pin. `games` is how
-many games it played: a row under
-`--rankings-min-games` is not served, one with no `games` is never cut,
-and it may also be a column.
+such as `78%`, is right-aligned), and `pinned: true` for a rating the ranker
+holds fixed, a scale's reference, which the page marks with a pin. `games` is
+how many games it played: a row under `--rankings-min-games` is not served,
+one with no `games` is never cut, and it may also be a column.
 A row may also carry `version`, `owner`, `url` (http or https) and
 `description`; a row whose `id` has a profile, the latest one its client sent
 ([api.md](api.md#client-identity-and-seat-recovery)), or the name a seat it
-held was last renamed to, is served with that profile's instead, and its `name` too when the profile has one. A row whose
-`id` is `bot:<entry>` stands for a server bot, and is served with the profile
-its preset declares ([guide.md](guide.md)), the version the server runs now.
-A profile changing re-serves the board without ranking again. Only these are served. Anything else a row carries, an address included, is
-dropped, so what the ranker is handed is not published unless it names it.
+held was last renamed to, is served with that profile's instead, and its
+`name` too when the profile has one. A row whose `id` is `bot:<entry>` stands
+for a server bot, and is served with the profile its preset declares
+([guide.md](guide.md)), the version the server runs now. A profile changing
+re-serves the board without ranking again. Only these are served. Anything
+else a row carries, an address included, is dropped, so what the ranker is
+handed is not published unless it names it.
 The page marks the row whose `id` is the visitor's own client id, and the MCP
 tool the rows whose `id` is the caller's.
 

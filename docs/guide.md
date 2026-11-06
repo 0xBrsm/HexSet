@@ -43,8 +43,8 @@ no 6 or 8 adjacent, the rulebook's fully random set-up, and `"spiral"` lays
 them in letter order from a random corner, counterclockwise toward the
 centre, skipping the desert. Terrain is shuffled and harbor kinds are dealt
 to the fixed harbor positions the same way under both. `compete`,
-`LaneEnv`, `HexSetEnv` and `HexSetAEC` take `board_mode` too. Every random stream of game `index` is a function of
-`(seed, index)`, so a tournament and a lockstep environment that deal the
+`LaneEnv`, `HexSetEnv` and `HexSetAEC` take `board_mode` too. Every random
+stream of game `index` is a function of `(seed, index)`, so a tournament and a lockstep environment that deal the
 same index play the same game. Within a game the dice and the steals each
 draw from a generator of their own, so an index rolls the same dice turn for
 turn whatever the seats play: two entrants dealt the same index meet the same
@@ -168,7 +168,6 @@ Menus, hooks, counters and the public ledger of offers are in
 [trading.md](trading.md). Results from `"round"` and `"auto"` are not
 comparable ([evaluation.md](evaluation.md)).
 
-
 ### Seats out of trading
 
 `<entrant>!notrade` takes that seat out of player trading altogether,
@@ -179,8 +178,7 @@ usual. The table puts the seat under a trade embargo with every other seat
 (`Game.embargoes`, set by `seat_bots` from `Entrant.no_trade`), which both
 mechanisms and the deal event already honour. Bank and port trades are moves,
 not trades, and stay open. The suffix is outermost, so it composes with
-`~<trader>` and `^<deal spec>`: `mybot^answer,ask!notrade`. A lineup
-without it plays exactly as before.
+`~<trader>` and `^<deal spec>`: `mybot^answer,ask!notrade`.
 
 ## Implement a bot
 
@@ -362,8 +360,7 @@ Every game is recorded: `compete` returns the records in
 `read(path)` yields them back. `replay(record)` replays every action,
 checking legality, the chance stream and the recorded result, and returns the
 final position; `replay_to(record, ply)` returns the position after `ply`
-actions, unchecked. A
-record carries the chance stream, the exchanges and the shown offers, so a
+actions, unchecked. A record carries the chance stream, the exchanges and the shown offers, so a
 replay reproduces the game without running any bot.
 
 Records hold game behaviour, not model activations, search trees or training
@@ -389,7 +386,8 @@ Commands are modules under `hexset.bench`; each takes `--help`.
   (repeatable), imported first in every worker.
 - The same four take `--game-type` (default `standard`), `--board`
   (default `random`; see `BOARD_MODES` above), `--turn-cap` (default
-  `MAX_TURNS`) and `--trade-mode` (`round` or `auto`, default `round`). `throughput` plays under `UNSTRUCTURED_TURN_CAP`.
+  `MAX_TURNS`) and `--trade-mode` (`round` or `auto`, default `round`).
+  `throughput` plays under `UNSTRUCTURED_TURN_CAP`.
 - `--workers` defaults to every core (`os.cpu_count()`), except
   `trade_census` (1). Set it explicitly on a shared machine.
 - `--games` must divide evenly over the seats so the rotation completes.

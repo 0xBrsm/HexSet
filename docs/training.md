@@ -489,16 +489,15 @@ does both. Four contracts are served (`contract9.CONTRACTS`):
 
 `hexset.contract9.encode9(game, seat, contract="9.1")` and
 `layout(players, hexes, vertices, edges, contract="9.1")` provide 40-feature
-seat tokens and a 35-feature table token. Contract `9` remains the default
-(39 and 20 features). The appended seat feature is `live`, false for a
+seat tokens and a 35-feature table token. Contract `9` is the default (39
+and 20 features). The appended seat feature is `live`, false for a
 retired slot. The appended table features are `winning_points / 10`,
 `discard_limit / 10`, `friendly_robber`, `balanced_dice`, and the next roll's
 probabilities for sums 2 through 12, including zeros for depleted sums.
 `SEAT_COLUMNS_91` and `TABLE_COLUMNS_91` name the slices. Hex tokens append
 their number token divided by 12 (0 for desert), giving eight features;
 pips alone cannot distinguish two sums with different conditional odds.
-Under `9.1` a
-seat's public points are divided by its game's victory target. Building
+Under `9.1` a seat's public points are divided by its game's victory target. Building
 points on vertices retain their unit scale. Board mode is not an input:
 the observation already states the dealt board. ONNX decision files select
 the encoding with their `contract` metadata.

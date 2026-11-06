@@ -24,8 +24,8 @@ settings, player count, game type, trading mode, game count, action cap and
 turn cap. Seed model sampling as well as the engine. Use complete seat
 rotations and state how boards are paired. Two runs on one seed pair game for
 game: the same board, seating, development deck and dice turn for turn, so a
-game they score differently is one where some seat decided differently. `compete` returns identical
-results at any `workers`; a custom runtime keeps that property by keying its
+game they score differently is one where some seat decided differently.
+`compete` returns identical results at any `workers`; a custom runtime keeps that property by keying its
 randomness to the game, seat and decision, not to the worker or lane.
 
 Record with every result the host engine, information model, source
@@ -166,6 +166,29 @@ Path("result.json").write_text(json.dumps(document, indent=2, allow_nan=False))
 
 This run exercises the workflow; it measures no strength.
 
+| Field | Contents |
+| --- | --- |
+| `schema`, `schema_version` | `"hexset.experiment"`, `1` |
+| `settings` | `entrants`, `games`, `seed`, `workers`, `action_cap`, `antithetic` |
+| `provenance` | HexSet version, commit, `dirty`, Python, platform, dependency versions and VCS revisions, thread environment variables, checkpoints |
+| `checkpoints`, `checkpoint_capture`, `checkpoints_changed` | SHA-256 and size per checkpoint path; whether they were captured `before_run` or `after_run`; whether they changed between the two captures |
+| `summary` | `games`, `unfinished`, `seconds`, `standings` |
+| `outcomes` | Per game: `index`, `board_index`, `winner`, `points`, `turns`, `seating`, and `roads`, `settlements`, `cities` |
+
+`settings` does not hold `trade_mode`, `game_type` or `turn_cap`; record them
+beside the document. Winner and point-vector indices refer to entrant order,
+`seating[e]` is entrant `e`'s seat, and `board_index` is the board and random
+stream two paired games share. The duel's JSON includes this document under
+`experiment`.
+
+Use immutable checkpoints. `checkpoints_changed` compares the pre-run capture
+with the one taken at assembly, so a file changed and restored during the run
+goes undetected. A hash identifies bytes without archiving them, and a
+`dirty` commit does not capture the local edits: archive checkpoints and the
+exact source when publishing. The document cannot recover unreported runtime
+configuration, nondeterministic accelerator behaviour, or the code and
+arguments of a `worker_initializer`; archive the driver too.
+
 ### The run journal
 
 Every `compete` run keeps its games in its `journal` (`hexset.gamelog`), and
@@ -198,7 +221,7 @@ writes each finished `Episode` as one line with
 
 ### Search decision logs
 
-A seat that searches logs every decision it searched, not only the game's
+A seat that searches logs every decision it searched, beside the game's
 result. `hexset.mcts.Search.decide` and `hexset.rollout.PairedRollouts.decide`
 append each to the searcher's `decision_log`: the root's options, the
 policy's prior and value, what each option scored (MCTS visits and means;
@@ -211,29 +234,5 @@ horizon can be scored on the same playouts afterwards.
 `hexset.arena.search_logs(bot)` finds the logs behind a seat, through the
 wrappers it is dealt in (a trader, a veto, a dealer, a coalition, both
 halves of a handoff). `compete` writes them into each game's journal line
-under `searches`, and `read_journal` returns them on each `Outcome`. Which
-decisions gained, and at what cost, is then a read of the run, not a new
-run.
-
-| Field | Contents |
-| --- | --- |
-| `schema`, `schema_version` | `"hexset.experiment"`, `1` |
-| `settings` | `entrants`, `games`, `seed`, `workers`, `action_cap`, `antithetic` |
-| `provenance` | HexSet version, commit, `dirty`, Python, platform, dependency versions and VCS revisions, thread environment variables, checkpoints |
-| `checkpoints`, `checkpoint_capture`, `checkpoints_changed` | SHA-256 and size per checkpoint path; whether they were captured `before_run` or `after_run`; whether they changed between the two captures |
-| `summary` | `games`, `unfinished`, `seconds`, `standings` |
-| `outcomes` | Per game: `index`, `board_index`, `winner`, `points`, `turns`, `seating`, and `roads`, `settlements`, `cities` |
-
-`settings` does not hold `trade_mode`, `game_type` or `turn_cap`; record them
-beside the document. Winner and point-vector indices refer to entrant order,
-`seating[e]` is entrant `e`'s seat, and `board_index` is the board and random
-stream two paired games share. The duel's JSON includes this document under
-`experiment`.
-
-Use immutable checkpoints. `checkpoints_changed` compares the pre-run capture
-with the one taken at assembly, so a file changed and restored during the run
-goes undetected. A hash identifies bytes without archiving them, and a
-`dirty` commit does not capture the local edits: archive checkpoints and the
-exact source when publishing. The document cannot recover unreported runtime
-configuration, nondeterministic accelerator behaviour, or the code and
-arguments of a `worker_initializer`; archive the driver too.
+under `searches`, and `read_journal` returns them on each `Outcome`, so
+the run itself shows which decisions gained, and at what cost.

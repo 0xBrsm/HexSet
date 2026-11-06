@@ -105,13 +105,16 @@ def test_two_paired_copies_roll_the_same_dice_whatever_was_played_between():
     assert rolls(paired_copy(world, 99, 0), 12) != rolls(paired_copy(world, 100, 0), 12)
 
 
-def test_a_decisive_root_plays_its_favourite_without_a_playout():
+def test_a_decisive_root_plays_the_policys_own_move_without_a_playout():
+    """The prior favours the road; the policy, played alone, ends its turn:
+    the root unsearched plays what the policy plays, not the prior's top."""
     stub = Stub(favouring(ActionType.BUILD_ROAD, 0.95))
     search = PairedRollouts(stub, worlds=8, decisive=0.9, rng=random.Random(1))
     decision = search.decide(a_road_or_not())
     assert decision.worlds == 0 and decision.scores == ()
-    assert decision.options[decision.chosen].type is ActionType.BUILD_ROAD
-    assert stub.acted == 0
+    assert decision.options[decision.chosen].type is ActionType.END_TURN
+    assert decision.move.type is ActionType.END_TURN and decision.candidates == (decision.chosen,)
+    assert stub.acted == 1
 
 
 def sure_of_the_first(options):
@@ -139,14 +142,15 @@ def test_full_setup_searches_a_confident_opening_root_and_no_later_one():
 
 def test_the_move_that_plays_out_better_is_chosen_over_the_favourite():
     """Holding on to the road's cards keeps a bigger hand at the mover's next
-    turn in every world, which is what the stub's values count."""
+    turn in every world, which is what the stub's values count. The policy's
+    own move (ending the turn) is the first candidate, the prior's top next."""
     stub = Stub(favouring(ActionType.BUILD_ROAD, 0.6))
     search = PairedRollouts(stub, worlds=16, top=2, horizon=1, marks=(), rng=random.Random(3))
     decision = search.decide(a_road_or_not())
     played = [decision.options[i].type for i in decision.candidates]
-    assert played == [ActionType.BUILD_ROAD, ActionType.END_TURN]
+    assert played == [ActionType.END_TURN, ActionType.BUILD_ROAD]
     assert decision.worlds == 16 and len(decision.scores) == 2
-    assert decision.scores[1] > decision.scores[0]
+    assert decision.scores[0] > decision.scores[1]
     assert decision.options[decision.chosen].type is ActionType.END_TURN
     assert stub.acted > 0 and stub.valued == 32
 
@@ -244,14 +248,14 @@ def test_every_decision_is_logged_with_what_it_was_made_from(monkeypatch):
                for table in decision.mark_values)
     assert not np.isnan(np.asarray(decision.mark_values)).any()
     # Right after the candidate, before any playout, the stub reads hand sizes:
-    # building the road spends two cards, ending the turn keeps them.
+    # ending the turn (the policy's own move, first) keeps two cards the road spends.
     after = np.asarray(decision.after_values)
-    assert after.shape == (4, 2) and (after[:, 0] < after[:, 1]).all()
+    assert after.shape == (4, 2) and (after[:, 1] < after[:, 0]).all()
     assert decision.steps > 0 and decision.cpu_seconds >= 0
     assert 0 < decision.mark_row_steps[0] <= decision.mark_row_steps[1] <= decision.row_steps
     line = json.loads(json.dumps(decision.to_json()))
     assert line["worlds"] == 4 and line["candidates"] == list(decision.candidates)
-    assert [a[0] for a in line["actions"]] == ["BUILD_ROAD", "END_TURN"]
+    assert [a[0] for a in line["actions"]] == ["END_TURN", "BUILD_ROAD"]
     assert len(line["mark_values"]) == 2 and len(line["outcomes"]) == 4
     assert len(line["after_values"]) == 4
 

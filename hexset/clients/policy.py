@@ -4,7 +4,9 @@
 Rows carry live games, explicit perspective seats and legal options; the
 runtime owns encoding, masking and inference. These games carry private state,
 so encode perspective-aware and never mutate an input game. Value vectors are
-always in board-seat order; priors align with the supplied options."""
+always in board-seat order; priors align with the supplied options. A policy
+may also keep plans for decisions it chooses whole, and list a decision's
+whole options (`Policy`'s optional names)."""
 
 from __future__ import annotations
 
@@ -46,6 +48,23 @@ class Policy(Protocol):
         one, and align with the supplied options; values follow `value_rows`'
         board-seat order and scale."""
         ...
+
+    # Optional, read by name where present (`hexset.rollout.PairedRollouts`):
+    #
+    # `plans`, a `hexset.decisions.Plans`: a policy that chooses a decision of
+    # several moves whole and plays it a move at a time keeps the rest of it
+    # there. Its `act_rows` is then the move it plays alone, which need not be
+    # the argmax of its `score_rows` prior; a caller that plays another move
+    # where a plan is held drops the game's plan (`Plans.drop`).
+    #
+    # `option_rows(rows: Sequence[tuple[Game, int]]) -> list[tuple[tuple[Option,
+    # ...], np.ndarray]]`: every whole option of each row's decision
+    # (`hexset.decisions.Option`, as `hexset.decisions.options` states them,
+    # a position inside a decision as its legal moves) with its probability,
+    # nonnegative and summing to one, in block order (flat actions by index,
+    # the setup turn or the double turn, Road Building, the discard), and
+    # its `act_rows` decision the most probable of them. A policy that has the
+    # method but cannot answer it sets `has_options` false.
 
 
 class Checkpoint(Protocol):

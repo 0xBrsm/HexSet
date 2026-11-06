@@ -138,6 +138,34 @@ class NetworkBot(trading.DeclaredTrade):
             return options[tip_robber(options, prior, value, seat, picked, self.robber_tip)]
         return self.policy.act_rows([(game, seat, options)])[0]
 
+    @classmethod
+    def choose_many(cls, pairs: Sequence[tuple["NetworkBot", Game]]) -> list[Action]:
+        """`choose` for several bots at once (`hexset.bots.ChoosesMany`): the
+        bots sharing one policy are asked in one `act_rows` call (a robber
+        move a seat tips, in one `score_rows` call), each seated at its own
+        game first, so a batched table makes one forward per policy a tick
+        where it made one per seat. Each answer is the one `choose` gives:
+        a policy's `act_rows` answers every row as it would alone."""
+        out: list[Action | None] = [None] * len(pairs)
+        groups: dict[tuple[int, bool], list[tuple[int, NetworkBot, Game, int, tuple[Action, ...]]]] = {}
+        for i, (bot, game) in enumerate(pairs):
+            bot.seat_at(game)
+            seat = to_move(game)
+            options = tuple(options_for(game))
+            tipped = bool(bot.robber_tip) and options[0].type is ActionType.MOVE_ROBBER
+            groups.setdefault((id(bot.policy), tipped), []).append((i, bot, game, seat, options))
+        for (_, tipped), members in groups.items():
+            policy = members[0][1].policy
+            rows = [(game, seat, options) for _, _, game, seat, options in members]
+            if tipped:
+                for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
+                    picked = max(range(len(options)), key=lambda k: prior[k])
+                    out[i] = options[tip_robber(options, prior, value, seat, picked, bot.robber_tip)]
+            else:
+                for (i, *_), action in zip(members, policy.act_rows(rows)):
+                    out[i] = action
+        return out  # type: ignore[return-value]
+
     def _perspective(self, view: View) -> int:
         if self.seat is not None and view.perspective != self.seat:
             raise ValueError(
@@ -661,14 +689,16 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
         if self.opponents is not None:
             self.policy.seat = to_move(game)      # this seat's rows stay its own in every playout
         decision = self.decide(game)
-        picked = decision.chosen
         tip = self.gate.robber_tip
-        if tip and decision.options[0].type is ActionType.MOVE_ROBBER:
+        if tip and not decision.whole and decision.options[0].type is ActionType.MOVE_ROBBER:
             # The root's own prior and value: no forward beyond the decision's.
             picked = tip_robber(
-                decision.options, decision.prior, decision.value, to_move(game), picked, tip
+                decision.options, decision.prior, decision.value, to_move(game), decision.chosen, tip
             )
-        return decision.options[picked]
+            if picked != decision.chosen:
+                self._drop(game)
+                return decision.options[picked]
+        return decision.move
 
 
 def tip_robber(

@@ -145,3 +145,55 @@ class NativePlayout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def discarding(players):
+    """A game past its opening with the seat to roll holding ten cards, two
+    of each, and owing half of them to a seven; nobody else owing."""
+    from hexset.board.terrain import Resource
+    from hexset.game import roll_dice
+
+    game = opened(players, 7)
+    state = game._state
+    seat = game.current_player
+    for s in range(players):
+        for r, n in enumerate(state.hands[s]):
+            state.bank[r] += n
+            state.hands[s][r] = 0
+    for r in Resource:
+        state.bank[r] -= 2
+        state.hands[seat][r] += 2
+    game.phase = Phase.ROLL
+    roll_dice(game, 7)
+    assert game.phase is Phase.DISCARD and game.discard_quota[seat] == 5
+    return game
+
+
+class WholeCandidates(unittest.TestCase):
+    def test_whole_decisions_applied_natively_play_out_as_the_python_ones(self):
+        """Candidates that are whole decisions -- setup turns and a discard,
+        their parts applied in order -- held natively, as their Python copies."""
+        for players in (2, 4):
+            for name, game in (("setup", start(base_board(rng=random.Random(players)), players,
+                                               random.Random(players),
+                                               game_type=DUEL_VARIANT_GAME if players == 2 else STANDARD_GAME)),
+                               ("discard", discarding(players))):
+                with self.subTest(players=players, kind=name):
+                    space = space_of(game)
+                    policy = Probe(space, contract_of(players))
+                    seat = to_move(game)
+                    moves = tuple(D.options(game, seat, double_turn=False))[:3]
+                    self.assertTrue(all(isinstance(m, D.Compound) for m in moves))
+                    tasks = [(game, 19), (game, 29)]
+
+                    def lanes(native):
+                        with mock.patch.object(rollout, "copyable", lambda *a: native and real(*a)):
+                            batch = RolloutBatch.from_tasks(policy, tasks, moves, seat, game.turns, (2, 4))
+                            return batch.advance(6), {type(g) for g in batch.games}
+
+                    real = rollout.copyable
+                    (python, kinds_p), (native, kinds_n) = lanes(False), lanes(True)
+                    self.assertEqual(kinds_p, {type(game)})
+                    self.assertEqual(kinds_n, {NativeCopy})
+                    np.testing.assert_array_equal(native.outcomes, python.outcomes)
+                    np.testing.assert_array_equal(native.after, python.after)

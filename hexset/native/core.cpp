@@ -403,6 +403,10 @@ PyObject* core_apply_cards(Core* self,PyObject* args) {
 PyObject* core_control(Core* self,PyObject*) {
     try {return tuple(checked(self).get(Block::game_control));} catch (...) {error();return nullptr;}
 }
+PyObject* core_phase(Core* self,PyObject*) {
+    try {return PyLong_FromLongLong(checked(self).get(Block::game_control)[PhaseColumn]);}
+    catch (...) {error();return nullptr;}
+}
 void apply_with_python_chance(ArenaState& state,int type,Int a,Int b,Int seat,PyObject* callback) {
     // Pure C++ lanes can call apply_atomic directly with their existing Chance
     // bridge. Only the CPython entry point constructs these borrowed closures.
@@ -465,6 +469,7 @@ PyMethodDef methods[]={
  {"apply_placement",reinterpret_cast<PyCFunction>(core_apply_placement),METH_VARARGS,"Setup and build placement entry point."},
  {"apply_cards",reinterpret_cast<PyCFunction>(core_apply_cards),METH_VARARGS,"Complete native concrete-deck buy/knight/roadbuilding/monopoly/plenty actions."},
  {"control",reinterpret_cast<PyCFunction>(core_control),METH_NOARGS,"Small control tuple only; contains no private hands, cards or referee labels."},
+ {"phase",reinterpret_cast<PyCFunction>(core_phase),METH_NOARGS,"Current public phase, without constructing the full control tuple."},
  {"apply_atomic",reinterpret_cast<PyCFunction>(core_apply_atomic),METH_VARARGS,"One native dispatcher for all15 atomic no-trade actions; no Game reconstruction."},
  {"apply_chance",reinterpret_cast<PyCFunction>(core_apply_chance),METH_VARARGS,"Complete native roll, robber and discard with one original Chance callback per draw."},
  {"legal_actions",reinterpret_cast<PyCFunction>(core_legal_actions),METH_VARARGS,"Ordered native atomic legality; debug copy of reusable worker queries."},

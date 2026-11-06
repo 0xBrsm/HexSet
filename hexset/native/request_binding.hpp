@@ -7,6 +7,11 @@ struct NativeRequestBatch {
     PyObject* cores=nullptr;
     RequestBuffers* buffers=nullptr;
 };
+const ArenaState& request_lane(NativeRequestBatch* self,Int lane) {
+    ensure(self->cores && self->buffers,"uninitialized native request batch");
+    ensure(lane>=0 && lane<PyTuple_GET_SIZE(self->cores),"invalid native request lane");
+    return checked(reinterpret_cast<Core*>(PyTuple_GET_ITEM(self->cores,static_cast<Py_ssize_t>(lane))));
+}
 std::vector<const ArenaState*> request_states(NativeRequestBatch* self) {
     ensure(self->cores && self->buffers,"uninitialized native request batch");
     std::vector<const ArenaState*> states;
@@ -88,20 +93,27 @@ PyObject* request_targets(NativeRequestBatch* self,PyObject* object) {
         set(result.value,"points",request_bytes(points));set(result.value,"turns",request_bytes(turns));return result.release();
     } catch(...) {error();return nullptr;}
 }
+PyObject* actor_tuple(const ArenaState& state) {
+    const auto& game=state.get(Block::game_control);std::vector<Int> actors;
+    if(game[PhaseColumn]!=6) {
+        if(game[PhaseColumn]==3) {
+            const auto& quota=state.get(Block::discard_quota);
+            for(std::size_t seat=0;seat<quota.size();++seat) if(quota[seat]>0) actors.push_back(static_cast<Int>(seat));
+        }
+        if(actors.empty()) actors.push_back(request_actor(state));
+    }
+    return tuple(actors);
+}
+PyObject* request_actors_at(NativeRequestBatch* self,PyObject* object) {
+    try {return actor_tuple(request_lane(self,integer(object)));}
+    catch(...) {error();return nullptr;}
+}
 PyObject* request_actors(NativeRequestBatch* self,PyObject*) {
     try {
         auto states=request_states(self);Object result(PyTuple_New(static_cast<Py_ssize_t>(states.size())));
         if(!result.value) throw PythonError{};
         for(std::size_t lane=0;lane<states.size();++lane) {
-            const auto& state=*states[lane];const auto& game=state.get(Block::game_control);std::vector<Int> actors;
-            if(game[PhaseColumn]!=6) {
-                if(game[PhaseColumn]==3) {
-                    const auto& quota=state.get(Block::discard_quota);
-                    for(std::size_t seat=0;seat<quota.size();++seat) if(quota[seat]>0) actors.push_back(static_cast<Int>(seat));
-                }
-                if(actors.empty()) actors.push_back(request_actor(state));
-            }
-            PyTuple_SET_ITEM(result.value,static_cast<Py_ssize_t>(lane),tuple(actors));
+            PyTuple_SET_ITEM(result.value,static_cast<Py_ssize_t>(lane),actor_tuple(*states[lane]));
         }
         return result.release();
     } catch(...) {error();return nullptr;}
@@ -110,9 +122,10 @@ PyObject* request_closes(NativeRequestBatch* self,PyObject* args) {
     long long row;int seat;PyObject* types;
     if(!PyArg_ParseTuple(args,"LiO",&row,&seat,&types)) return nullptr;
     try {
-        auto states=request_states(self);auto& b=*self->buffers;
+        ensure(self->cores && self->buffers,"uninitialized native request batch");
+        auto& b=*self->buffers;
         ensure(b.outstanding && row>=0 && static_cast<std::size_t>(row)<b.rows(),"invalid native closure row");
-        return PyBool_FromLong(option_closes(*states[b.ids[row*7+1]],seat,integers(types)));
+        return PyBool_FromLong(option_closes(request_lane(self,b.ids[row*7+1]),seat,integers(types)));
     } catch(...) {error();return nullptr;}
 }
 PyObject* request_replace(NativeRequestBatch* self,PyObject* args) {
@@ -140,6 +153,7 @@ PyMethodDef request_methods[]={
  {"finish",reinterpret_cast<PyCFunction>(request_finish),METH_O,"Release answered requests; the next fill reuses native capacities."},
  {"targets",reinterpret_cast<PyCFunction>(request_targets),METH_O,"Privileged labels only; never in the visible request packet."},
  {"actors",reinterpret_cast<PyCFunction>(request_actors),METH_NOARGS,"All presently acting seats; simultaneous discard seats retain ascending order."},
+ {"actors_at",reinterpret_cast<PyCFunction>(request_actors_at),METH_O,"Presently acting seats for one lane, without scanning the batch."},
  {"option_closes",reinterpret_cast<PyCFunction>(request_closes),METH_VARARGS,"Native decision-run closure after successful atomic parts."},
  {"replace",reinterpret_cast<PyCFunction>(request_replace),METH_VARARGS,"Replace a retired lane, preserving native request capacities and epoch."},
  {nullptr,nullptr,0,nullptr}

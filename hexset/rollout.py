@@ -32,6 +32,22 @@ made from: the outcome of each candidate in each world, and the value head's
 read of each playout at the mover's turn starts `marks` turns on. Fewer
 worlds, fewer candidates or a shorter horizon can then be scored on the same
 playouts afterwards, without playing again.
+
+**The policy's own move.** A root the search does not play out is played as
+the policy plays it alone (`act_rows`), not as its prior's favourite: a
+policy that chooses whole decisions (`hexset.decisions`) may open its best
+whole decision with a move its prior, marginalised onto first moves, does
+not rank first. At a root that is played out, that move is the first
+candidate and wins every tie. Where the search plays anything else, the
+policy's plan for the rest of its own decision is dropped
+(`hexset.decisions.Plans.drop`).
+
+**Whole decisions.** A policy that lists whole options (`option_rows`, see
+`hexset.clients.policy.Policy`) is searched over them at a root that opens a
+compound decision (a setup turn, the double turn, a Road Building card, a
+discard): each candidate is the whole decision, applied in every world
+before the playout, and the one chosen is played a move at a time, its
+later parts answering the asks inside it with no search of their own.
 """
 
 from __future__ import annotations
@@ -48,8 +64,9 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-from .actions import Action, apply, legal_actions
+from .actions import Action, ActionType, apply, legal_actions
 from .chance import Balanced, Live
+from .decisions import Compound, Option, Plans, first_move, inside, opens
 from .game import Game, Phase, imagine, is_over, to_move
 from .native.playout import NativeCopy, copyable, held
 from .victory import public_victory_points
@@ -78,10 +95,17 @@ SETUP_PHASES = (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
 class Decision:
     """One decision as `PairedRollouts.decide` made it: the root's `options`,
     the policy's `prior` over them and its `value` (board-seat order), the
-    option indices played out (`candidates`, highest prior first), each one's
-    mean outcome for the mover over the worlds (`scores`, empty where nothing
-    was played out), and the option `chosen`. `worlds` is how many worlds the
-    candidates were played out in: 0 for a root the policy decides alone.
+    option indices played out (`candidates`: the policy's own move first,
+    then the rest by prior), each one's mean outcome for the mover over the
+    worlds (`scores`, empty where nothing was played out), and the option
+    `chosen`; `move` is the atomic move it opens with. `worlds` is how many
+    worlds the candidates were played out in: 0 for a root the policy decides
+    alone, where `candidates` is the policy's own move alone.
+
+    Under `whole` the options are the root's whole decisions
+    (`hexset.decisions.Option`: an action, or a `Compound` of several) and
+    `prior` the policy's probability of each (`option_rows`); otherwise they
+    are the root's legal atomic moves and `prior` the policy's `score_rows`.
 
     What it was made from, for the log: the root's `turn` and `phase`, the
     deciding `seat`, every seat's public victory `points`; `outcomes`, one
@@ -98,13 +122,14 @@ class Decision:
     `truncated`, the playouts stopped short; and `cpu_seconds`, the process
     time the decision took."""
 
-    options: tuple[Action, ...]
+    options: tuple[Option, ...]
     prior: np.ndarray
     value: tuple[float, ...]
     candidates: tuple[int, ...]
     scores: tuple[float, ...]
     chosen: int
     worlds: int
+    whole: bool = False
     turn: int = 0
     phase: str = ""
     seat: int = 0
@@ -119,23 +144,31 @@ class Decision:
     truncated: int = 0
     cpu_seconds: float = 0.0
 
+    @property
+    def move(self) -> Action:
+        """The atomic move played: the chosen option, or its first part."""
+        return first_move(self.options[self.chosen])
+
     def to_json(self) -> dict:
         """The decision as one JSON object. A decision the policy made alone
-        keeps its top prior and the option count, not the full prior."""
+        keeps its top prior and the option count, not the full prior. A
+        candidate is written `[type, a, b]`, or for a whole decision of
+        several moves `[kind, [[type, a, b], ...]]`."""
         out = {
             "turn": self.turn, "phase": self.phase, "seat": self.seat,
             "points": list(self.points), "options": len(self.options),
-            "top_prior": round(float(self.prior[self.candidates[0]]), 4),
+            "top_prior": round(float(np.max(self.prior)), 4),
             "chosen": self.chosen, "worlds": self.worlds,
             "cpu_seconds": round(self.cpu_seconds, 4),
         }
+        if self.whole:
+            out["whole"] = True
         if not self.worlds:
             return out
         r = lambda x: round(float(x), 4)  # noqa: E731
         out.update(
             candidates=list(self.candidates),
-            actions=[[self.options[i].type.name, self.options[i].a, self.options[i].b]
-                     for i in self.candidates],
+            actions=[_option_json(self.options[i]) for i in self.candidates],
             prior=[r(self.prior[i]) for i in self.candidates],
             value=[r(v) for v in self.value],
             scores=[r(s) for s in self.scores],
@@ -148,6 +181,12 @@ class Decision:
             row_steps=self.row_steps, mark_row_steps=list(self.mark_row_steps),
         )
         return out
+
+
+def _option_json(option: Option) -> list:
+    if isinstance(option, Compound):
+        return [option.kind.name, [[p.type.name, p.a, p.b] for p in option.parts]]
+    return [option.type.name, option.a, option.b]
 
 
 def _outcome(x: float) -> float | int:
@@ -179,11 +218,23 @@ class PairedRollouts:
     `value_rows` for a playout stopped short of the game's end.
 
     `worlds` is the number of shared-chance worlds each candidate plays out
-    in; `top`, how many of the policy's moves, by prior, are candidates. A
-    root with one legal move, or, under `decisive`, whose prior on one move
-    is at least `decisive`, plays that move with no playout. Under
-    `full_setup`, `decisive` skips no setup root (`SETUP_PHASES`): every
-    opening settlement and road with a choice is played out.
+    in; `top`, how many candidates: the policy's own move (`act_rows`), then
+    its other moves by prior. A root with one legal move, or, under
+    `decisive`, whose prior on one move is at least `decisive`, plays the
+    policy's own move with no playout. Under `full_setup`, `decisive` skips
+    no setup root (`SETUP_PHASES`): every opening settlement and road with a
+    choice is played out. Where the search plays another move than the
+    policy's own, the policy's plan for the game (`plans`, where it keeps
+    one) is dropped.
+
+    A policy that lists whole options (`option_rows`, where `has_options`
+    is not false) is searched over whole decisions at a root that opens a
+    compound one (the module docstring): the candidates are its own whole
+    decision, then its others by probability; `decisive` and `full_setup`
+    read the root that opens the decision, and the asks inside it are
+    answered from the chosen decision's parts without a search. Inside a
+    decision begun a move at a time without such a plan, the root is
+    searched a move at a time.
 
     A playout runs to the game's end, scored 1 where the mover won and 0
     otherwise, or under `horizon` stops at the first turn start of the mover
@@ -193,7 +244,8 @@ class PairedRollouts:
     is scored by the value head's chance for the mover, read from the
     mover's own frame whoever is to move there, so the mover's own cards in
     that world stay known to the read. The candidate with the highest mean
-    score over the worlds is played, the higher prior on a tie.
+    score over the worlds is played, the earlier candidate on a tie (so the
+    policy's own move first).
     `truncated_rollouts` counts the playouts scored that way over this
     searcher's life, `last_truncated_rollouts` those of its last decision.
 
@@ -249,6 +301,8 @@ class PairedRollouts:
         self.truncated_rollouts = 0
         self.last_truncated_rollouts = 0
         self.decision_log: list[Decision] = []
+        # The rest of each whole decision this searcher chose, played a move at a time.
+        self._plans = Plans()
         self._steps = 0
         self._row_steps = 0
         self._mark_row_steps: tuple[int, ...] = ()
@@ -280,19 +334,33 @@ class PairedRollouts:
         ((prior, value),) = self.policy.score_rows([(game, seat, options)])
         prior = np.asarray(prior, dtype=np.float64)
         value = tuple(float(v) for v in value)
+        if self._plans.planned(game, seat, options):
+            # Inside a whole decision this searcher chose: its next part, unsearched.
+            move = self._plans.act(game, seat, options, None, None)
+            return self._alone(options, prior, value, options.index(move), context, began)
+        self._plans.drop(game)      # a plan the game has moved past is never played
+        own = options.index(self._own(game, seat, options))
+        whole = self._opens_whole(game, options)
         order = sorted(range(len(options)), key=lambda i: -prior[i])
         if len(options) == 1 or (
             self.decisive is not None and prior[order[0]] >= self.decisive
             and not (self.full_setup and game.phase in SETUP_PHASES)
         ):
-            decision = Decision(
-                options, prior, value, (order[0],), (), order[0], 0, **context,
-                cpu_seconds=time.process_time() - began,
-            )
-            self.decision_log.append(decision)
-            return decision
-        candidates = tuple(order[: self.top])
+            if whole:
+                self._hold_own(game, seat, options[own])
+            return self._alone(options, prior, value, own, context, began)
+        if whole:
+            return self._decide_whole(game, seat, options[own], value, context, began)
+        candidates = (own,) + tuple(i for i in order if i != own)[: self.top - 1]
+        decision = self._search(game, seat, options, prior, value, candidates, context, began, whole=False)
+        if decision.chosen != own:
+            self._drop(game)
+        return decision
 
+    def _search(self, game: Game, seat: int, options: tuple, prior: np.ndarray, value: tuple,
+                candidates: tuple[int, ...], context: dict, began: float, *, whole: bool) -> Decision:
+        """`candidates` of `options` played out in shared worlds, the best
+        mean score chosen (the earlier candidate on a tie), and logged."""
         # Worlds and seeds are drawn here, in order, whoever plays them out:
         # a pool's decision is the one this process would have made alone.
         tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
@@ -306,7 +374,7 @@ class PairedRollouts:
         reads = self._mark_reads
         decision = Decision(
             options, prior, value, candidates,
-            tuple(float(s) for s in scores), candidates[best], self.worlds, **context,
+            tuple(float(s) for s in scores), candidates[best], self.worlds, whole, **context,
             outcomes=tuple(tuple(float(x) for x in row) for row in table),
             marks=self.marks,
             mark_values=tuple(
@@ -324,9 +392,102 @@ class PairedRollouts:
         self.decision_log.append(decision)
         return decision
 
+    def _alone(self, options: tuple, prior: np.ndarray, value: tuple, index: int, context: dict,
+               began: float, *, whole: bool = False) -> Decision:
+        """The root decided with no playout: `options[index]`, logged."""
+        decision = Decision(options, prior, value, (index,), (), index, 0, whole, **context,
+                            cpu_seconds=time.process_time() - began)
+        self.decision_log.append(decision)
+        return decision
+
+    def _own(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
+        """The policy's own move at the root, as it plays alone (`act_rows`):
+        continuing a plan it holds, or opening the whole decision it chooses.
+        A lone legal move is asked too where the policy keeps plans, so its
+        plan moves on with the game."""
+        if len(options) == 1 and self._policy_plans() is None:
+            return options[0]
+        (move,) = self.policy.act_rows([(game, seat, options)])
+        if move not in options:
+            raise RuntimeError(f"the policy chose {move}, not among {options}")
+        return move
+
+    def _policy_plans(self) -> Plans | None:
+        return getattr(self.policy, "plans", None)
+
+    def _drop(self, game: Game) -> None:
+        """Forget the policy's plan for `game`: the search played something
+        else than the move it opened with or continued."""
+        plans = self._policy_plans()
+        if plans is not None:
+            plans.drop(game)
+
+    def _opens_whole(self, game: Game, options: tuple[Action, ...]) -> bool:
+        """Whether the root is searched over whole decisions: the policy lists
+        them, and the root opens a compound one (not inside one begun)."""
+        return (callable(getattr(self.policy, "option_rows", None))
+                and getattr(self.policy, "has_options", True)
+                and not inside(game)
+                and any(opens(game, action) is not None for action in options))
+
+    def _whole_own(self, game: Game, seat: int, first: Action, listed: tuple[Option, ...],
+                   probs: np.ndarray | None) -> int | None:
+        """Which of `listed` is the policy's own whole decision, opened by
+        `first`: the one whose parts are `first` and the plan the policy
+        keeps for the rest; without a plan, its most probable option opened
+        by `first`."""
+        plans = self._policy_plans()
+        if plans is not None:
+            parts = (first, *plans.peek(game, seat))
+            for i, option in enumerate(listed):
+                if (option.parts if isinstance(option, Compound) else (option,)) == parts:
+                    return i
+        opened = [i for i, option in enumerate(listed) if first_move(option) == first]
+        if not opened or probs is None:
+            return None
+        return max(opened, key=lambda i: (probs[i], -i))
+
+    def _hold_own(self, game: Game, seat: int, first: Action) -> None:
+        """The policy's own whole decision, opened by `first` and played with
+        no search: the rest of it held here, so the asks inside it are
+        answered from it."""
+        plans = self._policy_plans()
+        if plans is not None:
+            rest = plans.peek(game, seat)
+            plans.drop(game)
+        else:
+            ((listed, probs),) = self.policy.option_rows([(game, seat)])
+            own = self._whole_own(game, seat, first, tuple(listed), np.asarray(probs, dtype=np.float64))
+            option = None if own is None else listed[own]
+            rest = option.parts[1:] if isinstance(option, Compound) else ()
+        self._plans.keep(game, seat, rest)
+
+    def _decide_whole(self, game: Game, seat: int, first: Action, value: tuple, context: dict,
+                      began: float) -> Decision:
+        """A root that opens a compound decision, searched over the policy's
+        whole options (`option_rows`): its own first, then the rest by
+        probability. The chosen decision's first part is played and the rest
+        held for the asks inside it."""
+        ((listed, probs),) = self.policy.option_rows([(game, seat)])
+        listed = tuple(listed)
+        probs = np.asarray(probs, dtype=np.float64)
+        own = self._whole_own(game, seat, first, listed, probs)
+        self._drop(game)
+        order = np.argsort(-probs, kind="stable")
+        if own is None:
+            own = int(order[0])
+        if len(listed) == 1:
+            decision = self._alone(listed, probs, value, own, context, began, whole=True)
+        else:
+            rest = [int(i) for i in order[: self.top] if i != own][: self.top - 1]
+            candidates = (own, *rest)
+            decision = self._search(game, seat, listed, probs, value, candidates, context, began, whole=True)
+        option = listed[decision.chosen]
+        self._plans.keep(game, seat, option.parts[1:] if isinstance(option, Compound) else ())
+        return decision
+
     def choose(self, game: Game) -> Action:
-        decision = self.decide(game)
-        return decision.options[decision.chosen]
+        return self.decide(game).move
 
     def _lanes(self, tasks, moves, seat: int, start: int) -> "Lanes":
         """Every world of `tasks` played out after each of `moves`: here, or
@@ -384,7 +545,7 @@ class Lanes:
 
 
 def play_lanes(
-    policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action], seat: int, start: int,
+    policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option], seat: int, start: int,
     horizon: int | None, marks: tuple[int, ...],
 ) -> Lanes:
     """Each `(world, seed)` of `tasks` copied once per move of `moves`
@@ -407,6 +568,18 @@ def _apply(game, action: Action) -> None:
         game.apply(action)
     else:
         apply(game, action)
+
+
+def _apply_option(game, option: Option, seat: int) -> None:
+    """A candidate applied to a copy: an action, or a whole decision's parts
+    in order (`hexset.decisions.apply_option`), `seat` the discarding seat."""
+    for part in (option.parts if isinstance(option, Compound) else (option,)):
+        if is_over(game):
+            return
+        if type(game) is NativeCopy:
+            game.apply(part, seat)
+        else:
+            apply(game, part, seat if part.type is ActionType.DISCARD else None)
 
 
 def _stops(game: Game, seat: int, start: int, horizon: int | None) -> bool:
@@ -477,14 +650,14 @@ class RolloutBatch:
         self.scores = np.full(size, np.nan) if self.after is None else self.after.copy()
 
     @classmethod
-    def from_tasks(cls, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action],
+    def from_tasks(cls, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option],
                    seat: int, start: int, marks: Sequence[int] = ()) -> "RolloutBatch":
         """A paired copy per world and move, in world-major order."""
         batch = cls(policy, (), seat, start, marks, after=bool(marks))
         batch.add_tasks(tasks, moves)
         return batch
 
-    def add_tasks(self, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action]) -> tuple[int, ...]:
+    def add_tasks(self, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option]) -> tuple[int, ...]:
         """Append paired copies for new worlds or moves; return their indices.
         A world the native engine can hold for this policy (`copyable`) is
         copied once and held natively, each move's copy a fork of it."""
@@ -496,10 +669,9 @@ class RolloutBatch:
             for k, move in enumerate(moves):
                 if native is not None:
                     copy = native.fork()
-                    copy.apply(move)
                 else:
                     copy = base if k == 0 else paired_copy(world, seed, self.seat)
-                    apply(copy, move)
+                _apply_option(copy, move, self.seat)
                 copies.append(copy)
         return self.add(copies)
 
@@ -680,7 +852,7 @@ class RolloutPool:
             raise RuntimeError("a rollout worker could not load its policy") from error
 
     def play(
-        self, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Action], seat: int,
+        self, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option], seat: int,
         start: int, horizon: int | None, marks: tuple[int, ...],
     ) -> Lanes:
         """`play_lanes(policy, tasks, ...)`, with the workers playing all

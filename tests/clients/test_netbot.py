@@ -1095,3 +1095,78 @@ def test_a_calibrated_gate_prices_gains_on_the_calibrated_scale(board):
     assert gains["calibrated"] == pytest.approx(
         calibrate_own(p(own + 1), 0, cal)[0] - calibrate_own(before, 0, cal)[0])
     assert gains["calibrated"] > gains["raw"] > 0      # behind, a gain counts for more
+
+
+@dataclass
+class PositionPolicy(HandValuePolicy):
+    """A stub whose move depends on the position (the move count and the seat), and that counts its calls, so a
+    batch answered from the wrong row or asked once per bot shows."""
+
+    calls: list = None
+
+    def act_rows(self, rows):
+        if self.calls is not None:
+            self.calls.append(("act", len(rows)))
+        return [options[(game.turns + 3 * seat) % len(options)] for game, seat, options in rows]
+
+    def score_rows(self, rows):
+        if self.calls is not None:
+            self.calls.append(("score", len(rows)))
+        return [([float((game.turns + i) % 5) for i in range(len(options))], self._value(game, seat))
+                for game, seat, options in rows]
+
+
+def _positions(board, count: int, *, robber: bool = False):
+    """`count` live positions on their own games, each a few random moves in; with `robber`, ones where the
+    seat to move places the robber."""
+    out, seed = [], 0
+    while len(out) < count and seed < 5000:
+        seed += 1
+        game = start(board, PLAYERS, random.Random(seed))
+        rng = random.Random(seed)
+        for _ in range(rng.randrange(5, 120)):
+            options = tuple(options_for(game))
+            if robber and options[0].type is ActionType.MOVE_ROBBER:
+                break
+            step_randomly(game, rng)
+        if robber and tuple(options_for(game))[0].type is not ActionType.MOVE_ROBBER:
+            continue
+        out.append(game)
+    assert len(out) == count
+    return out
+
+
+def test_choose_many_answers_each_bot_as_choose_does_with_one_call_per_policy(board):
+    """`NetworkBot.choose_many` (`hexset.bots.ChoosesMany`): every bot gets the move `choose` gives it, seated at its
+    own game, and the bots sharing a policy are asked together, one `act_rows` call per policy."""
+    from hexset.bots import chooses_many
+
+    checkpoint = stub_checkpoint(board)
+    calls_a, calls_b = [], []
+    a = replace(checkpoint, policy=PositionPolicy(space=checkpoint.space, calls=calls_a))
+    b = replace(checkpoint, policy=PositionPolicy(space=checkpoint.space, calls=calls_b))
+    games = _positions(board, 9)
+    bots = [bot_for(a if i % 3 else b, rng=random.Random(i)) for i in range(len(games))]
+    assert all(chooses_many(bot) for bot in bots)
+    expected = [bot.choose(game) for bot, game in zip(bots, games)]
+    calls_a.clear(), calls_b.clear()
+    pairs = list(zip(bots, games))
+    assert type(bots[0]).choose_many(pairs) == expected
+    assert calls_a == [("act", 6)] and calls_b == [("act", 3)]
+    assert all(bot._seated is game for bot, game in pairs)
+
+
+def test_choose_many_tips_a_robber_move_as_choose_does(board):
+    """A seat that tips its robber moves (`robber_tip`) reads `score_rows` there, batched across the bots sharing its
+    policy, and moves the robber where `choose` would; a seat that does not tip plays `act_rows` beside it."""
+    checkpoint = stub_checkpoint(board)
+    policy = PositionPolicy(space=checkpoint.space, calls=[])
+    tipping = replace(checkpoint, policy=policy)
+    games = _positions(board, 4, robber=True)
+    bots = [bot_for(tipping, rng=random.Random(i)) for i in range(len(games))]
+    for bot in bots[:3]:
+        bot.robber_tip = 0.5
+    expected = [bot.choose(game) for bot, game in zip(bots, games)]
+    policy.calls.clear()
+    assert type(bots[0]).choose_many(list(zip(bots, games))) == expected
+    assert sorted(policy.calls) == [("act", 1), ("score", 3)]

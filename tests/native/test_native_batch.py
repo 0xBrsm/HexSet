@@ -53,6 +53,42 @@ def answer(group, request, kind=None, at=None):
 
 
 class NativeBatchProtocols(unittest.TestCase):
+    def test_selected_lane_queries_match_public_state_and_reject_invalid_lanes(self):
+        for players in (2, 4):
+            games = [position(players) for _ in Phase]
+            for phase, game in zip(Phase, games):
+                game.phase = phase
+                game.discard_quota = [1]*players
+            group = batch(games)
+            snapshots = [item.native.core.referee_snapshot() for item in group.lanes]
+            actors = group._native.actors()
+            for slot, (game, item) in enumerate(zip(games, group.lanes)):
+                self.assertEqual(item.native.core.phase(), int(game.phase))
+                self.assertEqual(group._native.actors_at(slot), actors[slot])
+            self.assertEqual(snapshots, [item.native.core.referee_snapshot() for item in group.lanes])
+            for slot in (-1, len(games)):
+                with self.assertRaisesRegex(ValueError, "lane"):
+                    group._native.actors_at(slot)
+
+    def test_closure_uses_request_lane_after_retirement_and_current_state_after_apply(self):
+        for players in (2, 4):
+            games = [position(players) for _ in range(3)]
+            games[1].current_player = 1
+            group = batch(games)
+            group.lanes[0].finished = True
+            requests = group.requests()
+            self.assertEqual([request.lane for request in requests], [1, 2])
+            for row, request in enumerate(requests):
+                for seat in range(players):
+                    option = Action(ActionType.BANK_TRADE, 0, 1)
+                    self.assertEqual(group._native.option_closes(row, seat, [int(option.type)]),
+                                     D.closes(games[request.lane], option, seat))
+            choices = [answer(group, request) for request in requests]
+            group.advance(choices)
+            for row in (-1, 0, 2):
+                with self.assertRaisesRegex(ValueError, "closure"):
+                    group._native.option_closes(row, 0, [int(ActionType.END_TURN)])
+
     def test_visible_bytes_candidates_and_separate_labels(self):
         for players in (2, 4):
             for phase in (Phase.SETUP_SETTLEMENT, Phase.ROLL, Phase.MAIN, Phase.DISCARD):

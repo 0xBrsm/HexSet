@@ -94,6 +94,9 @@ __all__ = [
     "decision_at",
     "topology_of",
     "Plans",
+    "first_move",
+    "OPTION_OUTPUTS",
+    "listed",
 ]
 
 
@@ -563,6 +566,78 @@ def arrays(decisions: Sequence["Decision | None"], space: ActionSpace, topology)
     }
 
 
+def first_move(option: Option) -> Action:
+    """The atomic move a decision opens with: an action itself, or a
+    compound's first part."""
+    return option.parts[0] if isinstance(option, Compound) else option
+
+
+#: The outputs a decision graph may answer every whole option's probability
+#: in, one per block of `Decision` (`listed` reads them): `option_flat`
+#: `(B, space.size)` and `option_setup` `(B, incidences)`, one per row;
+#: `option_double` `(D, incidences, incidences)`, the ordered pairs of each
+#: double-turn row in `double_rows` order (a graph that asks no double turn
+#: declares none); and `option_road_building` `(Kr,)` and `option_discard`
+#: `(Kd,)`, one per candidate, beside `road_building` and `discard`. Each is
+#: the option's probability in its row's whole decision, every block
+#: together, and zero where the option is not legal.
+OPTION_OUTPUTS = ("option_flat", "option_setup", "option_double", "option_road_building", "option_discard")
+
+_PAIRS_OK: dict[int, tuple[object, np.ndarray]] = {}
+
+
+def _pairs_ok(topology) -> np.ndarray:
+    """`double_pairs(topology)`, worked out once per topology."""
+    held = _PAIRS_OK.get(id(topology))
+    if held is not None and held[0] is topology:
+        return held[1]
+    out = double_pairs(topology)
+    out.flags.writeable = False
+    if len(_PAIRS_OK) >= 64:
+        _PAIRS_OK.pop(next(iter(_PAIRS_OK)))
+    _PAIRS_OK[id(topology)] = (topology, out)
+    return out
+
+
+def listed(decision: Decision, blocks: dict[str, np.ndarray], game: Game, seat: int,
+           space: ActionSpace) -> tuple[tuple[Option, ...], np.ndarray]:
+    """Every legal option of `seat`'s `decision` at `game` with its
+    probability, in block order -- flat actions by index, the setup turn's
+    incidences or the double turn's pairs (`first * incidences + second`),
+    the Road Building sets, the discards, each as `decision` lists them --
+    from `blocks`, the decision's own slice of each `OPTION_OUTPUTS` array
+    (`option_double` `(incidences, incidences)`, only for a double turn).
+    The probabilities are renormalised over the legal options, uniform where
+    none has any mass. Robber victims come back in board seats."""
+    topology = topology_of(game)
+    pairs = incidences(topology)
+    frame = frame_for(game, seat, space)
+    players = game.dealt if not isinstance(game, Game) else game._state.num_players
+    out: list[Option] = []
+    mass: list[np.ndarray] = []
+    flat = np.flatnonzero(decision.flat)
+    out.extend(option_of(decision, DecisionKind.FLAT, int(i), pairs, seat, space, players, frame) for i in flat)
+    mass.append(np.asarray(blocks["option_flat"], dtype=np.float64)[flat])
+    if decision.double:
+        legal = (decision.setup[:, None] & decision.setup[None, :] & _pairs_ok(topology)).reshape(-1)
+        at = np.flatnonzero(legal)
+        out.extend(option_of(decision, DecisionKind.DOUBLE, int(i), pairs, seat, space, players, frame) for i in at)
+        mass.append(np.asarray(blocks["option_double"], dtype=np.float64).reshape(-1)[at])
+    else:
+        at = np.flatnonzero(decision.setup)
+        out.extend(option_of(decision, DecisionKind.SETUP, int(i), pairs, seat, space, players, frame) for i in at)
+        mass.append(np.asarray(blocks["option_setup"], dtype=np.float64)[at])
+    for kind, name, rows in ((DecisionKind.ROAD_BUILDING, "option_road_building", decision.road_building),
+                             (DecisionKind.DISCARD, "option_discard", decision.discard)):
+        out.extend(option_of(decision, kind, i, pairs, seat, space, players, frame) for i in range(len(rows)))
+        mass.append(np.asarray(blocks[name], dtype=np.float64).reshape(-1)[:len(rows)])
+    probs = np.concatenate(mass) if mass else np.zeros(0)
+    probs = np.where(np.isfinite(probs) & (probs > 0), probs, 0.0)
+    total = probs.sum()
+    probs = probs / total if total > 0 else np.full(len(out), 1.0 / max(1, len(out)))
+    return tuple(out), probs
+
+
 def atomic(game: Game, seat: int, space: ActionSpace) -> Decision:
     """`seat`'s legal atomic moves at `game` as a decision of flat actions
     alone (robber victims seat-relative, as `tensors` states them): how a
@@ -596,7 +671,14 @@ class Plans:
 
     Plans are kept per game, by identity, so one `Plans` serves every game a
     process plays; a game that ended inside a decision leaves its plan behind,
-    and once `LIMIT` games hold one they are all dropped."""
+    and once `LIMIT` games hold one they are all dropped.
+
+    A caller that plays some other move at a position where a plan is held
+    (a search overriding the policy's own move) drops the game's plan
+    (`drop`): a plan's next part can still be legal after another move, and
+    must never be played from a decision that was not taken. `peek` reads a
+    plan without playing it, and `keep` puts one in place, for a caller that
+    chose the whole decision itself."""
 
     LIMIT = 256
 
@@ -608,6 +690,27 @@ class Plans:
         without asking `decide` or `finish`. Changes nothing."""
         plan = self._plans.get(id(game))
         return plan is not None and plan[0] is game and plan[1] == seat and bool(plan[2]) and plan[2][0] in options
+
+    def peek(self, game: Game, seat: int) -> tuple[Action, ...]:
+        """The moves left of `seat`'s plan at `game`, in order; none where it
+        holds none. Changes nothing."""
+        plan = self._plans.get(id(game))
+        return tuple(plan[2]) if plan is not None and plan[0] is game and plan[1] == seat else ()
+
+    def drop(self, game: Game) -> None:
+        """Forget any plan held for `game`."""
+        self._plans.pop(id(game), None)
+
+    def keep(self, game: Game, seat: int, parts: Sequence[Action]) -> None:
+        """Hold `parts` as `seat`'s plan at `game`, replacing any plan held
+        for it: the next asks inside the decision get them in order. No parts
+        holds nothing."""
+        self._plans.pop(id(game), None)
+        if not parts:
+            return
+        if len(self._plans) > self.LIMIT:
+            self._plans.clear()
+        self._plans[id(game)] = (game, seat, list(parts))
 
     def act(self, game: Game, seat: int, options: Sequence[Action], decide, finish) -> Action:
         """`seat`'s move at `game` from `options`, its legal atomic moves."""

@@ -229,7 +229,7 @@ class NativeBatch:
             if not actors:
                 raise ValueError("a terminal imported lane must be retained before collection")
             seat = actors[0]
-            if self.discard_order == "random" and lane.native.core.control()[0] == 3:
+            if self.discard_order == "random" and lane.native.core.phase() == 3:
                 if lane.discard_rng is None:
                     lane.discard_rng = random.Random(f"discard-order:{game_key(lane.seed, lane.index)}")
                 seat = lane.discard_rng.choice(actors)
@@ -310,21 +310,20 @@ class NativeBatch:
                 parts = option.parts if isinstance(option, D.Compound) else (option,)
                 done = False
                 for part, action in enumerate(parts):
-                    before = lane.native.core.control()
-                    discarding = before[0] == 3
-                    actors = self._native.actors()[request.lane] if discarding else ()
+                    discarding = lane.native.core.phase() == 3
+                    actors = self._native.actors_at(request.lane) if discarding else ()
                     actor = request.seat if discarding and actors and actors[0] != request.seat else None
                     lane.native.apply(action, request.seat if discarding else None)
                     lane.tape.step(action, (), actor=actor)
                     lane.actions += 1
                     if part == 0 and self.on_decision is not None:
                         self.on_decision(request, answer)
-                    after = lane.native.core.control()
-                    done = after[0] == 6 or lane.actions >= lane.action_cap
+                    phase = lane.native.core.phase()
+                    done = phase == 6 or lane.actions >= lane.action_cap
                     if done:
                         record = lane.record()
                         outcome = Outcome(record.winner, tuple(lane.native.core.privileged_true_points()),
-                            record.turns, lane.actions, after[0] != 6, 0, record.winner is None and after[0] == 6)
+                            record.turns, lane.actions, phase != 6, 0, record.winner is None and phase == 6)
                         completion = NativeCompletion(lane.index, lane.seed, lane.players, lane.cast, outcome, record)
                         kept = self.keep(completion)
                         lane.finished = True

@@ -46,7 +46,7 @@ its own `choose`.
 from __future__ import annotations
 
 import random
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from contextlib import ExitStack, contextmanager
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -314,6 +314,7 @@ class LaneEnv:
         bot_capacity: int = 256,
         discard_order: str = "seat",
         decisions: Collection[int] = (),
+        indices: Sequence[int] | None = None,
     ) -> None:
         """`deal` bounds how many games are started; left `None` the
         environment refills forever, where an evaluation wants a fixed cohort
@@ -325,7 +326,10 @@ class LaneEnv:
         Every game is recorded: each `Episode` carries its `hexset.record.Record`.
         `discard_order` is `DISCARD_ORDERS`' choice (the module docstring).
         `decisions` names the caller's policy ids asked for whole decisions;
-        a bot's id cannot be one.
+        a bot's id cannot be one. `indices`, when given, deals exactly those
+        games in that order and nothing else (a resumed cohort's missing
+        games), each the same game it is under any other deal; `deal` and
+        `first_game` are then ignored.
         """
         if players < 2:
             raise ValueError("a game needs at least two seats")
@@ -363,6 +367,11 @@ class LaneEnv:
         self.ticks = 0
         self.steps = 0
         self.games = 0
+        self._listed = None if indices is None else deque(indices)
+        if self._listed is not None:
+            if not self._listed:
+                raise ValueError("a listed environment needs at least one index")
+            first_game, deal = self._listed[0], len(self._listed)
         self._next = first_game
         self._stop = None if deal is None else first_game + deal * stride
         self._lanes: list[_Lane | None] = [self._fresh() for _ in range(lanes)]
@@ -409,6 +418,11 @@ class LaneEnv:
         return tuple(out)
 
     def _fresh(self) -> _Lane | None:
+        if self._listed is not None:
+            if not self._listed:
+                return None
+            self._next = self._listed.popleft()
+            self._stop = self._next + 1
         if self._stop is not None and self._next >= self._stop:
             return None
         index = self._next

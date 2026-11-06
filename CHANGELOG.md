@@ -5,6 +5,87 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.26.0
+
+### Added
+
+- **`NetworkBot.choose_many`** (`hexset.bots.ChoosesMany`): the network bots
+  to move in one tick are answered together, one `act_rows` call per policy
+  they share (a robber move a seat tips, one `score_rows` call), so a batched
+  table (`hexset.gym.lanes.LaneEnv`) seating `network:` entrants makes one
+  forward per policy a tick where it made one per seat. Every bot gets the
+  move its own `choose` gives, seated at its own game.
+
+- **One batched game loop over Python or native lanes.**
+  `hexset.gym.driver.Driver` plays the games a `LaneEnv` deals: each tick it
+  groups the requests of the seats a caller answers by policy id, asks each
+  policy's `Seat` once (`choose_many`), applies the answers and hands each
+  finished game to a required `keep` before its lane is dealt again, with an
+  optional per-decision hook. `lanes="native"` imports each dealt game into
+  the native engine and refills from the same dealer in the same order, so a
+  game is the same function of `(seed, index)` on either lane kind, record
+  and decisions alike; `lanes="auto"` takes native lanes where every seat
+  reads a native contract (`Seat.native_contract`) and the table has no bot,
+  watcher or trade gate. One `Request` type serves both lane kinds;
+  `observations(requests, contract)` reads each row's observation under a
+  contract, and `Driver.targets()` holds the referee's labels apart from the
+  requests. `draw_key`, the per-decision sampling key, moves here.
+
+- **`LaneEnv(indices=...)` deals exactly the listed games**, in order, each
+  the same game it is under a strided deal.
+
+- **Paired rollouts search whole decisions.** A policy that lists a
+  decision's whole options (`option_rows`, documented with
+  `hexset.clients.policy.Policy`) is searched over them at a root that opens
+  a setup turn, the double turn, a Road Building card or a discard: each
+  candidate is the whole decision, applied in every world before its
+  playout, its own whole decision first; the chosen one is played a move at
+  a time, its later parts unsearched. `decisive` and `setup=full` read the
+  root that opens the decision. `Decision.whole` marks such a decision,
+  `Decision.move` is the atomic move any decision plays, and `to_json`
+  writes a whole candidate as `[kind, [[type, a, b], ...]]`.
+
+- **A decision graph may answer every whole option's probability.**
+  `hexset.decisions.OPTION_OUTPUTS` names the outputs, one per block of
+  `Decision` (`option_flat`, `option_setup`, `option_double` for a graph that
+  declares `double_rows`, `option_road_building`, `option_discard`); a graph
+  answering them lists whole options (`DecisionPolicy.option_rows`,
+  `has_options`), and one answering only some is refused at load. A graph
+  without them plays and is searched as before. `hexset.decisions.listed`
+  reads a decision's options from those blocks, `first_move` names the move
+  an option opens with, and `Plans` gains `peek`, `drop` and `keep`;
+  `DecisionPolicy.plans` exposes its plans.
+
+### Changed
+
+- **Native lane bookkeeping reads only the state it needs.** Decision closure
+  and discard-actor queries access the selected lane directly
+  (`RequestBatch.actors_at`), and phase checks read `ArenaState.phase()`
+  instead of a complete control tuple for each atomic action. Request
+  validation, action order, random draws and record retention are unchanged.
+
+- **A searched rollout root's first candidate is the policy's own move.**
+  The candidates are the policy's own move (`act_rows`), then its other
+  moves by prior, and a tie in the playouts goes to the earlier candidate,
+  so to the policy's own move. A policy that plays its prior's favourite
+  searches the same candidates as before; a served contract-9 file searched
+  a move at a time (no whole-option outputs) now puts its whole decision's
+  first move, or the next move of its plan, first.
+
+### Fixed
+
+- **A paired-rollout root the search does not play out plays the policy's
+  own move.** A root with one legal move or a `decisive` prior played the
+  favourite of the policy's prior, which for a policy that chooses whole
+  decisions is its probability marginalised onto first moves and can rank
+  another first move above the one its best whole decision opens with. Such
+  a root now plays what the policy plays alone (`act_rows`), continuing its
+  plan, so a rollout seat that searches no root plays as `network:` does.
+  Where the search plays another move than the policy's own, the policy's
+  plan for the game is dropped, so no part of a decision not taken is
+  played later.
+
+
 ## 1.25.0
 
 ### Added

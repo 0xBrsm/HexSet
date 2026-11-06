@@ -213,7 +213,12 @@ class DecisionPolicy:
     0 the seat the row is from, the others in turn order). A graph that also
     answers `prior` `(B, space.size)`, a distribution over the flat actions
     its row's `flat` mask allows, can be searched (`score_rows`); one that
-    does not cannot (`has_prior`). HexSet reads nothing else it answers.
+    does not cannot (`has_prior`). A graph that also answers every whole
+    option's probability, block by block (`hexset.decisions.OPTION_OUTPUTS`:
+    all of them, `option_double` exactly where it declares `double_rows`),
+    lists a decision's whole options (`option_rows`, `has_options`), so a
+    search can be made over whole decisions. HexSet reads nothing else it
+    answers.
 
     A whole decision is played a move at a time (`hexset.decisions.Plans`).
     A position inside a decision with no plan of its own is asked as a
@@ -240,9 +245,20 @@ class DecisionPolicy:
                                  for item in session.get_inputs() if item.name in _PER_ROW)
         self._fixed_sizes = {item.name: item.shape[0] for item in session.get_inputs()
                              if getattr(item, "shape", None) and isinstance(item.shape[0], int)}
+        answered = {o.name for o in session.get_outputs()}
         #: Whether the graph answers `prior`, and so can be searched.
-        self.has_prior = "prior" in {o.name for o in session.get_outputs()}
+        self.has_prior = "prior" in answered
+        #: The whole-option outputs the graph answers, `()` for none (`option_rows`).
+        self._option_outputs = _option_outputs(answered, "double_rows" in declared)
+        #: Whether the graph lists a decision's whole options (`option_rows`).
+        self.has_options = bool(self._option_outputs)
         self._plans = D.Plans()
+
+    @property
+    def plans(self) -> "D.Plans":
+        """The rest of each decision this policy chose whole, played a move
+        at a time (`hexset.decisions.Plans`)."""
+        return self._plans
 
     @property
     def native_contract(self) -> str | None:
@@ -330,6 +346,31 @@ class DecisionPolicy:
             raise RuntimeError(f"the graph chose {choice}, not among {options}")
         return choice
 
+    def option_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[tuple["D.Option", ...], np.ndarray]]:
+        """Every whole option of each row's decision with its probability, as
+        the graph answers them (`hexset.decisions.listed`), in one forward: in
+        block order (flat actions by index, the setup or double turn, Road
+        Building, the discard). A position inside a decision lists its legal
+        moves. Raises for a graph that answers no whole options."""
+        if not self.has_options:
+            raise ValueError("this graph answers no whole options (`hexset.decisions.OPTION_OUTPUTS`)")
+        if not rows:
+            return []
+        decisions = [self._decision(game, seat) for game, seat in rows]
+        got = self._run(self._feed(rows, decisions), list(self._option_outputs))
+        arrays = D.arrays(decisions, self.space, self.topology)
+        rb_row, disc_row = arrays["road_building_row"], arrays["discard_row"]
+        double_at = {int(row): i for i, row in enumerate(arrays["double_rows"])}
+        out = []
+        for i, ((game, seat), decision) in enumerate(zip(rows, decisions)):
+            blocks = {"option_flat": got["option_flat"][i], "option_setup": got["option_setup"][i],
+                      "option_road_building": got["option_road_building"][rb_row == i],
+                      "option_discard": got["option_discard"][disc_row == i]}
+            if decision.double:
+                blocks["option_double"] = got["option_double"][double_at[i]]
+            out.append(D.listed(decision, blocks, game, seat, self.space))
+        return out
+
     def score_rows(
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
@@ -353,6 +394,24 @@ class DecisionPolicy:
             prior = weights / total if total > 0 else np.full(len(index), 1.0 / len(index))
             out.append((prior, frame.to_board(got["value"][i])))
         return out
+
+
+def _option_outputs(answered: set[str], double: bool) -> tuple[str, ...]:
+    """The whole-option outputs a graph answering `answered` is read for:
+    every `hexset.decisions.OPTION_OUTPUTS` name, `option_double` only where
+    it asks the double turn as one decision (`double`); `()` for a graph that
+    answers none. A graph answering some and not the rest is refused."""
+    wanted = tuple(name for name in D.OPTION_OUTPUTS if double or name != "option_double")
+    found = [name for name in D.OPTION_OUTPUTS if name in answered]
+    if not found:
+        return ()
+    if set(found) != set(wanted):
+        missing = sorted(set(wanted) - set(found))
+        extra = sorted(set(found) - set(wanted))
+        raise ValueError(f"a graph answering whole options answers all of {', '.join(wanted)}"
+                         + (f"; it lacks {missing}" if missing else "")
+                         + (f"; it answers {extra}, which needs `double_rows`" if extra else ""))
+    return wanted
 
 
 def _decision_policy(
@@ -383,6 +442,10 @@ def _decision_policy(
     missing = [name for name in ("decision", "value") if name not in {o.name for o in session.get_outputs()}]
     if missing:
         raise ValueError(f"{path} answers no {missing}, which HexSet's action contract reads")
+    try:
+        _option_outputs({o.name for o in session.get_outputs()}, "double_rows" in inputs)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from None
     return DecisionPolicy(session, space, topology, players)
 
 

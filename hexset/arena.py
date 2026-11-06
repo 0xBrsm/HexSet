@@ -27,7 +27,7 @@ import hashlib
 import importlib
 import json
 import os
-from math import sqrt
+from math import isfinite, sqrt
 from multiprocessing import get_context
 from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
@@ -1786,14 +1786,21 @@ def _mcts(name: str) -> Entrant:
     )
 
 
-_ROLLOUT_FORM = "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full]]"
+_ROLLOUT_FORM = (
+    "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full][:mix=<temperature>[:anchor=<exponent>]][:det=1[:salt=<n>]]]"
+)
 
 
 def _rollout(name: str) -> Entrant:
     # `rollout:<path>@<worlds>:top=<n>:decisive=<prior>:horizon=<turns>:setup=full`;
     # every part after the path is optional (`hexset.rollout.PairedRollouts`:
     # 32 worlds, the top 3 moves, no decisive root, played to the end;
-    # `setup=full` searches every opening root whatever `decisive` says).
+    # `setup=full` searches every opening root whatever `decisive` says;
+    # `mix=<temperature>` plays a mixed strategy over the searched candidates,
+    # `PairedRollouts.mix`, where 0 is the greedy search it is without one;
+    # `anchor=<exponent>` raises the prior it is anchored to, 1 by default;
+    # `det=1` seeds each searched decision from what the seat can see and
+    # `salt=<n>`, 0 by default, `PairedRollouts.det`).
     # `worlds` rides as `Entrant.simulations`, the rest as entrant options.
     path, at, spec = name[len(ROLLOUT) :].partition("@")
     if not at and any("=" in part for part in path.split(":")[1:]):
@@ -1802,7 +1809,8 @@ def _rollout(name: str) -> Entrant:
     if not (budget == "" or (budget.isdigit() and int(budget) >= 1)):
         raise ValueError(f"{name!r}: the worlds read {_ROLLOUT_FORM}")
     worlds = int(budget) if budget else 32
-    top, decisive, horizon, full_setup = 3, None, None, False
+    top, decisive, horizon, full_setup, mix, anchor = 3, None, None, False, 0.0, 1.0
+    det, salt = False, 0
     seen = set()
     for option in (part for part in options.split(":") if part):
         key, assigned, value = option.partition("=")
@@ -1817,11 +1825,25 @@ def _rollout(name: str) -> Entrant:
             horizon = int(value)
         elif key == "setup" and assigned and value == "full":
             full_setup = True
+        elif key == "mix" and assigned and _temperature(value) is not None:
+            mix = _temperature(value)
+        elif key == "anchor" and assigned and _temperature(value) is not None:
+            anchor = _temperature(value)
+        elif key == "det" and assigned and value in ("0", "1"):
+            det = value == "1"
+        elif key == "salt" and assigned and value.isdigit():
+            salt = int(value)
         else:
             raise ValueError(
                 f"unknown rollout option: {option!r}; use top=<n of 2 or more>, "
-                "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more> or setup=full"
+                "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more>, setup=full "
+                "mix=<temperature, 0 or more> with anchor=<exponent, 0 or more>, "
+                "or det=<0 or 1> with salt=<whole number>"
             )
+    if "anchor" in seen and not mix:
+        raise ValueError(f"{name!r}: anchor shapes a mixed strategy; give it a mix=<temperature> above 0")
+    if "salt" in seen and not det:
+        raise ValueError(f"{name!r}: salt seeds a deterministic search; give it det=1")
     label = f"rollout{worlds}t{top}"
     if decisive is not None:
         label = f"{label}d{_value_text(decisive)}"
@@ -1829,6 +1851,12 @@ def _rollout(name: str) -> Entrant:
         label = f"{label}h{horizon}"
     if full_setup:
         label = f"{label}s"
+    if mix:
+        label = f"{label}m{_value_text(mix)}"
+    if anchor != 1.0:
+        label = f"{label}a{_value_text(anchor)}"
+    if det:
+        label = f"{label}D{salt if salt else ''}"
     return Entrant(
         name=label,
         kind="rollout",
@@ -1837,8 +1865,21 @@ def _rollout(name: str) -> Entrant:
         options=(("top", top),)
         + ((("decisive", decisive),) if decisive is not None else ())
         + ((("horizon", horizon),) if horizon is not None else ())
-        + ((("full_setup", True),) if full_setup else ()),
+        + ((("full_setup", True),) if full_setup else ())
+        + ((("mix", mix),) if mix else ())
+        + ((("anchor", anchor),) if anchor != 1.0 else ())
+        + ((("det", True),) if det else ())
+        + ((("salt", salt),) if det and salt else ()),
     )
+
+
+def _temperature(text: str) -> float | None:
+    """`text` as a finite number of 0 or more (a temperature or an exponent), or `None` where it is not one."""
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return value if isfinite(value) and value >= 0.0 else None
 
 
 def _prior(text: str) -> float | None:

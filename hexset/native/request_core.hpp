@@ -52,6 +52,10 @@ struct RequestBuffers {
     RequestBuffers(const std::vector<const ArenaState*>& states,std::string name):contract(std::move(name)) {
         if(states.empty()) throw std::invalid_argument("a native request group requires at least one lane");
         const auto& first=*states.front();
+        // A request batch counts every dealt seat: a contract-9d lane is a two-seat table.
+        for(auto* state:states)
+            if(duel_contract(contract) && state->knowledge.common.size()!=2)
+                throw std::invalid_argument("a native request group holds contract 9d at two-seat tables only");
         width=encoded9_width(first,contract);players=first.knowledge.common.size();
         flat_width=action_offsets(first).back()+5;setup_width=first.get(Block::vertex_edges_values).size();
         for(auto* state:states) {

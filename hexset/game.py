@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
+import hashlib
+import numbers
 import random
-from dataclasses import dataclass, field
-from enum import IntEnum
+from dataclasses import dataclass, field, fields, is_dataclass
+from enum import Enum, IntEnum
 from typing import TYPE_CHECKING, Iterable, Sequence
 
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
@@ -35,6 +37,7 @@ from .state import (
     MAX_ROADS,
     NO_OWNER,
     GameState,
+    Hidden,
     check_city,
     check_road,
     check_settlement,
@@ -71,6 +74,7 @@ __all__ = [
     "start",
     "imagine",
     "observe",
+    "observed_digest",
     "place_initial_settlement",
     "legal_initial_roads",
     "place_initial_road",
@@ -494,6 +498,91 @@ def observe(game: Game, seat: int, chance: Chance | None = None) -> Game:
     seen.chance = Hosted() if chance is None else chance
     seen.trade_mode = "external"
     return seen
+
+
+#: `Game` fields `observed_digest` leaves out: the copy's own randomness and
+#: the host's settings for the table, none of them part of the position.
+_TABLE_FIELDS = frozenset({"rng", "chance", "turn_cap", "embargoes", "trade_mode"})
+
+
+def observed_digest(game: Game, seat: int) -> bytes:
+    """A sha256 digest of everything `seat` can see of `game`: the game
+    `observe(game, seat)` returns, written out canonically.
+
+    That is the board, every public field and flag of the game, the seat's
+    own hand and development cards, every other seat's hand and development
+    cards and the deck by size alone, and the ledger as the seat knows it.
+    The writing depends on nothing but those values, so the same visible
+    position gives the same digest in any process and on any copy, and two
+    games that differ only in what `seat` cannot see give the same one.
+
+    It is the position, not the table: the host's settings that a record
+    does not keep -- the turn cap, the trade embargoes and the trade mode --
+    are left out, so a position rebuilt from its record (`hexset.record`)
+    gives the digest it had when it was played."""
+    seen = observe(game, seat)
+    parts: list[str] = []
+    for f in fields(seen):
+        if f.name in _TABLE_FIELDS:
+            continue
+        parts.append(f.name)
+        if f.name == "_state":
+            from .record import board_fields
+
+            for g in fields(seen._state):
+                parts.append(g.name)
+                value = getattr(seen._state, g.name)
+                _canonical(board_fields(value) if g.name == "board" else value, parts)
+        else:
+            _canonical(getattr(seen, f.name), parts)
+    return hashlib.sha256("\x1f".join(parts).encode()).digest()
+
+
+def _canonical(value: object, out: list[str]) -> None:
+    """`value` as tokens that depend on its contents alone: no object
+    identity, no hash order, no process state. A hidden pile is its kind and
+    size. A type it does not know is refused rather than written by
+    identity."""
+    if value is None or isinstance(value, (bool, str, float)):
+        out.append(f"{type(value).__name__}:{value!r}")
+    elif isinstance(value, Enum):
+        out.append(f"{type(value).__name__}.{value.name}")
+    elif isinstance(value, numbers.Integral):
+        out.append(f"int:{int(value)}")
+    elif isinstance(value, Hidden):
+        out.append(f"{type(value).__name__}:{value.count}")
+    elif isinstance(value, (list, tuple)):
+        out.append(f"[{len(value)}")
+        for item in value:
+            _canonical(item, out)
+        out.append("]")
+    elif isinstance(value, (set, frozenset)):
+        items = []
+        for item in value:
+            tokens: list[str] = []
+            _canonical(item, tokens)
+            items.append("\x1e".join(tokens))
+        out.append(f"{{{len(items)}")
+        out.extend(sorted(items))
+        out.append("}")
+    elif isinstance(value, dict):
+        entries = []
+        for key, item in value.items():
+            tokens = []
+            _canonical(key, tokens)
+            _canonical(item, tokens)
+            entries.append("\x1e".join(tokens))
+        out.append(f"<{len(entries)}")
+        out.extend(sorted(entries))
+        out.append(">")
+    elif is_dataclass(value) and not isinstance(value, type):
+        out.append(f"{type(value).__name__}(")
+        for f in fields(value):
+            out.append(f.name)
+            _canonical(getattr(value, f.name), out)
+        out.append(")")
+    else:
+        raise TypeError(f"no canonical form for {type(value).__name__}")
 
 
 def _require(game: Game, phase: Phase) -> None:

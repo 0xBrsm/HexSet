@@ -204,14 +204,26 @@ inline std::array<float,5> encoded_ages(const ArenaState& state,int seat,Int hel
 }
 
 inline bool duel_contract(const std::string& contract) {return contract=="9d" || contract=="9d.1";}
+// The seats a contract-9d row counts: every dealt seat at a two-seat table,
+// else the live ones (`seat_frame`).
+inline std::size_t duel_live(const ArenaState& state) {
+    int dealt=static_cast<int>(state.get(Block::players)[0]);std::size_t live=0;
+    for (int seat=0;seat<dealt;++seat) live+=dealt==2 || !locked(state,seat);
+    return live;
+}
 
 inline std::size_t encoded9_width(const ArenaState& state,const std::string& contract="9") {
     if (contract!="9" && contract!="9.1" && !duel_contract(contract)) throw std::invalid_argument("unknown native observation contract");
     const auto& fixed=encoding_template(state);
-    if (duel_contract(contract) && fixed.players!=2) throw std::invalid_argument("contract 9d requires two seats");
+    std::size_t p=fixed.players;
+    if (duel_contract(contract)) {
+        // A table of two: dealt two seats, or more with all but two retired (`duel_live`).
+        if (duel_live(state)!=2) throw std::invalid_argument("contract 9d requires two live seats");
+        p=2;
+    }
     auto sw=contract=="9d.1" ? 32 : contract=="9d" ? 22 : contract=="9.1" ? 40 : 39;
     auto tw=contract=="9.1" ? 35 : 20,hw=contract=="9" ? 7 : 8;
-    return fixed.players*sw+tw+fixed.hexes*hw+fixed.vertices*8+fixed.edges+fixed.players*fixed.vertices;
+    return p*sw+tw+fixed.hexes*hw+fixed.vertices*8+fixed.edges+p*fixed.vertices;
 }
 
 inline void encode9_into(const ArenaState& state,int perspective,const std::string& contract,
@@ -219,22 +231,25 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
     if (contract!="9" && contract!="9.1" && !duel_contract(contract)) throw std::invalid_argument("unknown native observation contract");
     state.knowledge.check_seat(perspective);const auto& fixed=encoding_template(state);
     bool duel=duel_contract(contract),rules=contract=="9.1",economy=contract=="9d.1";
-    if (duel && fixed.players!=2) throw std::invalid_argument("contract 9d requires two seats");
-    const std::size_t p=fixed.players,h=fixed.hexes,v=fixed.vertices,e=fixed.edges;
+    if (duel && duel_live(state)!=2) throw std::invalid_argument("contract 9d requires two live seats");
+    // Row i is board seat frame.seats[i]: every dealt seat from the perspective,
+    // or under contract 9d the two live seats, a retired seat having no row.
+    const std::size_t dealt=fixed.players,h=fixed.hexes,v=fixed.vertices,e=fixed.edges;
+    const SeatFrame frame=seat_frame(state,perspective,duel ? 2 : dealt);
+    const std::size_t p=frame.size;
     std::size_t sw=duel ? (economy ? 32 : 22) : (rules ? 40 : 39),tw=rules ? 35 : 20,hw=contract=="9" ? 7 : 8;
     std::size_t table=p*sw,hexes=table+tw,vertices=hexes+h*hw,owner=vertices+v*7,edge=owner+v,reach=edge+e;
     if (width!=reach+p*v) throw std::invalid_argument("native observation destination width differs");
     std::fill_n(result,width,0.0f);
     VisibleView view(state,perspective);Counts unseen=unseen_development(state,perspective);
     const auto& roads=roads_to_take_all(state);const auto& distances=reach_all(state);
-    if (roads.size()!=p || distances.size()!=p*v) throw std::logic_error("native road feature shape differs");
+    if (roads.size()!=dealt || distances.size()!=dealt*v) throw std::logic_error("native road feature shape differs");
     auto knights=visible_knights_needed(state,perspective,unseen[0]);
     const auto& game=state.get(Block::game_control);const auto& mature=state.get(Block::dev_cards);
     const auto& fresh=state.get(Block::new_dev_cards);const auto& quota=state.get(Block::discard_quota);
     constexpr std::array<int,4> playable{0,2,3,4};
-    std::array<Int,4> relative{};for (std::size_t row=0;row<p;++row) relative[(perspective+row)%p]=row;
     for (std::size_t row=0;row<p;++row) {
-        int seat=static_cast<int>((perspective+row)%p);auto* out=result+row*sw;
+        int seat=frame.seats[row];auto* out=result+row*sw;
         Int old=public_pile_size(state,Block::dev_cards,seat),bought=public_pile_size(state,Block::new_dev_cards,seat);
         Int held=plus(old,bought);bool played=game[CardPlayedColumn] && seat==game[ActorColumn];
         auto ages=encoded_ages(state,seat,held);const auto& pieces=state.piece_counts[seat];
@@ -312,6 +327,8 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
             for (int i=0;i<11;++i) out[24+i]=static_cast<float>(odds[i]);
         }
     }
+    // A piece's owner by row; no owner, or a seat with no row, reads -1.
+    auto pointer=[&](Int who) {return who<0 || frame.slot[who]==static_cast<Int>(p) ? -1.0f : static_cast<float>(frame.slot[who]);};
     for (std::size_t at=0;at<h;++at) {
         auto* hex=result+hexes+at*hw;
         if (duel) {
@@ -323,11 +340,9 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
     std::copy(fixed.ports.begin(),fixed.ports.end(),result+vertices);
     for (std::size_t at=0;at<v;++at) {
         result[vertices+at*7+6]=count_scale(state.get(Block::vertex_building)[at]);
-        Int who=state.get(Block::vertex_owner)[at];result[owner+at]=who<0 ? -1.0f : static_cast<float>(relative[who]);
+        result[owner+at]=pointer(state.get(Block::vertex_owner)[at]);
     }
-    for (std::size_t at=0;at<e;++at) {
-        Int who=state.get(Block::edge_owner)[at];result[edge+at]=who<0 ? -1.0f : static_cast<float>(relative[who]);
-    }
+    for (std::size_t at=0;at<e;++at) result[edge+at]=pointer(state.get(Block::edge_owner)[at]);
 }
 inline std::vector<float> encode9(const ArenaState& state,int perspective,const std::string& contract="9") {
     std::vector<float> result(encoded9_width(state,contract));

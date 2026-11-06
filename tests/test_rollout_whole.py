@@ -287,3 +287,24 @@ def test_plans_can_be_read_dropped_and_kept():
     assert plans.peek(game, 0) == () and not plans.planned(game, 0, options)
     plans.keep(game, 0, ())
     assert plans.peek(game, 0) == ()
+
+
+def test_a_mixed_search_draws_a_whole_decision_and_plays_it_out_of_its_plan():
+    """A whole setup turn under `mix`: the turn drawn is played a move at a
+    time from its own parts, and a draw other than the policy's own drops
+    the policy's plan."""
+    seen_other = False
+    for seed in range(12):
+        policy = Whole()
+        search = PairedRollouts(policy, worlds=2, top=3, horizon=1, marks=(), rng=random.Random(seed), mix=100.0)
+        game = opening(seed)
+        decision = search.decide(game)
+        assert decision.whole and len(decision.mix) == 3 and decision.chosen in decision.candidates
+        chosen = decision.options[decision.chosen]
+        apply(game, decision.move)
+        road = search.decide(game)
+        assert road.worlds == 0 and road.move == chosen.parts[1]
+        if decision.chosen != decision.candidates[0]:
+            seen_other = True
+            assert policy.plans.peek(game, to_move(game)) == ()
+    assert seen_other, "no draw left the policy's own turn"

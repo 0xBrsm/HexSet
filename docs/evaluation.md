@@ -229,7 +229,11 @@ each rollout candidate's outcome in each world), the option chosen, the
 turn, phase, seat and public points, and the CPU time spent. A rollout
 decision also keeps the value head's read of each playout at later turns
 (`hexset.rollout.MARKS`), so fewer worlds, fewer candidates or a shorter
-horizon can be scored on the same playouts afterwards.
+horizon can be scored on the same playouts afterwards. Under a mixed
+strategy (`mix`) it keeps each candidate's probability and the candidate the
+best score would have played, beside the one drawn. Under a deterministic
+search (`det`) it keeps the decision's key and salt, so the decision can be
+searched again from a rebuilt position.
 
 `hexset.arena.search_logs(bot)` finds the logs behind a seat, through the
 wrappers it is dealt in (a trader, a veto, a dealer, a coalition, both

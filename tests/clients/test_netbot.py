@@ -1057,6 +1057,81 @@ def test_a_rollout_file_spawns_as_the_arenas_rollout_entrant_of_its_settings(
     assert searched, "no decision was played out"
 
 
+def test_a_rollout_file_that_declares_a_mix_spawns_as_the_mixed_rollout_entrant(
+    board, monkeypatch, arena_registry
+):
+    """Metadata `mix` and the spec's `mix=` build the same mixed searcher:
+    the same draws on the same seed, each logged with its probabilities."""
+    pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
+    from types import SimpleNamespace
+
+    from hexset.arena import entrant_from_name, spawn
+    from hexset.clients import onnxbot
+    from hexset.clients._modelmeta import RolloutConfig, SearchConfig
+
+    checkpoint = stub_checkpoint(board)
+    loaded = SimpleNamespace(**vars(checkpoint), search=SearchConfig(
+        rollout=RolloutConfig(worlds=2, top=3, horizon=1, mix=0.5, anchor=0.5)))
+    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
+    register_entrants(lambda path, topology: checkpoint)
+
+    served = onnxbot.spawn("stub.onnx", board, rng=random.Random(5))
+    entrant = spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=3:horizon=1:mix=0.5:anchor=0.5"), board,
+                    random.Random(5))
+    assert served.mix == entrant.mix == 0.5 and served.anchor == entrant.anchor == 0.5
+    game = start(board, PLAYERS, random.Random(2))
+    walk = random.Random(2)
+    chosen = 0
+    while chosen < 20:
+        if to_move(game) == 0:
+            move = served.choose(game)
+            assert entrant.choose(game) == move
+            chosen += 1
+            apply(game, move)
+        else:
+            step_randomly(game, walk)
+    searched = [d for d in served.decision_log if d.worlds]
+    assert searched and all(len(d.mix) == len(d.candidates) for d in searched)
+    assert [d.chosen for d in searched] == [d.chosen for d in entrant.decision_log if d.worlds]
+
+
+def test_a_deterministic_rollout_file_plays_alike_on_any_seed(board, monkeypatch, arena_registry):
+    """Metadata `det`: two seats spawned on different seeds, and the spec's
+    `det=1`, search each position on the same worlds and play the same
+    moves; the decision log keeps the key and the salt."""
+    pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
+    from types import SimpleNamespace
+
+    from hexset.arena import entrant_from_name, spawn
+    from hexset.clients import onnxbot
+    from hexset.clients._modelmeta import RolloutConfig, SearchConfig
+
+    checkpoint = stub_checkpoint(board)
+    loaded = SimpleNamespace(**vars(checkpoint), search=SearchConfig(
+        rollout=RolloutConfig(worlds=2, top=3, horizon=1, mix=0.5, det=True, salt=3)))
+    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
+    register_entrants(lambda path, topology: checkpoint)
+
+    seats = [onnxbot.spawn("stub.onnx", board, rng=random.Random(seed)) for seed in (5, 6)]
+    seats.append(spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=3:horizon=1:mix=0.5:det=1:salt=3"), board,
+                       random.Random(7)))
+    assert all(seat.det and seat.salt == 3 for seat in seats)
+    game = start(board, PLAYERS, random.Random(2))
+    walk = random.Random(2)
+    chosen = 0
+    while chosen < 20:
+        if to_move(game) == 0:
+            moves = {seat.choose(game) for seat in seats}
+            assert len(moves) == 1
+            chosen += 1
+            apply(game, moves.pop())
+        else:
+            step_randomly(game, walk)
+    logs = [[(d.chosen, d.scores, d.det_key) for d in seat.decision_log if d.worlds] for seat in seats]
+    assert logs[0] and logs[0] == logs[1] == logs[2]
+    assert all(d.det_key and d.salt == 3 for d in seats[0].decision_log if d.worlds)
+
+
 # --- own_calibration in the gate: gains on the calibrated scale -------------------------------------------
 
 

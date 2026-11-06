@@ -107,9 +107,11 @@ struct NativeDecision {
     std::vector<std::array<Int,2>> roads;
     std::vector<std::array<Int,10>> discards;
 };
-inline std::array<std::size_t,15> action_offsets(const ArenaState& state) {
+// Each action type's first flat slot in a space counting `counted` seats
+// (0: every dealt seat), whose robber block is a slot per victim and "none".
+inline std::array<std::size_t,15> action_offsets(const ArenaState& state,std::size_t counted=0) {
     auto v=state.get(Block::vertex_owner).size(),e=state.get(Block::edge_owner).size();
-    auto h=state.get(Block::terrain).size(),p=state.knowledge.common.size();
+    auto h=state.get(Block::terrain).size(),p=counted ? counted : state.knowledge.common.size();
     std::array<std::size_t,15> sizes{1,1,1,1,v,e,e,v,v,h*(p+1),1,5,15,25,5},at{};
     for(std::size_t i=1;i<at.size();++i) at[i]=at[i-1]+sizes[i-1];return at;
 }
@@ -130,9 +132,14 @@ inline std::vector<std::array<Int,2>> native_road_sets(const ArenaState& state,i
     }
     return out;
 }
-inline void native_decision_fill(const ArenaState& state,int seat,NativeDecision& out) {
+// `seat`'s decision as a net counting `counted` seats states it (0: every
+// dealt seat): robber victims by their slot in `seat`'s frame (`seat_frame`),
+// "no victim" and a seat outside the frame the slot after the last.
+inline void native_decision_fill(const ArenaState& state,int seat,NativeDecision& out,std::size_t counted=0) {
     state.knowledge.check_seat(seat);
-    auto offsets=action_offsets(state);
+    const std::size_t dealt=state.knowledge.common.size();
+    const SeatFrame frame=seat_frame(state,seat,counted ? counted : dealt);
+    auto offsets=action_offsets(state,frame.size);
     out.flat.assign(offsets.back()+5,0);out.roads.clear();out.discards.clear();
     const auto& vertices=state.get(Block::vertex_owner);
     const auto& game=state.get(Block::game_control);
@@ -166,14 +173,14 @@ inline void native_decision_fill(const ArenaState& state,int seat,NativeDecision
     bool road_card=false;
     for(auto action:native_legal_actions(state,seat)) {
         if(action.type==3) {road_card=true;continue;}
-        Int stride=action.type==9 ? static_cast<Int>(state.knowledge.common.size()+1):action.type==13 ? 5:1;
+        Int stride=action.type==9 ? static_cast<Int>(frame.size+1):action.type==13 ? 5:1;
         Int b=action.b;
-        if(action.type==9 && b<static_cast<Int>(state.knowledge.common.size())) b=(b-seat+state.knowledge.common.size())%state.knowledge.common.size();
+        if(action.type==9) b=b>=0 && b<static_cast<Int>(dealt) ? frame.slot[b] : static_cast<Int>(frame.size);
         out.flat[offsets[action.type]+action.a*stride+b]=1;
     }
     if(road_card) out.roads=native_road_sets(state,actor);
 }
-inline NativeDecision native_decision(const ArenaState& state,int seat) {
-    NativeDecision out;native_decision_fill(state,seat,out);return out;
+inline NativeDecision native_decision(const ArenaState& state,int seat,std::size_t counted=0) {
+    NativeDecision out;native_decision_fill(state,seat,out,counted);return out;
 }
 } // namespace hexset_native

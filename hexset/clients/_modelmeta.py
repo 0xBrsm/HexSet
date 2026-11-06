@@ -46,6 +46,16 @@ class RolloutConfig:
     #: Every opening root searched whatever `decisive` says (metadata
     #: `setup = full`, `PairedRollouts.full_setup`).
     full_setup: bool = False
+    #: The mixed strategy's temperature over the searched candidates
+    #: (metadata `mix`, `PairedRollouts.mix`); `0.0` plays the best score.
+    mix: float = 0.0
+    #: The exponent on the prior the mixed strategy is anchored to (metadata
+    #: `anchor`, `PairedRollouts.anchor`): 1, the prior itself.
+    anchor: float = 1.0
+    #: Each searched decision seeded from what the seat can see (metadata
+    #: `det`, `PairedRollouts.det`) and `salt` (metadata `salt`).
+    det: bool = False
+    salt: int = 0
     #: `(policy, encoder)`: the files that play every other seat of a playout
     #: (`hexset.clients.conditioned.Opponents`), named beside this one by
     #: metadata `opponents` and `opponent_encoder`; `None` for the file's own
@@ -216,12 +226,13 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
     searched, so a stale `simulations` cannot turn a policy into a search.
 
     `search = mcts` reads `simulations`, `wave` and `decisive`; `search =
-    rollout` reads `worlds`, `top`, `decisive`, `horizon`, `setup` and the
-    `opponents`/`opponent_encoder` pair. Every
+    rollout` reads `worlds`, `top`, `decisive`, `horizon`, `setup`, `mix`,
+    `anchor`, `det`, `salt` and the `opponents`/`opponent_encoder` pair. Every
     file reads `own_calibration` (`SearchConfig.own_calibration` says where
     it applies). Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
     and an unreadable one takes its default; a setting that changes what the
-    seat does (`decisive`, `horizon`, `setup`, `own_calibration`) fails the
+    seat does (`decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt`,
+    `own_calibration`) fails the
     load when it does not read. Any other `search` is no search."""
     method = meta.get("search", "none")
     calibration = _calibration(meta.get("own_calibration"))
@@ -235,6 +246,9 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
                 top=max(2, _clamp(meta.get("top"), DEFAULT_TOP, MAX_TOP) or DEFAULT_TOP),
                 horizon=_horizon(meta.get("horizon")),
                 full_setup=_full_setup(meta.get("setup")),
+                mix=_mix(meta.get("mix")),
+                anchor=_anchor(meta.get("anchor")),
+                **_det(meta.get("det"), meta.get("salt")),
                 opponents=_opponents(meta.get("opponents"), meta.get("opponent_encoder")),
             ),
         )
@@ -257,6 +271,50 @@ def _full_setup(value: str | None) -> bool:
     if value.strip() != "full":
         raise ValueError(f"setup {value!r} is not 'full'")
     return True
+
+
+def _mix(value: str | None) -> float:
+    """Metadata `mix`: a temperature of 0 or more in win chance
+    (`hexset.rollout.mixed_strategy`), or absent for the greedy search."""
+    if value is None or not value.strip():
+        return 0.0
+    try:
+        mix = float(value)
+    except ValueError:
+        raise ValueError(f"mix {value!r} is not a number") from None
+    if not (math.isfinite(mix) and mix >= 0.0):
+        raise ValueError(f"mix {value!r} is not a temperature of 0 or more")
+    return mix
+
+
+def _anchor(value: str | None) -> float:
+    """Metadata `anchor`: the exponent of 0 or more on the prior a mixed
+    strategy is anchored to (`hexset.rollout.mixed_strategy`), or absent
+    for 1, the prior itself."""
+    if value is None or not value.strip():
+        return 1.0
+    try:
+        anchor = float(value)
+    except ValueError:
+        raise ValueError(f"anchor {value!r} is not a number") from None
+    if not (math.isfinite(anchor) and anchor >= 0.0):
+        raise ValueError(f"anchor {value!r} is not an exponent of 0 or more")
+    return anchor
+
+
+def _det(det: str | None, salt: str | None) -> dict:
+    """Metadata `det` (`1` on, `0` or absent off) and `salt` (a whole
+    number, 0 or absent by default, read only with `det` on), as
+    `RolloutConfig` fields."""
+    det = (det or "").strip()
+    if det not in ("", "0", "1"):
+        raise ValueError(f"det {det!r} is not 0 or 1")
+    salt = (salt or "").strip()
+    if salt and not salt.isdigit():
+        raise ValueError(f"salt {salt!r} is not a whole number")
+    if salt and det != "1":
+        raise ValueError("salt seeds a deterministic search: set det = 1 with it")
+    return {"det": det == "1", "salt": int(salt) if salt else 0}
 
 
 def _horizon(value: str | None) -> int | None:

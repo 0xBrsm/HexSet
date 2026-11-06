@@ -799,6 +799,10 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None)
                        (board.topology, device, rollout.opponents)),
             own_calibration=loaded.search.own_calibration,
             opponents=opponents,
+            mix=rollout.mix,
+            anchor=rollout.anchor,
+            det=rollout.det,
+            salt=rollout.salt,
         )
     return searcher(
         path,

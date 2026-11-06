@@ -61,6 +61,10 @@ engine's board indexing.
 | `decisive` | The prior on one move at which a root is played without searching, under either search | Absent: every root with a choice is searched. A value that is not a number in (0, 1] fails the load |
 | `horizon` | Turns after the root at which a playout stops and is scored by the value head, under `search=rollout` | Absent: playouts run to the game's end. A value that is not a whole number of 1 or more fails the load |
 | `setup` | `full`: every opening root is played out whatever `decisive` says, under `search=rollout` | Absent: `decisive` applies everywhere. Any other value fails the load |
+| `mix` | A temperature in win chance: a searched root plays a candidate drawn from the mixed strategy over the candidates' scores and prior (`hexset.rollout.mixed_strategy`), under `search=rollout` | Absent or `0`: the best-scoring candidate. A value that is not a finite number of 0 or more fails the load |
+| `anchor` | The exponent on the prior that `mix` is anchored to: `1` the prior itself, `0` every candidate alike, under `search=rollout` | Absent: `1`. A value that is not a finite number of 0 or more fails the load |
+| `det` | `1`: each searched root draws its worlds, their seeds and its `mix` draw from a stream seeded by what the deciding seat can see (`hexset.game.observed_digest`) and `salt`, under `search=rollout` | Absent or `0`: the searcher's own running stream. Any other value fails the load |
+| `salt` | A whole number mixed into `det`'s seed | Absent: `0`. A value that is not a whole number, or one given without `det = 1`, fails the load |
 | `opponents`, `opponent_encoder` | Two files beside this one that play every other seat of a playout, under `search=rollout` ([opponent models](#opponent-models)) | Absent: the file's own policy plays every seat. One without the other, or a name with a path in it, fails the load |
 | `own_calibration` | `"a,b"`: the seat's own win chance read as `sigmoid(a + b * logit(p))` (`hexset.mcts.calibrate_own`), the other seats scaled so the vector keeps its sum. Under `search=mcts`, at every evaluated position and in the trade gate; otherwise in the trade gate and robber deals alone | Absent: no recalibration. A value that is not two finite numbers with `b > 0` fails the load |
 | `finish_decisions` | Read the graph's values where a setup turn or Road Building card is finished, not inside it (`hexset.clients.finishing.Finishing`): for a value head taught only where decisions start | Off; `1`/`true`/`yes`/`on` enable it |
@@ -121,7 +125,7 @@ raises there, naming the file; load the registering module with
 - a missing or non-integer `players` or board count, or a board count that
   does not match the topology;
 - a present `iteration` that is not an integer;
-- a `decisive`, `horizon`, `setup` or `own_calibration` that does not read,
+- a `decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt` or `own_calibration` that does not read,
   and a lone `opponents` or `opponent_encoder`: these change what the seat
   does, so the load fails rather than playing on a guess;
 - a `committee` that names a member not beside the file, or a member that

@@ -26,6 +26,31 @@ inline int next_unlocked(const ArenaState& state,int after) {
     for (int step=1;step<=players;++step) {int seat=(after+step)%players;if (!locked(state,seat)) return seat;}
     throw std::invalid_argument("every seat is locked");
 }
+// hexset.encoding.seat_frame: the seats a network counting `counted` seats
+// reads from `perspective`, perspective first, then turn order. Every dealt
+// seat when `counted` is the dealt count; else the live seats alone, which
+// must number `counted` and include `perspective`. `slot[s]` is seat s's slot,
+// or `size` for a seat outside the frame (a robber's "no victim").
+struct SeatFrame {
+    std::array<int,4> seats{};
+    std::array<Int,4> slot{};
+    std::size_t size=0;
+};
+inline SeatFrame seat_frame(const ArenaState& state,int perspective,std::size_t counted) {
+    int dealt=static_cast<int>(state.get(Block::players)[0]);
+    if (perspective<0 || perspective>=dealt) throw std::invalid_argument("invalid seat");
+    SeatFrame frame;
+    std::array<int,4> live{};std::size_t n=0;
+    for (int seat=0;seat<dealt;++seat)
+        if (counted==static_cast<std::size_t>(dealt) || !locked(state,seat)) live[n++]=seat;
+    auto at=std::find(live.begin(),live.begin()+n,perspective);
+    if (n!=counted || at==live.begin()+n)
+        throw std::invalid_argument("a seat frame needs its counted seats live, the perspective among them");
+    std::size_t k=static_cast<std::size_t>(at-live.begin());
+    frame.size=n;frame.slot.fill(static_cast<Int>(n));
+    for (std::size_t i=0;i<n;++i) {frame.seats[i]=live[(k+i)%n];frame.slot[frame.seats[i]]=static_cast<Int>(i);}
+    return frame;
+}
 struct TurnClosure {
     std::vector<Int> dev,fresh,ages,game,robber_allowed;
     void commit(ArenaState& state) {

@@ -804,6 +804,10 @@ def rollouts_for(
     pool: RolloutPool | None = None,
     own_calibration: tuple[float, float] | None = None,
     opponents=None,
+    mix: float = 0.0,
+    anchor: float = 1.0,
+    det: bool = False,
+    salt: int = 0,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
@@ -814,7 +818,10 @@ def rollouts_for(
     the value head as it is. `opponents`
     (`hexset.clients.conditioned.Opponents`) plays every other seat of a
     playout in place of the checkpoint, read from the moves the table makes;
-    its `pool` must load the same pair."""
+    its `pool` must load the same pair. `mix` above 0 plays a mixed strategy
+    over the searched candidates (`hexset.rollout.PairedRollouts.mix`), anchored
+    to the prior raised to `anchor`. `det` seeds each searched decision
+    from what the seat can see and `salt` (`PairedRollouts.det`)."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     return GatedRollouts(
         checkpoint.policy if opponents is None else opponents.playouts(checkpoint.policy),
@@ -827,6 +834,10 @@ def rollouts_for(
         rng=rng,
         pool=pool,
         opponents=opponents,
+        mix=mix,
+        anchor=anchor,
+        det=det,
+        salt=salt,
     )
 
 
@@ -878,7 +889,9 @@ def register_entrants(loader) -> None:
             worlds=entrant.simulations, top=entrant.option("top"),
             decisive=entrant.option("decisive"), horizon=entrant.option("horizon"),
             full_setup=bool(entrant.option("full_setup", False)),
-            rng=rng, trade=entrant.trade,
+            rng=rng, trade=entrant.trade, mix=float(entrant.option("mix", 0.0)),
+            anchor=float(entrant.option("anchor", 1.0)),
+            det=bool(entrant.option("det", False)), salt=int(entrant.option("salt", 0)),
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
                       veto_picks=trader_veto_pick_of(checkpoint))

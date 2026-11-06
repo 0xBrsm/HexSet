@@ -12,9 +12,16 @@ position: the same moves, the same tensors and the same observation bytes,
 drawing chance from a copy of the same streams.
 
 A copy is native only where `copyable` says the position and the policy's
-contract are supported; otherwise a playout keeps its Python copy.
+contract are supported; otherwise a playout keeps its Python copy. A
+contract-9d (two-seat) policy is held natively at a two-seat table and at one
+dealt more seats with all but two retired, where it counts the live seats
+alone (`hexset.encoding.seat_frame`). Setting the environment variable
+`HEXSET_NATIVE_PLAYOUTS=0` keeps every copy the Python engine's, to compare the
+two engines on the same games; native copies are the default.
 """
 from __future__ import annotations
+
+import os
 
 import numpy as np
 
@@ -29,6 +36,10 @@ __all__ = ["NativeCopy", "copyable", "held"]
 
 #: The contracts the native engine encodes (`hexset.native.supported`).
 _CONTRACTS = ("9", "9.1", "9d", "9d.1")
+#: The two-seat contracts, read at a table's two live seats.
+_DUEL = ("9d", "9d.1")
+#: Set to "0" to keep every playout copy the Python engine's (module docstring).
+SWITCH = "HEXSET_NATIVE_PLAYOUTS"
 
 _PHASES = tuple(Phase)
 _TYPES = tuple(ActionType)
@@ -45,13 +56,17 @@ def _action(row: tuple[int, int, int]) -> Action:
 
 def copyable(game: Game, contract: str | None, space: ActionSpace) -> bool:
     """Whether a playout copy of `game` may be held natively for a policy
-    that reads `contract` over `space`: the native extension is built, the
-    contract is one it encodes, and the policy counts every dealt seat (a
-    frame of live seats is the Python copy's). Whether the position itself
-    is a supported no-trade one is `held`'s to find out."""
-    return (contract in _CONTRACTS and available()
-            and space.num_players == game._state.num_players
-            and (contract not in ("9d", "9d.1") or game._state.num_players == 2))
+    that reads `contract` over `space`: the native extension is built and
+    not switched off (`SWITCH`), the contract is one it encodes, and the
+    policy counts every dealt seat, or is a two-seat (9d) policy at a table
+    with two live seats. Whether the position itself is a supported
+    no-trade one is `held`'s to find out."""
+    if contract not in _CONTRACTS or os.environ.get(SWITCH) == "0" or not available():
+        return False
+    dealt = game._state.num_players
+    if contract in _DUEL:
+        return space.num_players == 2 and dealt - len(game.locked) == 2
+    return space.num_players == dealt
 
 
 def held(game: Game) -> "NativeCopy | None":
@@ -163,17 +178,24 @@ class NativeCopy:
         return np.frombuffer(self.state.core.encode9(seat, contract), dtype=np.float32)
 
     def frame(self, seat: int, players: int) -> SeatFrame:
-        """`hexset.encoding.seat_frame` at this table, whose every dealt seat
-        the policy counts (`copyable`)."""
-        if players != self.dealt:
-            raise ValueError(f"a native copy is held for a {self.dealt}-seat policy, not {players}")
-        return SeatFrame(tuple((seat + i) % self.dealt for i in range(self.dealt)), self.dealt)
+        """`hexset.encoding.seat_frame` at this table: every dealt seat when
+        `players` is the dealt count, else the live seats, which must number
+        `players` and include `seat`."""
+        dealt = self.dealt
+        if players == dealt:
+            return SeatFrame(tuple((seat + i) % dealt for i in range(dealt)), dealt)
+        live = [s for s in range(dealt) if s not in self.locked]
+        if len(live) != players or seat not in live:
+            raise ValueError(f"a {players}-seat frame needs {players} live seats including {seat}; "
+                             f"this table deals {dealt} with live seats {live}")
+        k = live.index(seat)
+        return SeatFrame(tuple(live[(k + i) % players] for i in range(players)), dealt)
 
     def tensors(self, seat: int, space: ActionSpace):
         """`hexset.decisions.tensors` with no double turn: `seat`'s decision
-        here as a contract-9 net states it."""
+        here as a contract-9 net counting `space.num_players` seats states it."""
         from ..decisions import Decision
-        got = self.state.core.decision(seat)
+        got = self.state.core.decision(seat, space.num_players)
         flat = np.frombuffer(got["flat"], dtype=np.bool_)
         setup = np.frombuffer(got["setup"], dtype=np.bool_)
         if len(flat) != space.size or len(setup) != len(contract9.incidences(self.topology)):

@@ -18,9 +18,10 @@ inline PyObject* core_legal_actions(Core* self,PyObject* args) {
     } catch(...) {error();return nullptr;}
 }
 inline PyObject* core_decision(Core* self,PyObject* args) {
-    int seat;if(!PyArg_ParseTuple(args,"i",&seat)) return nullptr;
+    int seat,counted=0;if(!PyArg_ParseTuple(args,"i|i",&seat,&counted)) return nullptr;
     try {
-        auto decision=hexset_native::native_decision(checked(self),seat);
+        if(counted<0) throw std::invalid_argument("a negative seat count");
+        auto decision=hexset_native::native_decision(checked(self),seat,static_cast<std::size_t>(counted));
         Object out(PyDict_New());if(!out.value) throw PythonError{};
         set(out.value,"flat",PyBytes_FromStringAndSize(reinterpret_cast<const char*>(decision.flat.data()),static_cast<Py_ssize_t>(decision.flat.size())));
         set(out.value,"setup",PyBytes_FromStringAndSize(reinterpret_cast<const char*>(decision.setup.data()),static_cast<Py_ssize_t>(decision.setup.size())));

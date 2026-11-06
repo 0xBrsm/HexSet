@@ -343,6 +343,39 @@ few dozen worlds separate moves that independent playouts would not.
   outcome in each world, the value head's read of each playout at the
   mover's turn starts `MARKS` turns on, the cost, and the choice. Reading
   the marks draws nothing and changes no game.
+- `mix=<temperature>` (`rollout:...:mix=`, metadata `mix`) plays a mixed
+  strategy instead of the best mean score: the candidate is drawn with
+  probability proportional to `prior(a) * exp(score(a) / mix)`
+  (`hexset.rollout.mixed_strategy`), the policy that maximises the expected
+  score less `mix` times its KL divergence from the prior. `mix` is in the
+  scores' units, a win chance: candidates within about one `mix` of the
+  best are mixed in proportion to the prior, one trailing it by many is all
+  but never played, and the expected shortfall from the best score is at
+  most `mix * ln(1 / prior(best))`. The draws come from a stream seeded off
+  the searcher's `rng` that draws nothing else, so the worlds and scores are
+  the greedy search's and a game stays a function of its seeds.
+  `anchor=<exponent>` (metadata `anchor`) raises the prior first:
+  `prior(a) ** anchor`, so 1 anchors to the prior, 0 to every candidate
+  alike (a softmax over the scores), and the bound reads the raised prior,
+  renormalised over the candidates. The log
+  keeps each candidate's probability (`mix`) and the candidate the best
+  score would have played (`greedy`). A root decided without playouts draws
+  nothing.
+- `det=True` (`rollout:...:det=1`, metadata `det`) seeds each searched
+  root from what the deciding seat can see instead of the searcher's
+  running `rng`: `decision_key` is a sha256 of `salt` (0 by default) and
+  `hexset.game.observed_digest(game, seat)`, the canonical form of
+  `observe(game, seat)` (the board, every public field, the seat's own
+  hand and development cards, every other pile and the deck by size, and
+  the ledger as the seat knows it; the table's turn cap, trade embargoes
+  and trade mode, which a record does not keep, are left out). The worlds, their playout seeds and the
+  `mix` draw come from streams on that key. The same visible position then
+  searches the same worlds and plays the same move on any searcher and in
+  any process, two positions that differ only in what the seat cannot see
+  search alike, and a position rebuilt from a record is searched as it was.
+  The searcher's own `rng` is not drawn from, so a run stays a function of
+  the seeds that dealt its games. The log keeps the key (`det_key`) and the
+  `salt`.
 - `pool=RolloutPool(load_policy, workers)` plays the worlds out in worker
   processes beside the searching one, each loading its own copy of the
   policy; the worlds and their seeds are still drawn in the searching
@@ -358,7 +391,7 @@ few dozen worlds separate moves that independent playouts would not.
   candidate on ([native.md](native.md#playout-copies)).
 
 `hexset.clients.netbot.rollouts_for(checkpoint, worlds=, top=, decisive=,
-horizon=, full_setup=)` builds one with the checkpoint's own trade gate
+horizon=, full_setup=, mix=, anchor=, det=, salt=)` builds one with the checkpoint's own trade gate
 (`GatedRollouts`); the arena's `rollout:` entrant and a file's
 `search=rollout` metadata do the same.
 

@@ -190,3 +190,41 @@ def test_a_searched_file_can_ask_to_play_its_confident_roots_unsearched():
     for bad in ("0", "1.2", "sure"):
         with pytest.raises(ValueError, match="decisive"):
             search_config({"search": "mcts", "decisive": bad})
+
+
+def test_a_rollout_file_can_ask_for_a_mixed_strategy():
+    assert search_config({"search": "rollout", "mix": "0.02"}).rollout.mix == 0.02
+    assert search_config({"search": "rollout"}).rollout.mix == 0.0
+    assert search_config({"search": "rollout", "mix": ""}).rollout.mix == 0.0
+    assert search_config({"mix": "0.02"}).rollout is None
+    assert search_config({"search": "rollout", "mix": "0.01", "anchor": "0.5"}).rollout.anchor == 0.5
+    assert search_config({"search": "rollout", "mix": "0.01"}).rollout.anchor == 1.0
+
+
+@pytest.mark.parametrize("value", ["-0.01", "warm", "inf", "nan"])
+def test_an_unreadable_mix_fails_the_load(value):
+    """A mix changes what the seat plays: read wrong, it would play greedily."""
+    with pytest.raises(ValueError, match="mix"):
+        search_config({"search": "rollout", "mix": value})
+
+
+@pytest.mark.parametrize("value", ["-1", "flat", "inf"])
+def test_an_unreadable_anchor_fails_the_load(value):
+    with pytest.raises(ValueError, match="anchor"):
+        search_config({"search": "rollout", "mix": "0.01", "anchor": value})
+
+
+def test_a_rollout_file_can_ask_for_a_deterministic_search():
+    assert search_config({"search": "rollout", "det": "1"}).rollout.det
+    sure = search_config({"search": "rollout", "det": "1", "salt": "7"}).rollout
+    assert (sure.det, sure.salt) == (True, 7)
+    off = search_config({"search": "rollout"}).rollout
+    assert (off.det, off.salt) == (False, 0)
+    assert not search_config({"search": "rollout", "det": "0"}).rollout.det
+
+
+@pytest.mark.parametrize("keys", [{"det": "yes"}, {"det": "2"}, {"det": "1", "salt": "-1"},
+                                  {"det": "1", "salt": "seven"}, {"salt": "7"}, {"det": "0", "salt": "7"}])
+def test_an_unreadable_det_or_salt_fails_the_load(keys):
+    with pytest.raises(ValueError, match="det|salt"):
+        search_config({"search": "rollout", **keys})

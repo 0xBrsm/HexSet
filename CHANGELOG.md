@@ -5,6 +5,42 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.27.0
+
+### Added
+
+- **Native playouts hold a two-seat policy at a four-dealt duel table.** A
+  contract 9d or 9d.1 policy searching at a table dealt four with two seats
+  retired now plays its rollout copies on the native engine
+  (`hexset.native.playout.copyable`). The native observation, decision
+  tensors and seat frame count the two live seats, perspective first, and
+  map robber victims through that frame, byte for byte as the Python
+  engine. `ArenaState.decision(seat, players)` takes the policy's seat count.
+  `HEXSET_NATIVE_PLAYOUTS=0` keeps every playout copy on the Python engine.
+
+- **Paired rollouts can play a mixed strategy.** `PairedRollouts(mix=)`, the
+  `rollout:` spec's `mix=<temperature>` and a rollout file's metadata `mix`
+  draw a searched root's move with probability proportional to
+  `prior(a) * exp(score(a) / mix)` (`hexset.rollout.mixed_strategy`), in
+  place of the best mean score: close candidates are mixed by the policy's
+  prior, a clearly better one is played nearly always, and the expected
+  shortfall from the best score is at most `mix * ln(1 / prior(best))`. The
+  draws come from a stream of the searcher's own, so the worlds and scores
+  are the greedy search's; each searched decision's log line adds the
+  probabilities (`mix`) and the greedy candidate (`greedy`). `anchor=`
+  (metadata `anchor`) raises the prior to that exponent first, so `0` is a
+  softmax over the scores alone. Without `mix`, or at `0`, the search is
+  unchanged.
+
+- **Paired rollouts can search deterministically.** `PairedRollouts(det=,
+  salt=)`, the `rollout:` spec's `det=1` and `salt=<n>`, and metadata `det`
+  and `salt` seed each searched root from `hexset.game.observed_digest` (a
+  new sha256 of `observe(game, seat)`, written canonically) and the salt,
+  in place of the searcher's running stream: the same visible position
+  draws the same worlds, seeds and `mix` draw, and plays the same move, on
+  any searcher and in any process. The log adds the key and the salt
+  (`det_key`, `salt`). Off by default.
+
 ## 1.26.3
 
 ### Fixed

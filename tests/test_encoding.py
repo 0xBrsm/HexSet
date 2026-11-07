@@ -821,3 +821,86 @@ def test_the_roll_odds_are_the_next_rolls():
         assert block.sum() == pytest.approx(1.0)
         moved |= not np.allclose(block, plain)
     assert moved, "the balanced dice deck never moved off the plain odds"
+
+
+# --- contract 6 ---------------------------------------------------------------
+
+
+def test_contract_6_widths_and_blocks_are_pinned():
+    from hexset.encoding import hex_features
+
+    assert (hex_features("6"), vertex_features(4, "6"), edge_features(4, "6"), global_features(4, "6")) == (11, 14, 5, 67)
+    assert (hex_features(), hex_features("8.1")) == (HEX_FEATURES, HEX_FEATURES)
+    assert list(global_columns(4, "6")) == [
+        "own_hand", "opponent_hand_sizes", "bank", "own_dev_cards", "opponent_dev_card_counts", "knights_played",
+        "victory_points", "longest_road_holder", "largest_army_holder", "phase", "free_roads", "deck_size", "turn",
+        "ledger",
+    ]
+    obs = encode(a_game(), 0, "6")
+    assert obs.hexes.shape == (19, 11) and obs.vertices.shape == (54, 14) and obs.edges.shape == (72, 5)
+    assert obs.globals.shape == (67,)
+
+
+@pytest.mark.parametrize("players", [2, 3, 4])
+def test_contract_6_batch_is_byte_identical_to_the_single_encode(players):
+    rng = random.Random(41)
+    games = [start(random_base_board(rng), players, rng) for _ in range(4)]
+    for _ in range(60):
+        for game in games:
+            if not is_over(game):
+                step_randomly(game, rng)
+        seats = [rng.randrange(players) for _ in games]
+        for one, batched in zip((encode(g, s, "6") for g, s in zip(games, seats)), encode_batch(games, seats, "6")):
+            for a, b in zip(arrays(one), arrays(batched)):
+                assert a.dtype == np.float32 and np.array_equal(a, b)
+
+
+def test_contract_6_reads_the_board_and_the_pieces_one_hot():
+    game = a_game(steps=300)
+    state = game._state
+    obs = encode(game, 1, "6")
+    board = state.board
+    for h in range(board.num_hexes):
+        assert obs.hexes[h, int(board.terrain[h])] == 1.0 and obs.hexes[h, :8].sum() == 1.0
+        assert obs.hexes[h, 8] == (1.0 if board.tokens[h] else 0.0)
+        assert obs.hexes[h, 10] == (1.0 if h == state.robber else 0.0)
+    for v in range(board.topology.num_vertices):
+        building, owner = state.vertex_building[v], state.vertex_owner[v]
+        assert obs.vertices[v, building] == 1.0 and obs.vertices[v, :3].sum() == 1.0
+        slot = 4 if owner == NO_OWNER else _seat(owner, 1, 4)
+        assert obs.vertices[v, 3 + slot] == 1.0 and obs.vertices[v, 3:8].sum() == 1.0
+    for e, owner in enumerate(state.edge_owner):
+        assert obs.edges[e, 4 if owner == NO_OWNER else _seat(owner, 1, 4)] == 1.0 and obs.edges[e].sum() == 1.0
+    g = global_columns(4, "6")
+    assert obs.globals[g["phase"]].sum() == 1.0 and obs.globals[g["phase"]][int(game.phase)] == 1.0
+    points = obs.globals[g["victory_points"]] * POINTS_SCALE
+    assert points == pytest.approx([public_victory_points(state, s) for s in to_frame(range(4), 1)])
+
+
+def test_contract_6_reads_each_opponents_ledger_row_as_the_seat_knows_it():
+    """A steal shows the thief and the victim the card; contract 6 reads the
+    perspective's own rows (`PublicLedger.for_seat`), so the thief's view of
+    the victim knows the loss and a bystander's sees only a card gone."""
+    from hexset.game import Phase, move_robber_to
+    from hexset.ledger import SeatLedger
+
+    game = _main_phase_game()
+    game.phase = Phase.ROBBER
+    thief, victim, bystander = 0, 1, 2
+    game.current_player = thief
+    game._state.hands[victim] = [1, 1, 0, 0, 0]
+    game.ledger.seats[victim] = SeatLedger(known=[1, 1, 0, 0, 0], unknown=0)
+    topology = game._state.board.topology
+    target = next(
+        h for h in range(game._state.board.num_hexes)
+        if h != game._state.robber and any(game._state.vertex_owner[v] == victim for v in topology.hex_vertices[h])
+    )
+    move_robber_to(game, target, victim)
+    left = game._state.hands[victim]
+
+    def row(seat):
+        ledger = encode(game, seat, "6").globals[global_columns(4, "6")["ledger"]].reshape(3, NUM_RESOURCES + 1)
+        return list(np.rint(ledger[_seat(victim, seat, 4) - 1] * HAND_SCALE))
+
+    assert row(thief) == [*left, 0]
+    assert sum(row(bystander)) == 1

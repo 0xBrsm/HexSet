@@ -13,7 +13,12 @@ Nothing of trading or robber deals is read: those stay with the trade gate.
 Record contract 8 by default. Contract 8.1, asked for by name
 (`contract="8.1"`), is contract 8 with the table's rules and the next roll's
 odds appended to the globals and each seat's points read against the points
-the game is played to; a net trained across rule sets reads it. Closeness reads (`1 / (1 + n)`: a seat's distance to a
+the game is played to; a net trained across rule sets reads it. Contract 6
+(`contract="6"`) is the older encoding a contract-6 net reads, every block
+of its own width (`hex_features`, `vertex_features`, `edge_features` and
+`global_columns` take the contract): terrain and building one-hots, the
+award holders one-hot, and each opponent's hand as its ledger row (`known`
+per resource and `unknown`, from `PublicLedger.for_seat`). Closeness reads (`1 / (1 + n)`: a seat's distance to a
 vertex, to Longest Road, to Largest Army) read 1 at the goal and 0 where it is
 out of reach, so 0 is the far end of the scale, never a stand-in.
 """
@@ -31,6 +36,7 @@ from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DECK_SIZE, DevCard
 from .devcards import dev_count
+from .economy import hand_size
 from .game import Game, Phase, roll_odds, to_move
 from .roads import reach_all, roads_to_take_all
 from .state import NO_OWNER, Building, GameState
@@ -60,6 +66,7 @@ __all__ = [
     "static_graph",
     "Observation",
     "HEX_FEATURES",
+    "hex_features",
     "vertex_features",
     "edge_features",
     "global_features",
@@ -173,16 +180,27 @@ _PIPS = HEX_TERRAIN
 _ROBBER = HEX_TERRAIN + 1
 
 
-def vertex_features(players: int) -> int:
+def hex_features(contract: str = "8") -> int:
+    """Width of a hex row under observation `contract`: `HEX_FEATURES`, or
+    contract 6's terrain one-hot, has-token, pips and robber."""
+    return _C6_HEX if _contract(contract) == "6" else HEX_FEATURES
+
+
+def vertex_features(players: int, contract: str = "8") -> int:
     """Width of a vertex row for `players` seats: per seat its building here
     (1 a settlement, 2 a city), a generic port and one port per resource, and
-    per seat its reach (`roads.reach_all`, read `1 / (1 + d)`, 0 unreachable)."""
+    per seat its reach (`roads.reach_all`, read `1 / (1 + d)`, 0 unreachable).
+    Contract 6: the building one-hot, the seat-relative owner or nobody, a
+    generic port and one port per resource."""
+    if _contract(contract) == "6":
+        return _C6_BUILDINGS + players + 1 + 1 + NUM_RESOURCES
     return players + 1 + NUM_RESOURCES + players
 
 
-def edge_features(players: int) -> int:
-    """Width of an edge row for `players` seats: per seat, 1 for its road here."""
-    return players
+def edge_features(players: int, contract: str = "8") -> int:
+    """Width of an edge row for `players` seats: per seat, 1 for its road
+    here; contract 6 adds a column for nobody's."""
+    return players + 1 if _contract(contract) == "6" else players
 
 
 def _port_base(players: int) -> int:
@@ -193,9 +211,17 @@ def _reach_base(players: int) -> int:
     return players + 1 + NUM_RESOURCES
 
 
-#: The observation contracts `encode` writes: contract 8, the default, and
-#: contract 8.1, which appends `RULE_BLOCKS` to its globals.
-OBSERVATION_CONTRACTS: tuple[str, ...] = ("8", "8.1")
+#: The observation contracts `encode` writes: contract 8, the default;
+#: contract 8.1, which appends `RULE_BLOCKS` to its globals; and contract 6,
+#: the older encoding, every block of its own width.
+OBSERVATION_CONTRACTS: tuple[str, ...] = ("6", "8", "8.1")
+
+# Contract 6's layout, fixed: the terrain, building and phase counts it was
+# defined over, so a later enum member cannot widen it.
+_C6_TERRAIN = 8
+_C6_BUILDINGS = 3
+_C6_PHASES = 7
+_C6_HEX = _C6_TERRAIN + 3
 
 
 def _contract(contract: str) -> str:
@@ -209,6 +235,24 @@ def _global_blocks(players: int, contract: str = "8") -> list[tuple[str, int]]:
     `own_` is the perspective, `opponent_` each other seat in seat-relative
     order, `seat_` every seat with the perspective first, no prefix the table."""
     opponents = players - 1
+    if _contract(contract) == "6":
+        return [
+            ("own_hand", NUM_RESOURCES),
+            ("opponent_hand_sizes", opponents),
+            ("bank", NUM_RESOURCES),
+            ("own_dev_cards", NUM_DEV_CARDS),
+            ("opponent_dev_card_counts", opponents),
+            ("knights_played", players),
+            ("victory_points", players),
+            ("longest_road_holder", players + 1),
+            ("largest_army_holder", players + 1),
+            ("phase", _C6_PHASES),
+            ("free_roads", 1),
+            ("deck_size", 1),
+            ("turn", 1),
+            # Per opponent, its ledger row: `known` per resource, then `unknown`.
+            ("ledger", opponents * (NUM_RESOURCES + 1)),
+        ]
     blocks = [
         ("own_hand", NUM_RESOURCES),
         ("own_dev", NUM_DEV_CARDS),
@@ -227,7 +271,7 @@ def _global_blocks(players: int, contract: str = "8") -> list[tuple[str, int]]:
         ("free_roads", 1),
         ("turn", 1),
     ]
-    if _contract(contract) == "8.1":
+    if contract == "8.1":
         # Appended so every contract-8 column keeps its place.
         blocks += [("rules", 4), ("roll_odds", MAX_ROLL - MIN_ROLL + 1)]
     return blocks
@@ -626,7 +670,8 @@ def encode_batch(
 ) -> list[Observation]:
     """Encode a collector tick with one set of vector operations, pinned to the
     plain single-position `encode` as its oracle."""
-    _contract(contract)
+    if _contract(contract) == "6":
+        return _encode_batch6(games, perspectives)
     if len(games) != len(perspectives):
         raise ValueError("one perspective is required per game")
     if not games:
@@ -698,12 +743,13 @@ def encode_batch(
 def encode(game: Game, perspective: int | None = None, contract: str = "8") -> Observation:
     """Encode the position as seen by `perspective`, defaulting to the mover,
     under observation `contract` (`OBSERVATION_CONTRACTS`)."""
-    _contract(contract)
     state = game._state
     if perspective is None:
         perspective = to_move(game)
     if not 0 <= perspective < state.num_players:
         raise ValueError(f"no such player: {perspective}")
+    if _contract(contract) == "6":
+        return _encode_batch6([game], [perspective])[0]
 
     template = _template(state.board, state.num_players)
     vertices = _encode_vertices(state, perspective, template)
@@ -716,3 +762,153 @@ def encode(game: Game, perspective: int | None = None, contract: str = "8") -> O
         globals=np.asarray(_global_parts(game, perspective, building_points, contract), dtype=np.float32),
         graph=static_graph(state.board.topology),
     )
+
+
+# --- contract 6 ---------------------------------------------------------------
+
+
+@lru_cache(maxsize=4096)
+def _template6(board: Board, players: int) -> _Template:
+    """Contract 6's board template: terrain one-hot, has-token and pips per
+    hex; a generic port and one port per resource per vertex."""
+    hexes = np.zeros((board.num_hexes, _C6_HEX), dtype=np.float32)
+    for h in range(board.num_hexes):
+        hexes[h, int(board.terrain[h])] = 1.0
+        token = board.tokens[h]
+        hexes[h, _C6_TERRAIN] = 1.0 if token else 0.0
+        hexes[h, _C6_TERRAIN + 1] = pips(token) / MAX_TOKEN_PIPS
+    port_base = _C6_BUILDINGS + players + 1
+    vertices = np.zeros((board.topology.num_vertices, vertex_features(players, "6")), dtype=np.float32)
+    for port in board.ports:
+        column = port_base if port.resource is None else port_base + 1 + int(port.resource)
+        for v in port.vertices:
+            vertices[v, column] = 1.0
+    hexes.flags.writeable = False
+    vertices.flags.writeable = False
+    return _Template(hexes=hexes, vertices=vertices)
+
+
+@lru_cache(maxsize=32)
+def _vertex_rows6(players: int, perspective: int) -> np.ndarray:
+    """`rows[key]` (`_vertex_key`) is contract 6's building and owner block of
+    a vertex: the building one-hot, then the seat-relative owner, nobody last."""
+    slots = _slots(players, perspective)
+    rows = np.zeros((_C6_BUILDINGS * (players + 1), _C6_BUILDINGS + players + 1), dtype=np.float32)
+    for building in range(_C6_BUILDINGS):
+        for owner in range(NO_OWNER, players):
+            key = _vertex_key(building, owner, players)
+            rows[key, building] = 1.0
+            rows[key, _C6_BUILDINGS + slots[owner]] = 1.0
+    rows.flags.writeable = False
+    return rows
+
+
+@lru_cache(maxsize=32)
+def _edge_rows6(players: int, perspective: int) -> np.ndarray:
+    """`rows[owner]` is contract 6's edge row: the seat-relative owner, with
+    `NO_OWNER`'s, the last row, in the last column."""
+    rows = np.zeros((players + 1, players + 1), dtype=np.float32)
+    for owner, slot in enumerate(_slots(players, perspective)):
+        rows[owner, slot] = 1.0
+    rows.flags.writeable = False
+    return rows
+
+
+_C6_BUILDING_VALUE = np.arange(_C6_BUILDINGS, dtype=np.float32)
+
+
+def _global_parts6(game: Game, perspective: int, building_points: np.ndarray) -> list[float]:
+    """Contract 6's globals in `_global_blocks(players, "6")` order. Other
+    seats are read by size alone (`hand_size`, `dev_count`), and their hands
+    by the perspective's own ledger rows (`PublicLedger.for_seat`)."""
+    state = game._state
+    players = state.num_players
+    seats = to_frame(range(players), perspective)
+    parts: list[float] = []
+    parts.extend(n / HAND_SCALE for n in state.hands[perspective])
+    parts.extend(hand_size(state, s) / HAND_SCALE for s in seats[1:])
+    parts.extend(n / BANK_SCALE for n in state.bank)
+    parts.extend(
+        (held + fresh) / DEV_SCALE
+        for held, fresh in zip(state.dev_cards[perspective], state.new_dev_cards[perspective])
+    )
+    parts.extend(dev_count(state, s) / DEV_SCALE for s in seats[1:])
+    parts.extend(state.knights_played[s] / DEV_SCALE for s in seats)
+    parts.extend((float(building_points[i]) + award_points(state, s)) / POINTS_SCALE for i, s in enumerate(seats))
+    for holder in (state.longest_road_holder, state.largest_army_holder):
+        slot = players if holder == NO_OWNER else _seat(holder, perspective, players)
+        parts.extend(1.0 if i == slot else 0.0 for i in range(players + 1))
+    phase = int(game.phase)
+    parts.extend(1.0 if phase == i else 0.0 for i in range(_C6_PHASES))
+    parts.append(game.free_roads / FREE_ROADS_SCALE)
+    parts.append(len(state.deck) / DECK_SIZE)
+    parts.append(min(game.turns / TURN_SCALE, 1.0))
+    rows = game.ledger.for_seat(perspective).seats
+    for s in seats[1:]:
+        parts.extend(k / HAND_SCALE for k in rows[s].known)
+        parts.append(rows[s].unknown / HAND_SCALE)
+    return parts
+
+
+def _encode_batch6(games: Sequence[Game], perspectives: Sequence[int]) -> list[Observation]:
+    """Contract 6, every position into one packed buffer as `encode_batch`
+    writes contract 8; `encode` is this on one position."""
+    if len(games) != len(perspectives):
+        raise ValueError("one perspective is required per game")
+    if not games:
+        return []
+    states = [game._state for game in games]
+    players = states[0].num_players
+    if any(state.num_players != players for state in states):
+        raise ValueError("one batch cannot mix player counts")
+    perspective = np.asarray(perspectives, dtype=np.intp)
+    if np.any((perspective < 0) | (perspective >= players)):
+        raise ValueError("a perspective does not name a player")
+
+    batch = len(games)
+    topology = states[0].board.topology
+    shapes = (
+        (states[0].board.num_hexes, _C6_HEX),
+        (topology.num_vertices, vertex_features(players, "6")),
+        (topology.num_edges, edge_features(players, "6")),
+        (global_features(players, "6"),),
+    )
+    packed = np.empty((batch, sum(int(np.prod(shape)) for shape in shapes)), dtype=np.float32)
+    blocks, start = [], 0
+    for shape in shapes:
+        stop = start + int(np.prod(shape))
+        block = packed[:, start:stop].reshape(batch, *shape)
+        if block.base is None:
+            raise AssertionError("packed observation slice did not stay a view")
+        blocks.append(block)
+        start = stop
+    hexes, vertices, edges, globals_ = blocks
+
+    templates = [_template6(state.board, players) for state in states]
+    np.stack([template.hexes for template in templates], out=hexes)
+    rows = np.arange(batch)
+    robbers = np.asarray([state.robber for state in states], dtype=np.intp)
+    placed = robbers >= 0  # `OFF_BOARD` marks no hex
+    hexes[rows[placed], robbers[placed], _C6_TERRAIN + 2] = 1.0
+
+    np.stack([template.vertices for template in templates], out=vertices)
+    buildings = np.asarray([state.vertex_building for state in states], dtype=np.intp)
+    owners = np.asarray([state.vertex_owner for state in states], dtype=np.intp)
+    keys = buildings * (players + 1) + owners + 1
+    dynamic = _C6_BUILDINGS + players + 1
+    table = np.stack([_vertex_rows6(players, seat) for seat in range(players)])
+    vertices[:, :, :dynamic] = table[perspective[:, None], keys]
+
+    edge_owners = np.asarray([state.edge_owner for state in states], dtype=np.intp)
+    edge_table = np.stack([_edge_rows6(players, seat) for seat in range(players)])
+    edges[:] = edge_table[perspective[:, None], edge_owners]
+
+    # Each seat's building points: the building one-hot's value against the
+    # owner one-hot, summed over the board.
+    value = vertices[:, :, :_C6_BUILDINGS] @ _C6_BUILDING_VALUE
+    building_points = np.sum(value[:, :, None] * vertices[:, :, _C6_BUILDINGS : _C6_BUILDINGS + players], axis=1)
+    for i, (game, p) in enumerate(zip(games, perspective)):
+        globals_[i] = np.asarray(_global_parts6(game, int(p), building_points[i]), dtype=np.float32)
+
+    graph = static_graph(topology)
+    return [Observation(hexes[i], vertices[i], edges[i], globals_[i], graph, packed, i) for i in range(batch)]

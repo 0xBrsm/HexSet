@@ -5,6 +5,23 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.30.0
+
+### Added
+
+- **Observation contract 6 in `hexset.encoding`.** `encode(game, seat,
+  "6")` and `encode_batch(..., "6")` write the encoding a contract-6 network
+  reads: a hex row is its terrain one-hot, has-token, pips and the robber
+  (11 wide); a vertex row its building one-hot, its seat-relative owner or
+  nobody, and its ports (14 at four seats); an edge row its seat-relative
+  owner or nobody (5); and the globals each opponent's hand size, card count
+  and ledger row (`known` per resource, then `unknown`), the award holders
+  and the phase one-hot (67 at four seats). The ledger rows are the
+  perspective's own (`PublicLedger.for_seat`), as the record a contract-6
+  graph is served from reads them. `hex_features(contract)` is new;
+  `vertex_features`, `edge_features`, `global_features` and
+  `global_columns` take the contract, contract 8 by default as before.
+
 ## 1.29.0
 
 ### Added

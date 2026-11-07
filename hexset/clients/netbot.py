@@ -98,6 +98,12 @@ class NetworkBot(trading.DeclaredTrade):
     #: How far this seat's robber moves lean towards the leader (`tip_robber`);
     #: `0.0` plays them as the policy picks.
     robber_tip: float = 0.0
+    #: `0.0` plays the policy's top move. Above it, the seat samples its move
+    #: from the policy's probabilities raised to `1 / temperature`: a whole
+    #: option where the policy lists them (`option_rows`, its remaining moves
+    #: played from the policy's own plan), else a move from `score_rows`. The
+    #: draws come from a stream of the seat's own, seeded off `rng`'s state.
+    temperature: float = 0.0
     _seated: Game | None = field(default=None, repr=False, compare=False)
     _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
     _protocol: "TradeProtocol | None" = field(
@@ -114,6 +120,13 @@ class NetworkBot(trading.DeclaredTrade):
             hashlib.sha256(repr(self.rng.getstate()).encode()).digest()[:8], "big"
         )
         self._protocol = trading.install(self, TradeProtocol(self, self.trade, seed=seed))
+        if self.temperature < 0:
+            raise ValueError(f"temperature must be at least 0, got {self.temperature}")
+        # The sampling stream: off `rng`'s state like the protocol's seed, salted, so a draw
+        # never disturbs the gate's stream and the gate's never moves a sampled move.
+        self._draws = random.Random(
+            hashlib.sha256((repr(self.rng.getstate()) + ":temperature").encode()).digest()
+        )
 
     # Every bargaining limit -- `trade_params`, `max_offers`, `trade_floor`,
     # `gate_plies`, the offer budget -- reads through `trade`
@@ -131,6 +144,8 @@ class NetworkBot(trading.DeclaredTrade):
         self.seat_at(game)
         seat = to_move(game)
         options = tuple(options_for(game))
+        if self.temperature:
+            return self._sampled_many([(self, game, seat, options)])[0]
         if self.robber_tip and options[0].type is ActionType.MOVE_ROBBER:
             # The same forward `act_rows` makes, read for its prior and value.
             ((prior, value),) = self.policy.score_rows([(game, seat, options)])
@@ -147,23 +162,70 @@ class NetworkBot(trading.DeclaredTrade):
         where it made one per seat. Each answer is the one `choose` gives:
         a policy's `act_rows` answers every row as it would alone."""
         out: list[Action | None] = [None] * len(pairs)
-        groups: dict[tuple[int, bool], list[tuple[int, NetworkBot, Game, int, tuple[Action, ...]]]] = {}
+        groups: dict[tuple[int, str], list[tuple[int, NetworkBot, Game, int, tuple[Action, ...]]]] = {}
         for i, (bot, game) in enumerate(pairs):
             bot.seat_at(game)
             seat = to_move(game)
             options = tuple(options_for(game))
-            tipped = bool(bot.robber_tip) and options[0].type is ActionType.MOVE_ROBBER
-            groups.setdefault((id(bot.policy), tipped), []).append((i, bot, game, seat, options))
-        for (_, tipped), members in groups.items():
+            how = ("sampled" if bot.temperature else
+                   "tipped" if bot.robber_tip and options[0].type is ActionType.MOVE_ROBBER else "top")
+            groups.setdefault((id(bot.policy), how), []).append((i, bot, game, seat, options))
+        for (_, how), members in groups.items():
             policy = members[0][1].policy
             rows = [(game, seat, options) for _, _, game, seat, options in members]
-            if tipped:
+            if how == "sampled":
+                answers = cls._sampled_many([(bot, game, seat, options) for _, bot, game, seat, options in members])
+                for (i, *_), action in zip(members, answers):
+                    out[i] = action
+            elif how == "tipped":
                 for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
                     picked = max(range(len(options)), key=lambda k: prior[k])
                     out[i] = options[tip_robber(options, prior, value, seat, picked, bot.robber_tip)]
             else:
                 for (i, *_), action in zip(members, policy.act_rows(rows)):
                     out[i] = action
+        return out  # type: ignore[return-value]
+
+    def _draw(self, probabilities) -> int:
+        """An index drawn from `probabilities` raised to `1 / temperature`, off this seat's stream."""
+        weights = [float(p) ** (1.0 / self.temperature) if p > 0 else 0.0 for p in probabilities]
+        total = sum(weights)
+        if not total > 0:
+            weights, total = [1.0] * len(weights), float(len(weights))
+        point, running = self._draws.random() * total, 0.0
+        for index, weight in enumerate(weights):
+            running += weight
+            if point < running:
+                return index
+        return max(i for i, w in enumerate(weights) if w > 0)
+
+    @staticmethod
+    def _sampled_many(rows: Sequence[tuple["NetworkBot", Game, int, tuple[Action, ...]]]) -> list[Action]:
+        """Sampled moves for rows of bots sharing one policy, one forward for the rows that draw. A
+        policy that lists whole options (`option_rows`) draws one where a decision opens and plays
+        its plan's next move inside it (`hexset.decisions.Plans`, the policy's `plans`); any other
+        draws from `score_rows`. A position with one legal move draws nothing."""
+        policy = rows[0][0].policy
+        out: list[Action | None] = [None] * len(rows)
+        if getattr(policy, "has_options", False):
+            plans = policy.plans
+            ask = [i for i, (_, game, seat, options) in enumerate(rows)
+                   if len(options) > 1 and not plans.planned(game, seat, options)]
+            listed = dict(zip(ask, policy.option_rows([(rows[i][1], rows[i][2]) for i in ask]) if ask else []))
+            drawn: dict[int, object] = {}
+            for i in ask:
+                options, probabilities = listed[i]
+                drawn[i] = options[rows[i][0]._draw(probabilities)]
+            for i, (_, game, seat, options) in enumerate(rows):
+                pick = (lambda g, s, i=i: drawn[i])
+                out[i] = plans.act(game, seat, options, pick, lambda g, s, o, i=i: drawn[i])
+            return out  # type: ignore[return-value]
+        ask = [i for i, (_, _, _, options) in enumerate(rows) if len(options) > 1]
+        scored = policy.score_rows([rows[i][1:] for i in ask]) if ask else []
+        for i, (bot, _, _, options) in enumerate(rows):
+            out[i] = options[0] if len(options) == 1 else None
+        for i, (prior, _) in zip(ask, scored):
+            out[i] = rows[i][3][rows[i][0]._draw(prior)]
         return out  # type: ignore[return-value]
 
     def _perspective(self, view: View) -> int:
@@ -729,8 +791,10 @@ def bot_for(
     checkpoint: Checkpoint, *, rng: random.Random | None = None,
     trade: TradeParams | None = None,
     own_calibration: tuple[float, float] | None = None,
+    temperature: float = 0.0,
 ) -> NetworkBot:
-    """`checkpoint`, playing one position at a time.
+    """`checkpoint`, playing one position at a time; above `temperature` 0 it
+    samples its moves (`NetworkBot.temperature`).
 
     The gate is built from what the checkpoint declares about itself --
     clearing floor, continuation budget, card caps, responder price and
@@ -748,6 +812,7 @@ def bot_for(
         rng=random.Random() if rng is None else rng,
         own_calibration=own_calibration,
         robber_tip=robber_tip_of(checkpoint),
+        temperature=temperature,
     )
 
 
@@ -864,7 +929,8 @@ def register_entrants(loader) -> None:
         path = _checkpoint_path(entrant.weights, "network")
         checkpoint = loader(path, board.topology)
         trader = own_trader(entrant, checkpoint, path)
-        bot = bot_for(checkpoint, rng=rng, trade=entrant.trade)
+        bot = bot_for(checkpoint, rng=rng, trade=entrant.trade,
+                      temperature=float(entrant.option("temperature", 0.0) or 0.0))
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
                       veto_picks=trader_veto_pick_of(checkpoint))
 

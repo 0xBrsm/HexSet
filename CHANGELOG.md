@@ -5,6 +5,20 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.29.0
+
+### Added
+
+- **A network seat that samples: `network:<path>@0:temperature=<T>`.** A
+  `NetworkBot` with `temperature` above 0 draws its move from the policy's
+  probabilities raised to `1 / temperature`: a whole option where the policy
+  lists them (`option_rows`; the option's later moves come from the policy's
+  own plan, `hexset.decisions.Plans`), else a move from `score_rows`. Each
+  seat draws from a stream of its own, seeded off its `rng`'s state, so a
+  sampled game is a function of the seat's seed, and `choose_many` draws for
+  each bot what its `choose` would. `bot_for` takes `temperature`; a spec
+  without the option plays the policy's top move as before.
+
 ## 1.28.0
 
 ### Added

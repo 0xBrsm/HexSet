@@ -17,6 +17,8 @@ and dice variance rather than averaging it away.
 
 from __future__ import annotations
 
+import math
+
 import random
 import statistics
 import time
@@ -1717,17 +1719,31 @@ def _network(name: str) -> Entrant:
     # setting a spec names, and it names it by replacing the checkpoint's
     # own config rather than layering over it: an arm that does not trade
     # has nothing else to say about how it trades.
-    path, separator, trades = name[len(NETWORK) :].partition("@")
+    # `:temperature=<T>`, last, samples the seat's moves (`NetworkBot.temperature`).
+    rest, marked, value = name[len(NETWORK) :].rpartition(":temperature=")
+    if not marked:
+        rest, value = name[len(NETWORK) :], ""
+    temperature = None
+    if marked:
+        try:
+            temperature = float(value)
+        except ValueError:
+            temperature = None
+        if temperature is None or not math.isfinite(temperature) or temperature <= 0:
+            raise ValueError(f"{name!r}: `:temperature=<T>` takes a number above 0")
+    path, separator, trades = rest.partition("@")
     if separator and trades != "0":
         raise ValueError(
             f"{name!r}: `@` is the no-trade switch (`@0`), not an offer "
             f"budget -- a checkpoint declares that in its own metadata"
         )
+    label = "network-notrade" if separator else "network"
     return Entrant(
-        name="network-notrade" if separator else "network",
+        name=label if temperature is None else f"{label}-t{_value_text(temperature)}",
         kind="network",
         weights=path,
         trade=TradeParams(max_offers=0) if separator else None,
+        options=() if temperature is None else (("temperature", temperature),),
     )
 
 

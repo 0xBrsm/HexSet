@@ -7,6 +7,8 @@ and the stub reads nothing a real runtime could not.
 
 from __future__ import annotations
 
+import copy
+import math
 import random
 from dataclasses import dataclass, replace
 
@@ -1245,3 +1247,102 @@ def test_choose_many_tips_a_robber_move_as_choose_does(board):
     policy.calls.clear()
     assert type(bots[0]).choose_many(list(zip(bots, games))) == expected
     assert sorted(policy.calls) == [("act", 1), ("score", 3)]
+
+
+@dataclass
+class OptionPolicy(PositionPolicy):
+    """A stub listing every legal move as a whole option (`option_rows`) with fixed, unequal probabilities, the
+    way a policy of whole decisions declares itself (`has_options`, `plans`)."""
+
+    plans_: object = None
+    has_options = True
+
+    @property
+    def plans(self):
+        if self.plans_ is None:
+            from hexset import decisions
+
+            self.plans_ = decisions.Plans()
+        return self.plans_
+
+    def option_rows(self, rows):
+        if self.calls is not None:
+            self.calls.append(("options", len(rows)))
+        out = []
+        for game, seat in rows:
+            options = tuple(options_for(game))
+            weights = [float(i + 1) for i in range(len(options))]
+            total = sum(weights)
+            out.append((options, [w / total for w in weights]))
+        return out
+
+
+def _tempered(probabilities, temperature):
+    weights = [p ** (1.0 / temperature) for p in probabilities]
+    return [w / sum(weights) for w in weights]
+
+
+@pytest.mark.parametrize("listed", [False, True])
+def test_a_tempered_bot_draws_its_moves_from_the_tempered_probabilities(board, listed):
+    """`temperature` above 0: the move is drawn from the policy's probabilities raised to 1 / temperature -- its
+    whole options where it lists them, `score_rows` where it does not -- off the seat's own stream, so two bots
+    with one seed draw alike and many seeds spread as the tempered distribution says."""
+    checkpoint = stub_checkpoint(board)
+    space = checkpoint.space
+    policy = OptionPolicy(space=space) if listed else PositionPolicy(space=space)
+    tempered = replace(checkpoint, policy=policy)
+    game = next(g for g in _positions(board, 40) if 3 <= len(tuple(options_for(g))) <= 6)
+    options = tuple(options_for(game))
+    if listed:
+        probabilities = policy.option_rows([(game, to_move(game))])[0][1]
+    else:
+        probabilities = policy.score_rows([(game, to_move(game), options)])[0][0]
+        total = sum(probabilities)
+        probabilities = [p / total for p in probabilities]
+    for temperature in (0.5, 1.0):
+        counts = {o: 0 for o in options}
+        draws = 3000
+        for i in range(draws):
+            bot = bot_for(tempered, rng=random.Random(i), temperature=temperature)
+            counts[bot.choose(copy.deepcopy(game))] += 1
+        expected = _tempered(probabilities, temperature)
+        for option, p in zip(options, expected):
+            assert abs(counts[option] / draws - p) < 4 * math.sqrt(p * (1 - p) / draws) + 0.005, (option, p)
+    twin_a = bot_for(tempered, rng=random.Random(7), temperature=0.5)
+    twin_b = bot_for(tempered, rng=random.Random(7), temperature=0.5)
+    assert [twin_a.choose(copy.deepcopy(game)) for _ in range(20)] == [twin_b.choose(copy.deepcopy(game)) for _ in range(20)]
+
+
+@pytest.mark.parametrize("listed", [False, True])
+def test_choose_many_draws_for_each_tempered_bot_what_choose_draws(board, listed):
+    """A batch of tempered bots sharing a policy is asked in one call, and each bot draws off its own stream what
+    its `choose` draws, so batching does not change a sampled game."""
+    checkpoint = stub_checkpoint(board)
+    calls = []
+    space = checkpoint.space
+    policy = OptionPolicy(space=space, calls=calls) if listed else PositionPolicy(space=space, calls=calls)
+    tempered = replace(checkpoint, policy=policy)
+    games = _positions(board, 8)
+    alone = [bot_for(tempered, rng=random.Random(i), temperature=0.7) for i in range(len(games))]
+    together = [bot_for(tempered, rng=random.Random(i), temperature=0.7) for i in range(len(games))]
+    expected = [bot.choose(copy.deepcopy(game)) for bot, game in zip(alone, games)]
+    calls.clear()
+    pairs = [(bot, copy.deepcopy(game)) for bot, game in zip(together, games)]
+    assert type(together[0]).choose_many(pairs) == expected
+    asked = sum(1 for g in games if len(tuple(options_for(g))) > 1)
+    assert calls == [("options" if listed else "score", asked)]
+
+
+def test_a_network_spec_names_its_temperature():
+    """`network:<path>@0:temperature=<T>` seats a sampling bot (the option `temperature`); without it the spec is
+    unchanged, and a temperature that is not a number above 0 is refused."""
+    from hexset.arena import entrant_from_name
+
+    entrant = entrant_from_name("network:/x/a.pt@0:temperature=0.5")
+    assert entrant.weights == "/x/a.pt" and entrant.trade.max_offers == 0
+    assert entrant.option("temperature") == 0.5 and entrant.name == "network-notrade-t0.5"
+    plain = entrant_from_name("network:/x/a.pt@0")
+    assert plain.options == () and plain.name == "network-notrade"
+    for bad in ("network:/x/a.pt@0:temperature=0", "network:/x/a.pt:temperature=-1", "network:/x/a.pt:temperature=x"):
+        with pytest.raises(ValueError):
+            entrant_from_name(bad)

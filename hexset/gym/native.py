@@ -44,12 +44,19 @@ class NativeRequest:
     """A deciding seat's immutable visible buffers; no Game or referee labels.
 
     ids are game index, lane, seat, atomic step, policy, decision id and part.
-    Buffers keep their own lifetimes after the next request is packed.
+    Buffers keep their own lifetimes after the next request is packed. A
+    whole-decision row holds its `observation` and `decision`; an atomic row
+    (a policy in the batch's `atomic` set) holds its legal `actions`, in
+    `hexset.actions.legal_actions`' order, and `view`, a read-only
+    `hexset.native.playout.NativeCopy` of the lane's position that a policy
+    reads as it reads a `Game`, valid until the lane moves.
     """
     epoch: int
     ids: tuple[int, ...]
-    observation: np.ndarray
-    decision: D.Decision
+    observation: np.ndarray | None
+    decision: D.Decision | None
+    actions: tuple[Action, ...] = ()
+    view: object | None = None
 
     @property
     def index(self): return self.ids[0]
@@ -66,9 +73,9 @@ class NativeRequest:
     @property
     def part(self): return self.ids[6]
     @property
-    def mask(self): return self.decision.flat
+    def mask(self): return None if self.decision is None else self.decision.flat
     @property
-    def options(self): return ()
+    def options(self): return self.actions
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,7 @@ class NativeLane:
     runs: int = 0
     running: dict[int, tuple[int, int]] = field(default_factory=dict)
     discard_rng: random.Random | None = None
+    discarding: int | None = None
     finished: bool = False
     failed: BaseException | None = None
 
@@ -155,9 +163,14 @@ class NativeBatch:
     after the decision's first successful atomic apply and Tape append. All
     answers are checked before any lane is changed. A callback/apply failure
     poisons this batch, including a partially applied compound.
+
+    Seats whose policy is in `atomic` are asked one atomic move at a time, as
+    a Python lane asks them: the row's legal actions and a view of the lane
+    (`NativeRequest`), answered with one of the actions. Every other seat is
+    asked whole decisions under `contract`.
     """
     def __init__(self, lanes, *, space: ActionSpace, pairs, contract, planned_indices,
-                 keep, on_decision=None, discard_order="seat", finished_indices=()):
+                 keep, on_decision=None, discard_order="seat", finished_indices=(), atomic=()):
         if _NativeRequests is None:
             raise NativeUnavailable("the optional native extension is unavailable")
         self.lanes = list(lanes)
@@ -168,6 +181,7 @@ class NativeBatch:
         self.space, self.contract = space, contract
         self.pairs = tuple(tuple(map(integer, pair)) for pair in pairs)
         self.keep, self.on_decision, self.discard_order = keep, on_decision, discard_order
+        self.atomic = frozenset(map(integer, atomic))
         self._planned = set(map(integer, planned_indices))
         self._known = set(map(integer, finished_indices))
         indices = [lane.index for lane in self.lanes]
@@ -182,7 +196,7 @@ class NativeBatch:
         board = self.lanes[0].metadata
         from ..board.coords import Hex
         from ..board.topology import build
-        topology = build(Hex(*hexagon) for hexagon in board["layout"])
+        topology = self.topology = build(Hex(*hexagon) for hexagon in board["layout"])
         if space != build_space(topology.num_vertices, topology.num_edges, topology.num_hexes, self.lanes[0].players):
             raise ValueError("action space differs from the imported topology")
         expected_pairs = contract9.incidences(topology)
@@ -221,7 +235,7 @@ class NativeBatch:
             raise
 
     def _requests(self):
-        ids = []
+        ids, atomic = [], []
         for slot, actors in enumerate(self._native.actors()):
             lane = self.lanes[slot]
             if lane.finished:
@@ -230,15 +244,22 @@ class NativeBatch:
                 raise ValueError("a terminal imported lane must be retained before collection")
             seat = actors[0]
             if self.discard_order == "random" and lane.native.core.phase() == 3:
-                if lane.discard_rng is None:
-                    lane.discard_rng = random.Random(f"discard-order:{game_key(lane.seed, lane.index)}")
-                seat = lane.discard_rng.choice(actors)
+                # As `LaneEnv._actor`: the seat drawn keeps discarding until
+                # its quota is met, a card at a time for an atomic seat.
+                if lane.discarding is None or lane.discarding not in actors:
+                    if lane.discard_rng is None:
+                        lane.discard_rng = random.Random(f"discard-order:{game_key(lane.seed, lane.index)}")
+                    lane.discarding = lane.discard_rng.choice(actors)
+                seat = lane.discarding
+            else:
+                lane.discarding = None
             if seat not in lane.running:
                 lane.running[seat] = lane.runs, 0
                 lane.runs += 1
             run, part = lane.running[seat]
             ids.append((lane.index, slot, seat, lane.actions, lane.cast[seat], run, part))
-        packet = self._native.fill(ids)
+            atomic.append(lane.cast[seat] in self.atomic)
+        packet = self._native.fill([identity for identity, alone in zip(ids, atomic) if not alone])
         n, width, flat_width, setup_width = packet["shape"]
         def array(name, dtype, shape):
             value = np.frombuffer(packet[name], dtype=dtype).reshape(shape)
@@ -251,22 +272,59 @@ class NativeBatch:
         roads = array("rb", np.int16, (-1, 2)); ro = array("rb_offsets", np.int64, (n+1,))
         discards = array("discard", np.int8, (-1, 10)); do = array("discard_offsets", np.int64, (n+1,))
         self._epoch = packet["epoch"]
-        asked = []
-        for row, identity in enumerate(ids):
+        asked, row = [], 0
+        # Each asked row's place in the packed whole-decision rows (None for an atomic row).
+        self._filled = []
+        for identity, alone in zip(ids, atomic):
+            if alone:
+                asked.append(self._atomic_request(identity))
+                self._filled.append(None)
+                continue
+            self._filled.append(row)
             decision = D.Decision(flat[row], setup[row], False, roads[ro[row]:ro[row+1]],
                                   discards[do[row]:do[row+1]])
             asked.append(NativeRequest(self._epoch, identity, observations[row], decision))
+            row += 1
         self._asked = tuple(asked)
         return self._asked
+
+    def _atomic_request(self, identity):
+        """An atomic row: the seat's legal actions as a Python lane lists
+        them (`options_for` for the seat to move, `legal_actions(game, seat)`
+        for another seat owing a discard) and a view of the lane."""
+        from ..actions import Stuck
+        from ..native.playout import NativeCopy
+        lane, seat = self.lanes[identity[1]], identity[2]
+        view = NativeCopy.viewing(lane.native, self.topology, lane.players, lane.metadata["locked"])
+        actions = view.legal() if seat == view.to_move() else view.legal(seat)
+        if not actions:
+            raise Stuck(f"no legal action for player {seat} in lane {identity[1]}")
+        return NativeRequest(self._epoch, identity, None, None, tuple(actions), view)
 
     def targets(self):
         """Referee recording labels; never part of any NativeRequest."""
         self.requests()
         if self._targets is None:
             labels = self._native.targets(self._epoch)
-            self._targets = NativeTargets(
-                np.frombuffer(labels["points"], np.int64).reshape(len(self._asked), self.space.num_players),
-                np.frombuffer(labels["turns"], np.int64))
+            whole = np.frombuffer(labels["points"], np.int64).reshape(-1, self.space.num_players)
+            turns = np.frombuffer(labels["turns"], np.int64)
+            if len(whole) == len(self._asked):
+                self._targets = NativeTargets(whole, turns)
+                return self._targets
+            whole, turns = iter(whole), iter(turns)
+            points, turned = [], []
+            for request in self._asked:
+                if request.view is None:
+                    points.append(next(whole))
+                    turned.append(next(turns))
+                else:
+                    core = self.lanes[request.lane].native.core
+                    points.append(np.asarray(core.privileged_true_points(), np.int64))
+                    turned.append(core.control()[8])
+            points = np.asarray(points, np.int64).reshape(len(self._asked), self.space.num_players)
+            turned = np.asarray(turned, np.int64)
+            points.flags.writeable = turned.flags.writeable = False
+            self._targets = NativeTargets(points, turned)
         return self._targets
 
     def _validate_answers(self, answers):
@@ -276,6 +334,11 @@ class NativeBatch:
         self._native.check(self._epoch)
         actions = []
         for request, answer in zip(asked, answers):
+            if request.view is not None:
+                if getattr(answer, "decision", None) is not None or answer.action not in request.actions:
+                    raise ValueError("answer is not one of the atomic row's legal actions")
+                actions.append(answer.action)
+                continue
             if answer.decision is None or len(answer.decision) != 2:
                 raise ValueError("answer must name its decision candidate")
             kind, at = map(integer, answer.decision)
@@ -330,7 +393,9 @@ class NativeBatch:
                         finished.append(completion if kept is None else kept)
                         break
                 if not done:
-                    if self._native.option_closes(row, request.seat, [int(action.type) for action in parts]):
+                    types = [int(action.type) for action in parts]
+                    if (self._native.lane_closes(request.lane, request.seat, types) if request.view is not None
+                            else self._native.option_closes(self._filled[row], request.seat, types)):
                         del lane.running[request.seat]
                     else:
                         lane.running[request.seat] = request.decision_id, request.part + 1

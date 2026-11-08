@@ -14,6 +14,7 @@
 #include "atomic_dispatch.hpp"
 #include "legal_core.hpp"
 #include "encoding.hpp"
+#include "encoding8.hpp"
 #include "request_core.hpp"
 using namespace hexset_native;
 namespace {
@@ -475,6 +476,8 @@ PyMethodDef methods[]={
  {"legal_actions",reinterpret_cast<PyCFunction>(core_legal_actions),METH_VARARGS,"Ordered native atomic legality; debug copy of reusable worker queries."},
  {"decision",reinterpret_cast<PyCFunction>(core_decision),METH_VARARGS,"Exact native flat/setup/road/discard decision arrays; debug copies."},
  {"encode9",reinterpret_cast<PyCFunction>(core_encode9),METH_VARARGS,"Persistent native visible9/9d rows; no Python feature or View callbacks."},
+ {"encode8",reinterpret_cast<PyCFunction>(core_encode8),METH_VARARGS,"Native contract-8/8.1 rows: hexes, vertices, edges and globals packed, as encoding.encode."},
+ {"record8",reinterpret_cast<PyCFunction>(core_record8),METH_VARARGS,"One position's information-set record (onnx_record), every field but the mask, as raw bytes."},
  {nullptr,nullptr,0,nullptr}
 };
 PyType_Slot slots[]={

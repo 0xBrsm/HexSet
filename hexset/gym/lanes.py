@@ -315,6 +315,7 @@ class LaneEnv:
         discard_order: str = "seat",
         decisions: Collection[int] = (),
         indices: Sequence[int] | None = None,
+        no_trade: Collection[int] = (),
     ) -> None:
         """`deal` bounds how many games are started; left `None` the
         environment refills forever, where an evaluation wants a fixed cohort
@@ -329,7 +330,10 @@ class LaneEnv:
         a bot's id cannot be one. `indices`, when given, deals exactly those
         games in that order and nothing else (a resumed cohort's missing
         games), each the same game it is under any other deal; `deal` and
-        `first_game` are then ignored.
+        `first_game` are then ignored. `no_trade` names policy ids whose
+        seats are out of player trading: each is under a trade embargo with
+        every other seat (`Game.embargoes`), as `hexset.arena.seat_bots`
+        closes an `Entrant.no_trade` seat.
         """
         if players < 2:
             raise ValueError("a game needs at least two seats")
@@ -363,6 +367,7 @@ class LaneEnv:
         self.stride = stride
         self.discard_order = discard_order
         self.decisions = frozenset(decisions)
+        self.no_trade = frozenset(no_trade)
         self._spaces: dict[tuple[int, ...], ActionSpace] = {}
         self.ticks = 0
         self.steps = 0
@@ -443,6 +448,10 @@ class LaneEnv:
         )
         bots = self._seat_bots(game, index, cast)
         game.gates = self._seat_gates(game, cast, bots)
+        closed = [seat for seat, pid in enumerate(cast) if pid in self.no_trade]
+        if closed:
+            game.embargoes = game.embargoes | frozenset(
+                (seat, other) for seat in closed for other in range(self.players) if other != seat)
         return _Lane(
             index=index,
             game=game,

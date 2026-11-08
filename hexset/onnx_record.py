@@ -319,6 +319,8 @@ def record_rows(
     place. Every game must share `space`'s topology and player count."""
     if not rows:
         raise ValueError("need at least one position")
+    if not all(isinstance(game, Game) for game, _, _ in rows):
+        return _native_rows(rows, space, indices)
     built = [
         _row(game, seat, space, options, None if indices is None else indices[i])
         for i, (game, seat, options) in enumerate(rows)
@@ -349,3 +351,38 @@ def record_batch(
     if not games_and_perspectives:
         raise ValueError("need at least one position")
     return record_rows([(game, seat, None) for game, seat in games_and_perspectives], space)
+
+
+def _native_rows(
+    rows: Sequence[tuple[Game, int | None, Sequence[Action] | None]],
+    space: ActionSpace,
+    indices: Sequence[Sequence[int]] | None,
+) -> dict[str, np.ndarray]:
+    """`record_rows` where some rows are native positions
+    (`hexset.native.playout.NativeCopy`), which state their own record
+    (`NativeCopy.record`), the same values; a `Game` row is
+    `record_from_game`'s."""
+    built = []
+    for i, (game, seat, options) in enumerate(rows):
+        if isinstance(game, Game):
+            record = record_from_game(game, seat, space, options)
+            if indices is not None:
+                record["action_mask"] = np.zeros(space.size, dtype=bool)
+                record["action_mask"][list(indices[i])] = True
+            built.append(record)
+            continue
+        if seat is None:
+            seat = game.to_move()
+        chosen = None if indices is None else indices[i]
+        if chosen is None:
+            if options is None:
+                options = game.legal(seat) or (NO_MOVE,)
+            chosen = [space.index(action) for action in options]
+        record = game.record(seat)
+        record["action_mask"] = np.zeros(space.size, dtype=bool)
+        record["action_mask"][list(chosen)] = True
+        built.append(record)
+    return {name: np.stack([np.asarray(record[name], dtype=bool if name == "action_mask" else
+                                       np.float32 if name in ("expected_hand", "dev_ages", "roll_odds")
+                                       else np.int64) for record in built])
+            for name in RECORD_FIELDS}

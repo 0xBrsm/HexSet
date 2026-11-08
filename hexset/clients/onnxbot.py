@@ -85,6 +85,12 @@ class V2Policy:
                     for item in session.get_inputs())
         )
 
+    #: What this graph reads from a position: the information-set record,
+    #: which a native position states too (`hexset.native.playout.NativeCopy.record`),
+    #: so a `hexset.gym.seats.PolicySeat` reading it plays on native lanes. A
+    #: playout copy is not held natively for it (`hexset.native.playout.copyable`).
+    native_contract = "record"
+
     def _run(
         self,
         rows: Sequence[tuple[Game, int, tuple[Action, ...]]],

@@ -6,8 +6,11 @@ Python copy as it stands, played on natively a move at a time. It stands in
 for that copy wherever a playout reads it -- whose move it is, the legal
 moves, applying one, the phase, turn count and winner -- and wherever a
 contract-9 policy states a seat's decision there: the observation
-(`observation`), the decision's tensors (`decision`) and the seat frame
-(`frame`). Each answers exactly what the Python engine answers for the same
+(`observation`, `observation8` for a contract-8 one, or the information-set
+`record` for an ONNX record graph), the decision's
+tensors (`decision`) and the seat frame (`frame`). `NativeCopy.viewing` is a
+read-only view of a native lane's own state, which a seat reads at the lane's
+position (`hexset.gym.native`). Each answers exactly what the Python engine answers for the same
 position: the same moves, the same tensors and the same observation bytes,
 drawing chance from a copy of the same streams.
 
@@ -41,6 +44,13 @@ _DUEL = ("9d", "9d.1", "11d")
 #: Set to "0" to keep every playout copy the Python engine's (module docstring).
 SWITCH = "HEXSET_NATIVE_PLAYOUTS"
 
+#: The record fields `record` reads as floats, and those with a row per seat
+#: or one number (`hexset.onnx_record`).
+_FLOAT_RECORD = frozenset({"expected_hand", "dev_ages", "roll_odds"})
+_RECORD_SHAPES = {**dict.fromkeys(("ledger_known", "reach", "expected_hand", "dev_ages"), "seats"),
+                  **dict.fromkeys(("robber", "longest_road_holder", "largest_army_holder", "phase", "free_roads",
+                                   "deck_size", "turns", "to_move", "perspective", "dev_card_played",
+                                   "winning_points", "discard_limit", "friendly_robber", "balanced_dice"), "scalar")}
 _PHASES = tuple(Phase)
 _TYPES = tuple(ActionType)
 _ACTIONS: dict[tuple[int, int, int], Action] = {}
@@ -94,6 +104,16 @@ class NativeCopy:
         self.dealt = game._state.num_players
         self.locked = game.locked
         self._read()
+
+    @classmethod
+    def viewing(cls, state: NativeState, topology, dealt: int, locked) -> "NativeCopy":
+        """A read-only view of a native lane's own state, not a copy: what a
+        policy reads at the lane's position (`hexset.gym.native`). It is
+        valid until the lane moves; never `apply` through it."""
+        view = cls()
+        view.state, view.topology, view.dealt, view.locked = state, topology, dealt, frozenset(locked)
+        view._read()
+        return view
 
     def fork(self) -> "NativeCopy":
         child = NativeCopy()
@@ -176,6 +196,24 @@ class NativeCopy:
     def observation(self, seat: int, contract: str) -> np.ndarray:
         """`contract9.flatten(contract9.encode9(game, seat, contract))`."""
         return np.frombuffer(self.state.core.encode9(seat, contract), dtype=np.float32)
+
+    def observation8(self, seat: int, contract: str = "8") -> np.ndarray:
+        """`seat`'s contract-8 (or 8.1) row: `hexset.encoding.encode`'s
+        hexes, vertices, edges and globals, flattened and packed in that
+        order (`hexset.encoding.encode_batch` splits it)."""
+        return np.frombuffer(self.state.core.encode8(seat, contract), dtype=np.float32)
+
+    def record(self, seat: int) -> dict[str, np.ndarray]:
+        """`seat`'s information-set record (`hexset.onnx_record`), every
+        field but `action_mask`, each with `record_from_game`'s dtype and
+        shape."""
+        players, raw = self.dealt, self.state.core.record8(seat)
+        out = {}
+        for name, data in raw.items():
+            value = np.frombuffer(data, dtype=np.float32 if name in _FLOAT_RECORD else np.int64).copy()
+            shape = _RECORD_SHAPES.get(name)
+            out[name] = value.reshape(players, -1) if shape == "seats" else value[0] if shape == "scalar" else value
+        return out
 
     def frame(self, seat: int, players: int) -> SeatFrame:
         """`hexset.encoding.seat_frame` at this table: every dealt seat when

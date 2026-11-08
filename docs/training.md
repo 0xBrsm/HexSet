@@ -113,7 +113,8 @@ casters.
 `hexset.gym.driver.Driver(env, seats, keep=...)` plays a `LaneEnv`'s games
 with the caller's seats answering their policy IDs. Each tick it collects one
 request per live lane, asks each seat's `choose_many(requests)` once for all
-of its rows, in lane order, and applies the answers. An answer is an object
+of its rows, in lane order, and applies the answers. One seat object may
+answer several policy IDs; it is asked once for all of their rows. An answer is an object
 with `action` (an action, or a `Compound` for a decision) and `decision`
 (the `(DecisionKind, index)` it chose, or `None` for an atomic answer). Bot
 seats are played inside the environment. Every finished game goes to
@@ -157,13 +158,71 @@ sharded. `Driver.targets()` holds the referee's labels for the tick's rows
 import each dealt game into the optional C++ core ([native.md](native.md))
 and refill from the same dealer in the same order, so a game is the same
 function of `(seed, index)` on either kind and keeps the same record. They
-need the native extension, a bounded deal, and every seat asked for whole
-decisions (`decisions=`) and reading one contract-9 observation natively
-(the seat's `native_contract`), with no bot, watcher or trade gate. `"auto"`
-takes them where that holds and the Python lanes otherwise, as in the
-example above, whose seat reads no observation. A native request carries no
-`Game`; `hexset.gym.driver.observations(requests, contract)` reads each
-row's observation from the native buffer or, on a Python lane, encodes it.
+need the native extension, a bounded deal, and no bot, watcher or trade
+gate. A seat asked for whole decisions (`decisions=`) must read one
+contract-9 observation natively (the seat's `native_contract`, the same for
+every such seat); a seat asked atomic moves must read native positions (its
+`native_atomic`, the contracts its policies read, each one of
+`hexset.gym.driver.NATIVE_READS`: 8, 8.1, the contract-9 ones, and
+"record", the information-set record an ONNX record graph reads). One seat
+object answers whole decisions or atomic moves, not both. `"auto"` takes
+native lanes where that holds and the Python lanes otherwise, as in the
+example above, whose seat reads no observation. A whole-decision request on
+a native lane carries no `Game`; `hexset.gym.driver.observations(requests,
+contract)` reads each row's observation from the native buffer or encodes
+it from the row's position. An atomic request on a native lane carries the
+same legal actions, in the same order, as on a Python lane, and as its
+`game` a read-only view of the lane's position
+(`hexset.native.playout.NativeCopy.viewing`), which a policy reads as it
+reads a `Game`; it is valid until the lane moves. Under
+`discard_order="random"` the seat drawn to discard keeps discarding until
+its quota is met, on either kind, so an atomic seat discards a card at a
+time as on a Python lane.
+
+### Policy seats and labels
+
+`hexset.gym.seats.PolicySeat(policies, plays, record=False)` is a driver seat
+for atomic requests, on Python lanes or native ones. Each tick it calls every policy in
+`policies` once (`score_rows`) over all of its rows that have more than one
+option; a row with one option is played without a forward. `plays` maps
+each policy ID it answers to a `Play`: the product of some of `policies`
+(`members`, a committee; one member is that policy alone) or a policy of its
+own (`policy`, read on that ID's rows only), at a `temperature`. At 0 it
+plays the option with the highest mean log prior over the members, as
+`hexset.clients.committee.Committee` does; above 0 it draws from the
+renormalised product raised to `1 / temperature`, reading only the request's
+`draw` key. With `record=True` each answer to a multi-option row carries a
+`Label`: the seat, the option played, and every policy's prior and
+per-seat values as float32. `Labels` is an `on_decision` hook that keeps a
+game's labels until `take(index)`, normally in `keep`.
+
+```python
+from hexset.gym.seats import Labels, Play, PolicySeat
+
+seat = PolicySeat([net_a, net_b, net_c], {0: Play(members=(0, 1, 2), temperature=0.5),
+                                          1: Play(members=(1,), temperature=0.5)}, record=True)
+labels = Labels()
+driver = Driver(env, {0: seat, 1: seat}, on_decision=labels,
+                keep=lambda episode: store(episode, labels.take(episode.index)))
+```
+
+`PolicySeat.native_atomic` is the set of contracts its policies read
+(each policy's `native_contract`), or None where a policy reads only a
+`Game` or the seat reads through a `scorer`; the driver plays the seat on
+native lanes only where it is set. There it plays the same games and records
+the same labels, bit for bit, as on Python lanes: each tick's rows are the
+same rows in the same order, and a native position encodes to the same bytes.
+
+`PolicySeat(..., scorer=fn)` reads every policy through `fn(rows)`, which
+returns one `score_rows` answer per policy in order: policies served by
+another process then cost one round trip a tick for all of them.
+`PolicySeat(..., batch=False)` asks each policy one row at a time. It plays
+the same games where the policies' forwards do not depend on their batch,
+and is the reference the batched seat is checked against.
+
+`LaneEnv(no_trade=ids)` puts every seat of those policy IDs under a trade
+embargo with every other seat, as the arena closes an `Entrant.no_trade`
+seat.
 
 ### Collector practice
 

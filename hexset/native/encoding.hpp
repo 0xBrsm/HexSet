@@ -49,6 +49,8 @@ inline Int public_pile_size(const ArenaState& state,Block block,int seat) {
 struct VisibleView {
     std::array<Counts,4> known{},room{};
     std::array<Int,4> sizes{},unknown{};
+    // Per seat, whether its upper bounds bind (`View.bounded`).
+    std::array<bool,4> bounded{};
     Counts pool{};
     explicit VisibleView(const ArenaState& state,int perspective) {
         state.knowledge.check_seat(perspective);
@@ -75,6 +77,7 @@ struct VisibleView {
                 if (total(room[seat])<hidden) bounded=false;
             }
             if (!bounded) room[seat].fill(hidden);
+            this->bounded[seat]=bounded;
         }
         const auto& bank=state.get(Block::bank);
         for (int r=0;r<5;++r) {

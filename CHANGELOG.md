@@ -5,6 +5,54 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.31.0
+
+### Added
+
+- **Atomic seats on native lanes.** The driver plays a seat asked one
+  atomic move at a time on native lanes where every policy it reads states
+  its contract (`PolicySeat.native_atomic`, contracts 8, 8.1 and the
+  contract-9 ones, `hexset.gym.driver.NATIVE_READS`). Its request holds the
+  legal actions in the Python lane's order and, as its `game`, a read-only
+  view of the lane (`hexset.native.playout.NativeCopy.viewing`). Atomic
+  seats and whole-decision seats share one native batch
+  (`NativeBatch(atomic=...)`), and the seat plays the same games and labels
+  as on Python lanes.
+
+- **Native contract-8 observations: `hexset.native.encode8`.** Contract 8
+  and 8.1 rows from the native state, byte for byte as `hexset.encoding`
+  writes them, the opponents' expected hands included
+  (`View.expected_counts`, exact in 128-bit integers).
+  `NativeCopy.observation8` reads one, and `hexset.encoding.encode_batch`
+  encodes a native position through it.
+
+- **Batched policy seats on the driver: `hexset.gym.seats`.** `PolicySeat`
+  answers atomic requests for several policy IDs from a fixed set of
+  policies, calling each policy's `score_rows` once a tick over every
+  multi-option row. A policy ID plays the product of some of the policies
+  (a committee, as `hexset.clients.committee.Committee` scores it) or a
+  policy of its own, at temperature 0 or sampled from the request's `draw`
+  key. With `record=True` each answer carries every policy's prior and
+  values (`Label`), and `Labels` keeps them per game from the driver's
+  `on_decision` hook. `batch=False` asks one row at a time, the reference
+  the batched seat is checked against.
+
+- **`PolicySeat(scorer=...)`.** A seat may read all of its policies through
+  one callable, `scorer(rows)`, which returns one `score_rows` answer per
+  policy, so policies served by another process cost one round trip a tick.
+
+- **`LaneEnv(no_trade=...)`.** The seats of the named policy IDs are under a
+  trade embargo with every other seat, as an `Entrant.no_trade` seat is in
+  the arena.
+
+### Changed
+
+- **One driver seat object answers all of its policy IDs in one call.**
+  `Driver` groups each tick's requests by the seat object answering them
+  rather than by policy ID, so a seat registered for several IDs gets one
+  `choose_many` with all their rows, in lane order. A seat answering one ID
+  is asked as before.
+
 ## 1.30.0
 
 ### Added

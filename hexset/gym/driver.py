@@ -3,8 +3,9 @@
 
 `Driver` plays the games a `hexset.gym.lanes.LaneEnv` deals. Each tick it
 collects one request per live lane, groups the requests whose seat a caller
-answers by policy id, asks each policy's `Seat` once for all of its rows, in
-lane order and in the order the seats were given, and applies the answers.
+answers by the `Seat` answering their policy id, asks each seat once for all
+of its rows (every policy id it answers), in lane order and in the order the
+seats were given, and applies the answers.
 Every finished game goes to `keep` before its lane is dealt again; a
 per-decision hook sees each answered decision after it was applied. Bot seats
 are played inside the environment, as `LaneEnv.step` plays them.
@@ -45,6 +46,11 @@ from ..victory import victory_points
 from .lanes import Episode, LaneEnv
 
 LANE_KINDS = ("python", "native", "auto")
+#: What a native lane's position states for an atomic seat's policies
+#: (`hexset.native.playout.NativeCopy`): observation contracts 8 and 8.1,
+#: every contract-9 one (a two-seat one at a table with two live seats), and
+#: the information-set record an ONNX record graph reads ("record").
+NATIVE_READS = ("8", "8.1", "record") + tuple(contract9.CONTRACTS)
 
 _MASK64 = (1 << 64) - 1
 _GOLDEN64 = 0x9E3779B97F4A7C15
@@ -155,7 +161,7 @@ def observations(requests: Sequence[Request], contract: str) -> list:
         return out
     if contract in contract9.CONTRACTS:
         for i in games:
-            out[i] = contract9.flatten(contract9.encode9(requests[i].game, requests[i].seat, contract))
+            out[i] = contract9.observation_row(requests[i].game, requests[i].seat, contract)
     else:
         encoded = encode_batch([requests[i].game for i in games], [requests[i].seat for i in games], contract)
         for i, observation in zip(games, encoded, strict=True):
@@ -213,9 +219,19 @@ class Driver:
 
     # --- choosing and starting lanes ----------------------------------------
 
+    def _atomic_ids(self) -> frozenset[int]:
+        """The policy ids asked one atomic move at a time: every seat's id the
+        environment does not ask for whole decisions."""
+        return frozenset(pid for pid in self.seats if pid not in self.env.decisions)
+
     def native_contract(self) -> str | None:
-        """The one contract every seat reads natively, or None."""
-        contracts = {getattr(seat, "native_contract", None) for seat in self.seats.values()}
+        """The one contract every whole-decision seat reads natively, or None.
+        With no whole-decision seat, contract 9: the native batch then packs
+        no whole-decision rows."""
+        whole = [seat for pid, seat in self.seats.items() if pid in self.env.decisions]
+        if not whole:
+            return contract9.CONTRACT
+        contracts = {getattr(seat, "native_contract", None) for seat in whole}
         return contracts.pop() if len(contracts) == 1 else None
 
     def _native_feasible(self) -> str | None:
@@ -227,11 +243,22 @@ class Driver:
         if not available():
             return "the native extension is unavailable"
         if contract not in contract9.CONTRACTS:
-            return "every seat must read one native contract"
+            return "every whole-decision seat must read one native contract"
         if env.bots or env.gates:
             return "a bot or a trade gate needs a Python game"
-        if not set(self.seats) <= env.decisions:
-            return "every seat must be asked for whole decisions"
+        atomic = self._atomic_ids()
+        for seat in {id(seat): seat for seat in self.seats.values()}.values():
+            ids = {pid for pid, held in self.seats.items() if held is seat}
+            if not ids & atomic:
+                continue
+            if not ids <= atomic:
+                return "a seat answers whole decisions and atomic moves both"
+            reads = getattr(seat, "native_atomic", None)
+            if reads is None:
+                return "an atomic seat must read native positions (`native_atomic`)"
+            for read in reads:
+                if read not in NATIVE_READS:
+                    return f"an atomic seat reads {read}, which a native position cannot state"
         if env._stop is None:
             return "native lanes play a bounded deal"
         return None
@@ -265,7 +292,7 @@ class Driver:
         self._batch = NativeBatch(lanes, space=self.space, pairs=self.pairs, contract=contract,
             planned_indices=planned, finished_indices=finished, keep=self._kept_native,
             on_decision=self._decided_native if self.on_decision is not None else None,
-            discard_order=env.discard_order)
+            discard_order=env.discard_order, atomic=self._atomic_ids())
 
     def _import(self, dealt):
         from .native import NativeLane
@@ -306,8 +333,12 @@ class Driver:
         out = []
         for row, r in enumerate(self._batch.requests()):
             ids = r.ids
-            request = Request(row, ids[1], ids[0], ids[2], ids[4], ids[3], ids[5], ids[6], seed,
-                              r.decision, (), None, (contract, r.observation))
+            if r.view is not None:
+                request = Request(row, ids[1], ids[0], ids[2], ids[4], ids[3], ids[5], ids[6], seed,
+                                  None, r.actions, r.view, None)
+            else:
+                request = Request(row, ids[1], ids[0], ids[2], ids[4], ids[3], ids[5], ids[6], seed,
+                                  r.decision, (), None, (contract, r.observation))
             self._by_ids[ids] = request
             out.append(request)
         return tuple(out)
@@ -327,22 +358,28 @@ class Driver:
         return self._targets
 
     def _answers(self, asked: Sequence[Request]) -> list:
-        """One `choose_many` per seat, in the order the seats were given,
-        reassembled in request order."""
-        shares: dict[int, list[int]] = {pid: [] for pid in self.seats}
+        """One `choose_many` per seat object, in the order the seats were
+        given, reassembled in request order: a seat answering several policy
+        ids gets all of their rows in one call, in lane order."""
+        by_seat: dict[int, object] = {}
+        shares: dict[int, list[int]] = {}
+        for seat in self.seats.values():
+            by_seat.setdefault(id(seat), seat)
+            shares.setdefault(id(seat), [])
         for i, request in enumerate(asked):
-            share = shares.get(request.policy)
-            if share is None:
+            seat = self.seats.get(request.policy)
+            if seat is None:
                 raise ValueError(f"lane {request.lane} seat {request.seat} is policy {request.policy}, "
                                  "which no seat answers")
-            share.append(i)
+            shares[id(seat)].append(i)
         out: list = [None] * len(asked)
-        for pid, share in shares.items():
+        for key, share in shares.items():
             if not share:
                 continue
-            answers = list(self.seats[pid].choose_many([asked[i] for i in share]))
+            answers = list(by_seat[key].choose_many([asked[i] for i in share]))
             if len(answers) != len(share):
-                raise ValueError(f"policy {pid} answered {len(answers)} of {len(share)} requests")
+                pids = sorted({asked[i].policy for i in share})
+                raise ValueError(f"policies {pids} answered {len(answers)} of {len(share)} requests")
             for i, answer in zip(share, answers):
                 out[i] = answer
         return out
@@ -424,5 +461,5 @@ class Driver:
         return self.env.games_started()
 
 
-__all__ = ["Answer", "Driver", "LANE_KINDS", "Request", "Seat", "Targets", "draw_key", "observations",
+__all__ = ["Answer", "Driver", "LANE_KINDS", "NATIVE_READS", "Request", "Seat", "Targets", "draw_key", "observations",
            "seat_points"]

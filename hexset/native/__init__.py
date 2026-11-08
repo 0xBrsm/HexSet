@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Optional native rules, legality and contract-9 observation state.
+"""Optional native rules, legality and contract-8 and contract-9 observation state.
 
 Importing this module succeeds without a compiler-built extension. Choose a
 backend before importing a lane; a native apply failure never falls back to
@@ -15,4 +15,12 @@ def encode9(state, perspective, contract="9"):
     return row
 
 
-__all__ = ["NativeState", "NativeUnavailable", "available", "supported", "encode9"]
+def encode8(state, perspective, contract="8"):
+    """An owned writable float32 contract-8 (or 8.1) row of the perspective's
+    facts: `hexset.encoding.encode`'s hexes, vertices, edges and globals,
+    flattened and packed in that order, the same bytes."""
+    import numpy as np
+    return np.frombuffer(state.core.encode8(perspective, contract), dtype=np.float32)
+
+
+__all__ = ["NativeState", "NativeUnavailable", "available", "supported", "encode8", "encode9"]

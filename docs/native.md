@@ -33,7 +33,14 @@ callbacks and their Recording events. `encode9(state, perspective, contract)`
 returns a fresh writable float32 observation for that perspective. Supported
 contracts are `9`, `9.1`, and the two-seat `9d`, `9d.1` and `11d`, each byte for byte
 as `hexset.contract9` encodes it; referee snapshots and true victory points
-are separate from visible observations.
+are separate from visible observations. `encode8(state, perspective,
+contract)` returns the contract-8 (or 8.1) observation, byte for byte as
+`hexset.encoding.encode` writes it: its hexes, vertices, edges and globals
+flattened and packed in that order. An opponent's expected hand is
+`hexset.view.View.expected_counts` exactly: where the seat's upper bounds
+bind, every split of its hidden cards is weighed by its hypergeometric
+chance in 128-bit integers and each mean is the correctly rounded quotient,
+as Python's integer division gives it.
 
 ## The driver
 
@@ -59,6 +66,12 @@ drawing chance from a copy of the same streams. A position the native engine
 refuses keeps its Python copy. `HEXSET_NATIVE_PLAYOUTS=0` in the environment
 keeps every copy a Python one, to compare the two engines on the same games.
 
+`NativeCopy.viewing(state, topology, dealt, locked)` is a read-only view of
+a native lane's own state rather than a copy: what an atomic seat on a
+native lane reads (`observation`, `observation8`, `tensors`, `frame`,
+`legal`). `hexset.encoding.encode_batch` encodes such a position through its
+`observation8`.
+
 Batched requests (below) count every dealt seat, so they take the two-seat
 contracts at a two-seat table only.
 
@@ -72,8 +85,11 @@ Trading gates, unresolved deals, hidden referee state and unsupported Chance
 implementations are refused before the native lane is created.
 
 `NativeBatch(lanes, *, space, pairs, contract, planned_indices, keep,
-on_decision=None, discard_order="seat", finished_indices=())` exposes one
-decision per active lane. `pairs` is the original topology's
+on_decision=None, discard_order="seat", finished_indices=(), atomic=())`
+exposes one decision per active lane. A seat whose policy is in `atomic` is
+asked one atomic move at a time: its request holds the legal `actions`
+(`options`) in `hexset.actions.legal_actions`' order and a `view` of the lane
+(`NativeCopy.viewing`), and no observation or decision tensors. `pairs` is the original topology's
 `contract9.incidences`; setup coordinates remain Python integers. The caller
 owns policy batching, sampling, draw keys, and when retired lanes are refilled.
 
@@ -86,7 +102,8 @@ later requests. Requests contain neither a `Game` nor private record targets.
 recording caller; these must never be supplied to a deciding seat.
 
 `advance(answers)` accepts one object with `action` and
-`decision=(DecisionKind, candidate_index)` for each request, in request order.
+`decision=(DecisionKind, candidate_index)` for each request, in request order;
+an atomic request's answer is one of its actions, with `decision` None.
 Every answer is validated before any lane changes. Compounds apply one atomic
 action at a time, with the action cap checked after each part. The optional
 `on_decision(request, answer)` callback runs once, after the decision's first

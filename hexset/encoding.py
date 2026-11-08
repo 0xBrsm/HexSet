@@ -669,13 +669,17 @@ def encode_batch(
     games: Sequence[Game], perspectives: Sequence[int], contract: str = "8"
 ) -> list[Observation]:
     """Encode a collector tick with one set of vector operations, pinned to the
-    plain single-position `encode` as its oracle."""
+    plain single-position `encode` as its oracle. A native position
+    (`hexset.native.playout.NativeCopy`) among `games` encodes itself, to the
+    same bytes, under contract 8 or 8.1; contract 6 takes `Game`s only."""
     if _contract(contract) == "6":
         return _encode_batch6(games, perspectives)
     if len(games) != len(perspectives):
         raise ValueError("one perspective is required per game")
     if not games:
         return []
+    if not all(isinstance(game, Game) for game in games):
+        return _encode_rows(games, perspectives, contract)
 
     states = [game._state for game in games]
     players = states[0].num_players
@@ -738,6 +742,33 @@ def encode_batch(
         Observation(hexes[i], vertices[i], edges[i], globals_[i], graph, packed, i)
         for i in range(batch)
     ]
+
+
+def _encode_rows(games: Sequence, perspectives: Sequence[int], contract: str) -> list[Observation]:
+    """`encode_batch` over rows some of which are native positions
+    (`hexset.native.playout.NativeCopy`), which encode themselves to the same
+    bytes (`observation8`): one packed row per position, split as
+    `encode_batch` splits its own."""
+    first = games[0]
+    topology = first._state.board.topology if isinstance(first, Game) else first.topology
+    players = first._state.num_players if isinstance(first, Game) else first.dealt
+    shapes = ((topology.num_hexes, HEX_FEATURES), (topology.num_vertices, vertex_features(players)),
+              (topology.num_edges, edge_features(players)), (global_features(players, contract),))
+    widths = [int(np.prod(shape)) for shape in shapes]
+    packed = np.empty((len(games), sum(widths)), dtype=np.float32)
+    for i, (game, p) in enumerate(zip(games, perspectives)):
+        if isinstance(game, Game):
+            o = encode(game, int(p), contract)
+            packed[i] = np.concatenate([o.hexes.ravel(), o.vertices.ravel(), o.edges.ravel(), o.globals])
+        else:
+            packed[i] = game.observation8(int(p), contract)
+    blocks, start = [], 0
+    for shape, width in zip(shapes, widths):
+        blocks.append(packed[:, start:start + width].reshape(len(games), *shape))
+        start += width
+    hexes, vertices, edges, globals_ = blocks
+    graph = static_graph(topology)
+    return [Observation(hexes[i], vertices[i], edges[i], globals_[i], graph, packed, i) for i in range(len(games))]
 
 
 def encode(game: Game, perspective: int | None = None, contract: str = "8") -> Observation:

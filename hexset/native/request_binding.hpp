@@ -128,6 +128,12 @@ PyObject* request_closes(NativeRequestBatch* self,PyObject* args) {
         return PyBool_FromLong(option_closes(request_lane(self,b.ids[row*7+1]),seat,integers(types)));
     } catch(...) {error();return nullptr;}
 }
+PyObject* request_lane_closes(NativeRequestBatch* self,PyObject* args) {
+    long long lane;int seat;PyObject* types;
+    if(!PyArg_ParseTuple(args,"LiO",&lane,&seat,&types)) return nullptr;
+    try {return PyBool_FromLong(option_closes(request_lane(self,lane),seat,integers(types)));}
+    catch(...) {error();return nullptr;}
+}
 PyObject* request_replace(NativeRequestBatch* self,PyObject* args) {
     long long lane;PyObject* core;
     if(!PyArg_ParseTuple(args,"LO",&lane,&core)) return nullptr;
@@ -155,6 +161,7 @@ PyMethodDef request_methods[]={
  {"actors",reinterpret_cast<PyCFunction>(request_actors),METH_NOARGS,"All presently acting seats; simultaneous discard seats retain ascending order."},
  {"actors_at",reinterpret_cast<PyCFunction>(request_actors_at),METH_O,"Presently acting seats for one lane, without scanning the batch."},
  {"option_closes",reinterpret_cast<PyCFunction>(request_closes),METH_VARARGS,"Native decision-run closure after successful atomic parts."},
+ {"lane_closes",reinterpret_cast<PyCFunction>(request_lane_closes),METH_VARARGS,"Decision-run closure at one lane after an atomic row's move."},
  {"replace",reinterpret_cast<PyCFunction>(request_replace),METH_VARARGS,"Replace a retired lane, preserving native request capacities and epoch."},
  {nullptr,nullptr,0,nullptr}
 };

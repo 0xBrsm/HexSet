@@ -306,6 +306,33 @@ def test_a_file_that_asks_for_a_robber_tip_spawns_a_bot_that_tips(checkpoint_v2,
     assert spawn(path, board, rng=random.Random(0)).robber_tip == 0.0
 
 
+def test_a_file_that_declares_a_hold_model_deals_its_worlds_by_it(checkpoint_v2, tmp_path):
+    """`hold_shape` and `hold_scale` in the file's metadata reach the loaded
+    checkpoint and every world the spawned seat samples, one forward (its
+    gate) and searched; a file without them deals the worlds alike."""
+    from hexset.clients.onnxbot import load, spawn
+    from hexset.clients.onnxmeta import with_metadata
+    from hexset.holding import HoldModel
+
+    path, board = checkpoint_v2
+    hold = HoldModel(shape=1.0, scale=(0.5, 1.0, 0.6, 0.6, 0.7))
+    for searched in (False, True):
+        named = tmp_path / f"held-{searched}.onnx"
+        named.write_bytes(with_metadata(
+            open(path, "rb").read(),
+            {**hold.meta(), **({"search": "mcts", "simulations": "8"} if searched else {})},
+        ))
+        assert load(str(named), board.topology).hold == hold
+        seat = spawn(str(named), board, rng=random.Random(0))
+        assert seat.hold == hold and (not searched or seat.gate.hold == hold)
+    assert load(path, board.topology).hold is None
+    assert spawn(path, board, rng=random.Random(0)).hold is None
+    broken = tmp_path / "half.onnx"
+    broken.write_bytes(with_metadata(open(path, "rb").read(), {"hold_shape": "1.0"}))
+    with pytest.raises(ValueError, match="hold_shape"):
+        load(str(broken), board.topology)
+
+
 def test_a_file_that_asks_for_a_calibration_reads_its_own_seat_through_it_in_every_gate(checkpoint_v2, tmp_path):
     """`own_calibration` in the file's metadata reaches the spawned seat's
     gate one forward, searched by MCTS and by rollouts, and an MCTS file's

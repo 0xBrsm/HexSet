@@ -23,12 +23,12 @@ from hexset.native.playout import NativeCopy
 from hexset.rollout import PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
-    closer_of, gate_config_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
+    closer_of, gate_config_of, hold_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
 )
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
-from hexset.view import View
+from hexset.view import HoldReading, View
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from hexset.board.board import Board
@@ -105,6 +105,10 @@ class NetworkBot(trading.DeclaredTrade):
     #: played from the policy's own plan), else a move from `score_rows`. The
     #: draws come from a stream of the seat's own, seeded off `rng`'s state.
     temperature: float = 0.0
+    #: How the gate's sampled worlds deal the other seats' held development
+    #: cards (`View.sample`): `bot_for` sets the hold model the checkpoint
+    #: declares (`hold_shape`, `hold_scale`); `None` deals them alike.
+    hold: HoldReading | None = None
     _seated: Game | None = field(default=None, repr=False, compare=False)
     _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
     _protocol: "TradeProtocol | None" = field(
@@ -364,7 +368,7 @@ class NetworkBot(trading.DeclaredTrade):
             certify=[(them, [max(0, n) for n in bundle]) for _, them, bundle in coverable],
         )
         rng = self._world_rng(view, seat)
-        sampled = certified.sample(rng)
+        sampled = certified.sample(rng, self.hold)
         # One world certifies every candidate at once, and a counterparty's
         # asks together can exceed its hand: value only what this world covers.
         coverable = [
@@ -814,6 +818,7 @@ def bot_for(
     trade: TradeParams | None = None,
     own_calibration: tuple[float, float] | None = None,
     temperature: float = 0.0,
+    hold: HoldReading | None = None,
 ) -> NetworkBot:
     """`checkpoint`, playing one position at a time; above `temperature` 0 it
     samples its moves (`NetworkBot.temperature`).
@@ -825,8 +830,11 @@ def bot_for(
     `trade` replaces what the checkpoint declares -- that is how a no-trade
     arm is built -- and `rng` seeds a `gate_plies > 0` checkpoint's sampled
     worlds. `own_calibration` reads the seat's own chance through
-    `hexset.mcts.calibrate_own` wherever the gate prices a trade."""
+    `hexset.mcts.calibrate_own` wherever the gate prices a trade. `hold`
+    replaces the hold model the checkpoint declares for the gate's sampled
+    worlds (`NetworkBot.hold`)."""
     trade = gate_config_of(checkpoint) if trade is None else trade
+    hold = hold_of(checkpoint) if hold is None else hold
     return NetworkBot(
         policy=checkpoint.policy,
         players=checkpoint.players,
@@ -835,6 +843,7 @@ def bot_for(
         own_calibration=own_calibration,
         robber_tip=robber_tip_of(checkpoint),
         temperature=temperature,
+        hold=hold,
     )
 
 
@@ -849,6 +858,7 @@ def searcher_for(
     trade: TradeParams | None = None,
     own_calibration: tuple[float, float] | None = None,
     decisive: float | None = None,
+    hold: HoldReading | None = None,
 ) -> GatedSearch:
     """`checkpoint` as a batched PUCT search, trading through its own value-head
     gate. `rng` seeds both the search and, derived from it, the gate's sampling
@@ -857,21 +867,27 @@ def searcher_for(
     `k` is how many determinizations of the seat's own belief each decision is
     searched in (`hexset.mcts.Search.worlds`); the tree is never rooted on the
     true state from here. `decisive` plays a root whose prior on one move
-    reaches it without searching (`hexset.mcts.Search`). A policy that
+    reaches it without searching (`hexset.mcts.Search`). The other
+    seats' held development cards are dealt in those worlds, and in the
+    gate's, by the hold model the checkpoint declares (`hold_shape`,
+    `hold_scale`; `hexset.holding.HoldModel`), else alike; `hold` replaces
+    it. A policy that
     declares no prior to score its leaves with (`has_prior` false) is refused
     here rather than at the first leaf."""
     if not getattr(checkpoint.policy, "has_prior", True):
         raise ValueError(f"{type(checkpoint.policy).__name__} declares no `prior`: it cannot be searched")
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
+    hold = hold_of(checkpoint) if hold is None else hold
     return GatedSearch(
         LeafEvaluator(
             policy=checkpoint.policy,
             pad_to=inference_batch,
         ),
-        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration),
+        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration, hold=hold),
         simulations=simulations,
         wave=wave,
         k=k,
+        hold=hold,
         rng=rng,
         own_calibration=own_calibration,
         decisive=decisive,
@@ -895,6 +911,7 @@ def rollouts_for(
     anchor: float = 1.0,
     det: bool = False,
     salt: int = 0,
+    hold: HoldReading | None = None,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
@@ -908,11 +925,15 @@ def rollouts_for(
     its `pool` must load the same pair. `mix` above 0 plays a mixed strategy
     over the searched candidates (`hexset.rollout.PairedRollouts.mix`), anchored
     to the prior raised to `anchor`. `det` seeds each searched decision
-    from what the seat can see and `salt` (`PairedRollouts.det`)."""
+    from what the seat can see and `salt` (`PairedRollouts.det`). The other
+    seats' held development cards are dealt in every world, the gate's too,
+    by the hold model the checkpoint declares, else alike; `hold` replaces
+    it (`searcher_for`)."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
+    hold = hold_of(checkpoint) if hold is None else hold
     return GatedRollouts(
         checkpoint.policy if opponents is None else opponents.playouts(checkpoint.policy),
-        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration),
+        bot_for(checkpoint, rng=gate_rng, trade=trade, own_calibration=own_calibration, hold=hold),
         worlds=worlds,
         top=top,
         decisive=decisive,
@@ -925,6 +946,7 @@ def rollouts_for(
         anchor=anchor,
         det=det,
         salt=salt,
+        hold=hold,
     )
 
 

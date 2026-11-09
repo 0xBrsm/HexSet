@@ -154,6 +154,7 @@ class Encoder:
 def _opponents():
     o = C.Opponents.__new__(C.Opponents)
     o.rng, o.policy, o.encoder, o.moves = random.Random(0), _policy_without_a_session(), Encoder(), 0
+    o.hold = None
     return o
 
 
@@ -191,3 +192,28 @@ def test_a_seat_watches_each_move_before_it_is_applied():
     action = next(a for a in legal_actions(game) if a.type is ActionType.ROLL)
     seat.play(mover, action, roll=8)
     assert before == [(Phase.ROLL, mover, 0)]
+
+
+def test_the_model_reads_moves_in_worlds_dealt_by_its_hold_model(monkeypatch):
+    """`Opponents.seen` samples its world with the hold model it was given
+    (the searching file's), `None` dealing every unseen card alike."""
+    from hexset.holding import HoldModel
+    from hexset.view import View
+
+    model = HoldModel(shape=1.0, scale=(0.5, 1.0, 0.6, 0.6, 0.7))
+    holds = []
+    sample = View.sample
+
+    def recording(self, rng, hold=None):
+        holds.append(hold)
+        return sample(self, rng, hold)
+
+    monkeypatch.setattr(View, "sample", recording)
+    game = after_setup()
+    game.phase, game.current_player = Phase.ROLL, 1
+    roll = next(a for a in legal_actions(game) if a.type is ActionType.ROLL)
+    for hold in (None, model):
+        o = _opponents()
+        o.hold = hold
+        o.seen(game, 1, roll, 0)
+    assert holds == [None, model]

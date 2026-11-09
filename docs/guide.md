@@ -295,8 +295,16 @@ information-set policy reads its `View` and samples worlds for search
 (`View.sample`, [worlds.md](worlds.md)). The engine reads no hidden card for
 it: `View.sample`, `hexset.bots.determinized.distinct_worlds` and
 `hexset.mcts.Search` deal every unseen development card alike unless the
-caller passes a `hexset.view.HoldReading`. An experiment that reads
-opponents' true cards is reported as such. The `# true state:` comments in
+caller passes a `hexset.view.HoldReading`. A checkpoint may declare one in
+its metadata: `hold_shape` and `hold_scale` give a `hexset.holding.HoldModel`,
+which deals each held card by how long its owner has kept it
+(`GameState.dev_ages`), and the network seats
+(`hexset.clients.netbot.bot_for`, `searcher_for`, `rollouts_for`) deal their
+worlds by it. The engine carries no parameters of its own for it. Every
+world keeps a seat's cards bought this turn unplayable this turn, and deals
+no seat the victory point cards its public points would already have won
+with (`hexset.view.vp_room`). An experiment that reads opponents' true
+cards is reported as such. The `# true state:` comments in
 the source mark every true-state read for review; behavioural invariance
 tests, which redeal hidden cards and compare answers, are what show a policy
 respects its information set.

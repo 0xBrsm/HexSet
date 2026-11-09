@@ -5,6 +5,51 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.33.0
+
+### Added
+
+- **A checkpoint can declare how other seats' development cards are kept:
+  `hexset.holding`.** `HoldModel(shape, scale)` reads another seat's held
+  card by how long its owner has kept it: a card of kind `k` is still
+  unplayed after `c` of its owner's turns with probability
+  `scale[k] ** (c ** shape)` (`HoldModel.kept`). It is a
+  `hexset.view.HoldReading`, so `View.sample(rng, model)` deals each held
+  card by kind in proportion to the unseen cards of the kind times that
+  chance. A checkpoint declares one with the metadata keys `hold_shape` and
+  `hold_scale` (`HoldModel.meta` writes them,
+  `hexset.clients._modelmeta.hold_config` reads them, and the loader keeps
+  the model as `hexset.clients.onnxbot.Loaded.hold`). One key without the other, or a value out of
+  range, fails the load. The engine carries no parameters of its own.
+
+### Changed
+
+- **Network seats deal their search worlds by the hold model their file
+  declares.** `hexset.clients.netbot.bot_for`, `searcher_for` and
+  `rollouts_for` pass the checkpoint's declared hold model to the worlds
+  their MCTS, paired rollouts and trade gate sample (`NetworkBot.hold`), and
+  `hexset.clients.conditioned.Opponents` takes `hold=` for the worlds it
+  reads opponents' moves in, which a rollout file passes its own model to.
+  A `hold=` argument replaces the declared model. A checkpoint that declares
+  none deals every unseen card alike, as before.
+
+### Fixed
+
+- **`View.sample` keeps two public facts about development cards.** A
+  card another seat bought this turn is dealt to its `new_dev_cards`,
+  unplayable this turn, where every held card was dealt matured. And no
+  seat is dealt the victory point cards its public points would already
+  have won with (`hexset.view.vp_room`: the winning points less one less
+  its public points). Without a `hold` reading the deal is the exact
+  conditional: a first deal within the bound stands, otherwise the victory
+  point cards are redrawn by their exact odds under it; with one, a seat at
+  its bound is dealt no further victory point card. A deal within both
+  bounds draws as before.
+
+- **`docs/onnx.md` lists the hold model keys.** The metadata table names
+  `hold_shape` and `hold_scale`, what each one sets and its default, and the
+  load refusals list one key without the other or either out of range.
+
 ## 1.32.0
 
 ### Added

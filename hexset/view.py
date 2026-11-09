@@ -11,6 +11,7 @@ observed state whose opponents' piles are hidden counts.
 
 from __future__ import annotations
 
+import itertools
 import math
 import random
 from functools import lru_cache
@@ -22,14 +23,17 @@ from .devcards import dev_count
 from .economy import hand_size
 from .game import Game
 from .ledger import PublicLedger
-from .state import BANK_PER_RESOURCE, GameState, HiddenRead, copy_state, is_hidden
+from .state import BANK_PER_RESOURCE, GameState, HiddenRead, copy_state, is_hidden, pile_size
+from .victory import public_victory_points
 
 
 class HoldReading(Protocol):
     """A caller's reading of what another seat's held development card is,
     for `View.sample`: how much more likely a card held `age` turns
     (`GameState.dev_ages`) is of kind `card`, before the unseen cards of each
-    kind are counted in. The engine has none of its own."""
+    kind are counted in. The engine has no reading of its own: a checkpoint
+    may declare one (`hexset.holding.HoldModel`, metadata `hold_shape` and
+    `hold_scale`), which the network seats pass (`hexset.clients.netbot`)."""
 
     def weight(self, card: int, age: int) -> float: ...
 
@@ -358,15 +362,30 @@ class View:
         return [k + s / total for k, s in zip(known, sums)]
 
     def sample(self, rng: random.Random, hold: HoldReading | None = None) -> GameState:
-        """One determinized world consistent with everything public: a concrete
-        `GameState` matching the real position's hand and card counts, hidden
-        cards dealt from the pool without replacement, opponents' card types
-        redrawn all matured. Every unseen development card is dealt alike,
-        unless the caller passes its own `hold` reading: then, where the ages
-        are known (`GameState.dev_ages`), each held card is dealt by kind in
+        """One determinized world consistent with everything this seat knows:
+        a concrete `GameState` matching the real position's hand and card
+        counts, hidden cards dealt from the pool without replacement. Raises
+        `ValueError` if the resource bounds admit no complete hidden deal.
+
+        Each other seat's development cards are dealt from the cards this
+        seat has not seen (`unseen_dev_cards`), and the deck takes the rest.
+        Every card is dealt alike unless the caller passes a `hold` reading
+        (a `hexset.holding.HoldModel`, for one): then, where the ages are
+        known (`GameState.dev_ages`), each held card is dealt by kind in
         proportion to the unseen cards of the kind times `hold.weight(kind,
-        age)`. Raises `ValueError` if the resource bounds admit no complete
-        hidden deal."""
+        age)`. Two public facts bound every deal:
+
+        - The cards a seat bought this turn (`new_dev_cards`, public by
+          count) stay unplayable this turn: they are the last of its cards
+          dealt, its youngest by age.
+        - No seat holds the victory point cards its public points would have
+          won with (`vp_room`): a win is announced at the start of a seat's
+          turn and after each of its actions, and the game is still on.
+          Without a `hold` reading the deal is the exact conditional: a
+          first deal that keeps within the bound stands, otherwise the
+          victory point cards are redrawn across the seats and the deck by
+          their exact odds under it (`_vp_bounded`). With one, a seat at its
+          bound is dealt no further victory point card."""
         state = copy_state(self.state)
         for seat, hidden in enumerate(self._deal(rng)):
             if seat == self.perspective:
@@ -378,52 +397,135 @@ class View:
 
         composition = self.unseen_dev_cards()
         others = [seat for seat in range(self.num_players) if seat != self.perspective]
+        counts = [dev_count(state, seat) for seat in others]
+        rooms = [vp_room(state, seat) for seat in others]
         ages = [state.dev_ages[seat] for seat in others]
-        if hold is not None and all(a is not None and len(a) == dev_count(state, seat)
-                                    for seat, a in zip(others, ages)):
+        dealt: list[list[int]] = []
+        if hold is not None and all(a is not None and len(a) == count
+                                    for a, count in zip(ages, counts)):
             # Each held card is dealt by the caller's reading of its age, from
-            # the cards still undealt.
+            # the cards still undealt, oldest first.
             left = list(composition)
-            for seat, seat_ages in zip(others, ages):
-                held = [0] * NUM_DEV_CARDS
+            for seat_ages, room in zip(ages, rooms):
+                cards: list[int] = []
+                vp = 0
                 for age in seat_ages:
                     weights = [n * hold.weight(card, age) for card, n in enumerate(left)]
+                    if room is not None and vp >= room:
+                        weights[DevCard.VICTORY_POINT] = 0.0
                     total = sum(weights)
                     if not total:
-                        held[DevCard.KNIGHT] += 1
+                        cards.append(int(DevCard.KNIGHT))
                         continue
                     pick, card = rng.random() * total, 0
                     while pick >= weights[card] and card < NUM_DEV_CARDS - 1:
                         pick -= weights[card]
                         card += 1
-                    held[card] += 1
+                    cards.append(card)
                     left[card] -= 1
-                state.dev_cards[seat] = held
-                state.new_dev_cards[seat] = [0] * NUM_DEV_CARDS
+                    vp += card == DevCard.VICTORY_POINT
+                dealt.append(cards)
             unseen = [c for c in range(NUM_DEV_CARDS) for _ in range(left[c])]
             rng.shuffle(unseen)
             cursor = 0
         else:
             unseen = [c for c in range(NUM_DEV_CARDS) for _ in range(composition[c])]
             rng.shuffle(unseen)
+            if _over_room(unseen, counts, rooms):
+                unseen = _vp_bounded(rng, composition, counts, rooms) or unseen
             cursor = 0
-            for seat in others:
-                count = dev_count(state, seat)
-                held = [0] * NUM_DEV_CARDS
-                for card in unseen[cursor : cursor + count]:
-                    held[card] += 1
-                dealt = min(count, max(0, len(unseen) - cursor))
-                held[DevCard.KNIGHT] += count - dealt
+            for count in counts:
+                cards = unseen[cursor : cursor + count]
+                cards.extend([int(DevCard.KNIGHT)] * (count - len(cards)))
                 cursor += count
-                state.dev_cards[seat] = held
-                state.new_dev_cards[seat] = [0] * NUM_DEV_CARDS
+                dealt.append(cards)
+        for seat, cards in zip(others, dealt):
+            # This turn's purchases are the seat's youngest cards, the last dealt.
+            split = len(cards) - min(len(cards), pile_size(self.state.new_dev_cards[seat]))
+            held = [0] * NUM_DEV_CARDS
+            fresh = [0] * NUM_DEV_CARDS
+            for card in cards[:split]:
+                held[card] += 1
+            for card in cards[split:]:
+                fresh[card] += 1
+            state.dev_cards[seat] = held
+            state.new_dev_cards[seat] = fresh
         deck = unseen[cursor : cursor + len(state.deck)]
         deck.extend([int(DevCard.KNIGHT)] * (len(state.deck) - len(deck)))
         state.deck = deck
         return state
 
 
-__all__ = ["View"]
+def vp_room(state: GameState, seat: int) -> int | None:
+    """The most victory point cards `seat` can hold with the game still on:
+    one short of the winning points less its public points, since a seat
+    whose cards reach the target wins at its next action or the start of its
+    next turn. `None` where its public points already reach the target,
+    which a seat can only gain off its own turn (a Longest Road passed to
+    it), so its cards are not bounded."""
+    room = state.rules.winning_points - 1 - public_victory_points(state, seat)
+    return room if room >= 0 else None
+
+
+def _over_room(unseen: Sequence[int], counts: Sequence[int], rooms: Sequence[int | None]) -> bool:
+    """Whether dealing `unseen` in order, `counts` cards a seat, gives any
+    seat more victory point cards than its room."""
+    cursor = 0
+    for count, room in zip(counts, rooms):
+        if room is not None:
+            vp = sum(1 for card in unseen[cursor : cursor + count] if card == DevCard.VICTORY_POINT)
+            if vp > room:
+                return True
+        cursor += count
+    return False
+
+
+def _vp_bounded(
+    rng: random.Random, composition: Sequence[int], counts: Sequence[int],
+    rooms: Sequence[int | None],
+) -> list[int] | None:
+    """The unseen cards in dealing order (`counts` cards a seat, then the
+    rest), drawn uniformly among the deals that keep every seat within its
+    victory point room: each split of the victory point cards across the
+    seats and the rest weighed by its number of placements, the other cards
+    shuffled into the slots left. `None` where the counts outnumber the
+    unseen cards or no split fits: the record is inconsistent."""
+    vp_total = composition[DevCard.VICTORY_POINT]
+    total = sum(composition)
+    rest = total - sum(counts)
+    if rest < 0:
+        return None
+    limits = [min(count, vp_total if room is None else room) for count, room in zip(counts, rooms)]
+    splits: list[tuple[int, ...]] = []
+    weights: list[int] = []
+    for split in itertools.product(*(range(limit + 1) for limit in limits)):
+        spare = vp_total - sum(split)
+        if spare < 0 or spare > rest:
+            continue
+        weight = math.comb(rest, spare)
+        for count, vp in zip(counts, split):
+            weight *= math.comb(count, vp)
+        splits.append(split)
+        weights.append(weight)
+    if not sum(weights):
+        return None
+    split = rng.choices(splits, weights)[0]
+    others = [c for c in range(NUM_DEV_CARDS) if c != DevCard.VICTORY_POINT for _ in range(composition[c])]
+    rng.shuffle(others)
+    out: list[int] = []
+    at = 0
+    for count, vp in zip(counts, split):
+        cards = [int(DevCard.VICTORY_POINT)] * vp + others[at : at + count - vp]
+        at += count - vp
+        rng.shuffle(cards)
+        out.extend(cards)
+    tail = others[at:] + [int(DevCard.VICTORY_POINT)] * (vp_total - sum(split))
+    rng.shuffle(tail)
+    out.extend(tail)
+    return out
+
+
+__all__ = ["View", "vp_room"]
 
 
 #: Whole deals `View.sample` draws for one that keeps every seat within its

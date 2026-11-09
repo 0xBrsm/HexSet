@@ -20,8 +20,10 @@ from hexset.board.board import random_base_board
 from hexset.clients.netbot import (
     bot_for,
     register_entrants,
+    rollouts_for,
     searcher_for,
 )
+from hexset.holding import HoldModel
 from hexset.game import Phase, run_trade_event, start, to_move
 from hexset.actions import options_for
 from hexset.trading import ENUMERATION_CARDS, UNLIMITED, TradeParams, valued_many
@@ -36,6 +38,8 @@ from journals import fresh
 # so no trade could clear both gates; rotating gives the seats tastes.
 WEIGHTS = (0.006, -0.011, 0.004, 0.013, -0.008)
 
+#: A hold model for the tests, its numbers illustrative.
+HOLD = HoldModel(shape=1.0, scale=(0.5, 1.0, 0.6, 0.6, 0.7))
 PLAYERS = 4
 
 
@@ -87,6 +91,8 @@ class StubCheckpoint:
     players: int = PLAYERS
     trade_floor: float = UNLIMITED.trade_floor
     gate_plies: int = UNLIMITED.gate_plies
+    # The hold model the file declares (`Loaded.hold`), `None` for none.
+    hold: HoldModel | None = None
     # A whole parameter set, for a checkpoint that asks to bargain by more
     # than a floor. `None` leaves the two loose attributes above to answer.
     trade_params: TradeParams | None = None
@@ -645,8 +651,8 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
 
     original_sample = View.sample
 
-    def fake_sample(self, rng):
-        sampled = original_sample(self, rng)
+    def fake_sample(self, rng, hold=None):
+        sampled = original_sample(self, rng, hold)
         sampled.hands[1] = [9, 9, 9, 9, 9]
         return sampled
 
@@ -717,8 +723,8 @@ def test_on_another_seats_turn_the_gate_reads_from_the_movers_frame(board, monke
 
     original_sample = View.sample
 
-    def fake_sample(self, rng):
-        sampled = original_sample(self, rng)
+    def fake_sample(self, rng, hold=None):
+        sampled = original_sample(self, rng, hold)
         sampled.hands[1] = [9, 9, 9, 9, 9]
         return sampled
 
@@ -872,7 +878,7 @@ def test_gate_own_frame_reads_off_turn_from_this_seats_frame(board, monkeypatch)
     space = stub_checkpoint(board).space
     captured = _captured_value_rows(monkeypatch)
 
-    def no_sample(self, rng):
+    def no_sample(self, rng, hold=None):
         raise AssertionError("an own-frame read samples no world")
 
     monkeypatch.setattr(View, "sample", no_sample)
@@ -1346,3 +1352,39 @@ def test_a_network_spec_names_its_temperature():
     for bad in ("network:/x/a.pt@0:temperature=0", "network:/x/a.pt:temperature=-1", "network:/x/a.pt:temperature=x"):
         with pytest.raises(ValueError):
             entrant_from_name(bad)
+
+
+def test_every_network_seat_deals_its_worlds_by_the_hold_model_it_declares(board):
+    """The searched worlds and the gate's deal each held development card by
+    the hold model the checkpoint declares (`hold_shape`, `hold_scale`); a
+    checkpoint that declares none deals them alike, and `hold=` replaces
+    either."""
+    plain = stub_checkpoint(board)
+    for seat in (searcher_for(plain, simulations=2, wave=2), rollouts_for(plain, worlds=2)):
+        assert seat.hold is None and seat.gate.hold is None
+    assert bot_for(plain).hold is None
+    declared = replace(plain, hold=HOLD)
+    for seat in (searcher_for(declared, simulations=2, wave=2), rollouts_for(declared, worlds=2)):
+        assert seat.hold is HOLD and seat.gate.hold is HOLD
+    assert bot_for(declared).hold is HOLD
+    other = HoldModel(shape=2.0, scale=(0.9,) * 5)
+    for seat in (searcher_for(declared, hold=other), rollouts_for(plain, worlds=2, hold=other)):
+        assert seat.hold is other and seat.gate.hold is other
+
+
+def test_a_rollout_world_is_the_view_sampled_by_the_declared_hold_model(board):
+    checkpoint = replace(stub_checkpoint(board), hold=HOLD)
+    game = start(board, PLAYERS, random.Random(3))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, options_for(game)[0])
+    state = game._state
+    for seat, card, age in ((1, 1, 9), (2, 0, 2), (3, 0, 6)):
+        state.deck.remove(card)
+        state.dev_cards[seat][card] += 1
+        state.dev_ages[seat].append(age)
+    seat = to_move(game)
+    rollouts = rollouts_for(checkpoint, worlds=2)
+    rollouts.rng = random.Random(5)
+    world = rollouts.world(game, seat)
+    sampled = game.state(seat).sample(random.Random(5), HOLD)
+    assert world.state(seat, hidden=False).dev_cards == sampled.dev_cards

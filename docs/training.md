@@ -605,7 +605,7 @@ table token. Each hex carries the chance its number is the next roll, and
 the table the seven's. `9d.1` appends each seat's production by resource
 (`seat_production`: the cards a roll yields it at the dice's long-run odds,
 a city twice, nothing from the robber's hex) and its bank rate by resource
-over 4. `11d` is two-seat too, with each fact where it belongs: my token
+over 4. `11d` is two-seat too, with the facts grouped by what they describe: my token
 (35 wide) holds the public seat columns 9d.1 reads plus my development
 cards, those I can play and the cards I have not seen; the opponent's
 token (27 wide) holds the same public columns plus its development cards

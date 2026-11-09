@@ -15,6 +15,7 @@ import math
 
 from dataclasses import dataclass
 
+from hexset.holding import HoldModel
 from hexset.trading import UNLIMITED, TradeParams
 
 # Bounded because a bot is spawned synchronously inside a request: an
@@ -204,6 +205,31 @@ def robber_tip_of(checkpoint: object) -> float:
     """The robber tip `checkpoint` declares, read by name like `trader_of`:
     a loader that carries none plays its robber moves untouched."""
     return float(getattr(checkpoint, "robber_tip", 0.0))
+
+
+def hold_config(meta: dict[str, str]) -> HoldModel | None:
+    """The hold model `meta` declares for the other seats' held development
+    cards (`hexset.holding.HoldModel`, written by `HoldModel.meta`):
+    `hold_shape`, a positive number, and `hold_scale`, one chance in (0, 1]
+    for each kind, comma separated. `None` when it declares neither, and its
+    search worlds deal every unseen card alike. One without the other, or a
+    value out of range, fails the load: a declared reading is never dropped
+    quietly."""
+    shape, scale = (meta.get("hold_shape") or "").strip(), (meta.get("hold_scale") or "").strip()
+    if not shape and not scale:
+        return None
+    if not shape or not scale:
+        raise ValueError("`hold_shape` and `hold_scale` declare one hold model: give both or neither")
+    try:
+        return HoldModel(shape=float(shape), scale=tuple(float(s) for s in scale.split(",")))
+    except ValueError as error:
+        raise ValueError(f"unreadable hold model ({shape!r}; {scale!r}): {error}") from None
+
+
+def hold_of(checkpoint: object) -> HoldModel | None:
+    """The hold model `checkpoint` declares, read by name like `trader_of`:
+    a loader that carries none deals its worlds' unseen cards alike."""
+    return getattr(checkpoint, "hold", None)
 
 
 def _opponents(policy: str | None, encoder: str | None) -> tuple[str, str] | None:

@@ -341,7 +341,9 @@ class PairedRollouts:
     change no game, so the moves played are the same with or without them.
 
     `hold` is a reading of other seats' held development cards for the world
-    samples (`View.sample`); without one every unseen card is dealt alike.
+    samples (`View.sample`), such as the `hexset.holding.HoldModel` a
+    checkpoint declares (`hexset.clients.netbot.rollouts_for` passes it);
+    without one every unseen card is dealt alike.
 
     `pool` (a `RolloutPool`) plays the worlds out in worker processes beside
     this one. The worlds and their seeds are still drawn here, in the same

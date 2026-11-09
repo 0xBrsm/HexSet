@@ -39,6 +39,7 @@ from hexset.board.topology import Topology
 from hexset.game import Game, imagine
 from hexset.onnx_record import RECORD_FIELDS, record_from_game, record_rows
 from hexset.server.constants import RECORD_CONTRACTS
+from hexset.view import HoldReading
 
 __all__ = ["ConditionedPolicy", "SeatEncoder", "Opponents", "SeatRouted", "session_for"]
 
@@ -210,11 +211,16 @@ class Opponents:
     makes, before it is applied (`hexset.bots.watch`). A move by another seat
     with more than one legal option feeds that seat's encoder, read in a world
     drawn from `viewer`'s own view (`hexset.game.imagine`), and replaces the
-    seat's condition. `playouts(own)` is the policy a rollout plays with."""
+    seat's condition. That world deals the other seats' held development
+    cards by `hold` (`View.sample`): the searching file passes the hold model
+    it declares; `None` deals them alike. `playouts(own)` is the policy a
+    rollout plays with."""
 
     def __init__(self, policy_path: str, encoder_path: str, topology: Topology, *,
-                 threads: int | None = 1, rng: random.Random | None = None) -> None:
+                 threads: int | None = 1, rng: random.Random | None = None,
+                 hold: HoldReading | None = None) -> None:
         self.rng = rng or random.Random()
+        self.hold = hold
         self.policy = ConditionedPolicy(policy_path, topology, threads=threads,
                                         rng=random.Random(self.rng.getrandbits(64)))
         self.encoder = SeatEncoder(encoder_path, topology, threads=threads)
@@ -227,7 +233,7 @@ class Opponents:
             return
         rng = random.Random(self.rng.getrandbits(64))
         try:
-            state = game.state(viewer).sample(rng)
+            state = game.state(viewer).sample(rng, self.hold)
         except ValueError:
             return                          # the record admits no deal here: nothing read
         world = imagine(game, rng, randomize_deck=False, seat=viewer)

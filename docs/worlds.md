@@ -15,7 +15,8 @@ does not need it.
 dealt alike. The fold beneath it, `distinct_worlds(belief, rng, draws,
 world_key, hold)`, returns `(share, state)` pairs and takes a
 `hexset.view.HoldReading` as `hold` for a caller with its own reading of held
-cards.
+cards, such as the `hexset.holding.HoldModel` a checkpoint declares, which
+deals each held card by its age.
 
 ## Model callbacks
 

@@ -71,6 +71,7 @@ engine's board indexing.
 | `committee` | Member files beside this one, joined by `+`, that vote with it ([committees](#committees)) | Absent: the file plays alone |
 | `closer` | A bot, named as a lineup names it, whose move is played in place of the checkpoint's wherever the closer has one (`hexset.arena.closed`, `hexset.bots.Closes`) | Absent or empty: none |
 | `robber_tip` | Under one forward per decision, how far a robber move leans towards the leader (the other seat with the highest value): the leader's best robber move by prior is played in place of the chosen one where its prior is at least this fraction of the chosen one's (`hexset.clients.netbot.tip_robber`) | `0.0`, off; held to `[0.0, 1.0]`; an unreadable value is off |
+| `hold_shape`, `hold_scale` | How other seats' held development cards are dealt in every world the seat samples (its search, its trade gate, its opponent model): a card of kind `k` is still unplayed after `c` of its owner's turns with probability `scale[k] ** (c ** shape)` (`hexset.holding.HoldModel`; `HoldModel.meta` writes both keys). `hold_scale` is one chance in (0, 1] per kind, comma separated, by `DevCard` | Absent: every unseen card is dealt alike. One key without the other, a shape that is not a positive number or a scale that is not one chance in (0, 1] per kind fails the load |
 
 Search keys are read only under the `search` that uses them, so a stale
 `simulations` does not turn a policy into a search.
@@ -130,6 +131,7 @@ raises there, naming the file; load the registering module with
   does, so the load fails rather than playing on a guess;
 - a `committee` that names a member not beside the file, or a member that
   declares a committee of its own;
+- a `hold_shape` without `hold_scale`, or the reverse, or either out of range;
 - a decision graph that declares an input HexSet does not supply, an input
   at a width HexSet does not supply it at, no per-row input, no `decision`
   or `value` output, or some but not all of the whole-option outputs;

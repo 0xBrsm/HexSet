@@ -432,7 +432,9 @@ class Search:
     `hidden=False` roots the tree on the true state instead -- the omniscient
     search, an analysis tool only. Nothing a bot seats may pass it. `hold` is
     a caller's reading of other seats' held development cards for those
-    samples (`View.sample`); without one every unseen card is dealt alike.
+    samples (`View.sample`), such as the `hexset.holding.HoldModel` a
+    checkpoint declares (`hexset.clients.netbot.searcher_for` passes it);
+    without one every unseen card is dealt alike.
 
     `exploration` is PUCT's c_puct; the values it trades against are the
     stance's reading of win chances: [0, 1] for `own`, [-1/(seats-1), 1] for

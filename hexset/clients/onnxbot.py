@@ -31,6 +31,7 @@ from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
 from hexset.clients.netbot import NetworkBot, bot_for, declared_closer, declared_trader, rollouts_for, searcher_for
 from hexset.game import Game
+from hexset.holding import HoldModel
 from hexset.lockstep import forward
 from hexset.mcts import Search
 from hexset.rollout import RolloutPool, SharedPools
@@ -42,8 +43,8 @@ from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
-    SearchConfig, closer_config, finish_decisions_config, gate_config, robber_tip_config, search_config, trader_config,
-    trader_veto_config, trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
+    SearchConfig, closer_config, finish_decisions_config, gate_config, hold_config, robber_tip_config,
+    search_config, trader_config, trader_veto_config, trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
 
@@ -481,6 +482,9 @@ class Loaded:
     trader_veto_pick: bool = False
     #: How far its robber moves lean towards the leader (`robber_tip`).
     robber_tip: float = 0.0
+    #: How the other seats' held development cards are dealt in its search
+    #: and gate worlds (`hold_shape`, `hold_scale`); `None` deals them alike.
+    hold: HoldModel | None = None
     #: The game types it plays (`modes`, `hexset.clients.onnxmeta.modes_of`).
     modes: tuple[str, ...] = (STANDARD_GAME.name,)
 
@@ -584,6 +588,7 @@ def _load_cached(
         trader_veto=trader_veto_config(meta),
         trader_veto_pick=trader_veto_pick_config(meta),
         robber_tip=robber_tip_config(meta),
+        hold=hold_config(meta),
         modes=modes_of(meta),
     )
 
@@ -791,7 +796,8 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None)
 
             files = _opponent_files(path, rollout.opponents)
             opponents = Opponents(*files, board.topology, threads=threads,
-                                  rng=random.Random() if rng is None else random.Random(rng.getrandbits(64)))
+                                  rng=random.Random() if rng is None else random.Random(rng.getrandbits(64)),
+                                  hold=loaded.hold)
             pool_load = partial(_pool_routed, path, files, board.topology, device)
         return rollouts_for(
             load(path, board.topology, device, threads),

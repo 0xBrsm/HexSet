@@ -312,13 +312,33 @@ class NativeState:
         # the oracle's root RNG, dice/steal generators or mutable event lists.
         self._rng, self._chance = _copy_streams(game.rng, game.chance)
 
-    def fork(self):
+    def fork(self, chance=None):
+        """An independent copy of this state. Without `chance` it owns copies
+        of this state's streams, the same as the original's at the fork. With
+        one, every random event it plays draws from `chance` instead (a
+        search that picks each outcome itself), and the original's streams
+        are not copied: the fork shares the root generator, which nothing
+        draws from directly, and only `restore_referee` reads (copying it)."""
         self._healthy()
         child = object.__new__(type(self))
         child.core = self.core.clone()
         child._failed = None
-        child._rng, child._chance = _copy_streams(self._rng, self._chance)
+        if chance is None:
+            child._rng, child._chance = _copy_streams(self._rng, self._chance)
+        else:
+            child._rng, child._chance = self._rng, chance
         return child
+
+    def shuffle_deck(self, rng):
+        """Shuffle the development deck in place by `rng.shuffle`, as
+        `hexset.game.imagine` shuffles a copied Python deck: `shuffle`'s
+        permutation depends only on the deck's length and `rng`, so the two
+        decks end in the same order. Referee-only, for a search's own world."""
+        self._healthy()
+        deck, flags = self.core.deck()
+        cards = list(zip(deck, flags))
+        rng.shuffle(cards)
+        self.core.set_deck([card for card, _ in cards], [flag for _, flag in cards])
 
     def restore_referee(self):
         rng, chance = copy.deepcopy((self._rng, self._chance))

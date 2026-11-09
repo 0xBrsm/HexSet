@@ -5,6 +5,16 @@ Leaves are collected in waves; virtual loss discourages duplicate descents.
 Nodes store per-seat value vectors and select with the mover's stance, or as
 one side against named seats (`Search.against`). Dice,
 steals and dev-card draws are sampled per simulation, not frozen at expansion.
+
+Where the evaluator's policy reads native positions (`native_contract` and
+`space`, as `hexset.clients.netbot.LeafEvaluator` states them) and the native
+engine holds the world (`hexset.native.playout.copyable`), every node of that
+world's tree holds a `hexset.native.playout.NativeCopy` instead of a Python
+`Game`. The search draws each roll and steal from its own stream exactly as
+the Python tree does and hands the outcome to the native copy, so the two
+trees make the same draws, read the same positions and choose the same moves.
+Before a development card's draw the native deck is shuffled from the same
+stream, as the Python tree shuffles its copied deck. Setting `HEXSET_NATIVE_PLAYOUTS=0` keeps every node a Python `Game`.
 """
 
 from __future__ import annotations
@@ -25,7 +35,9 @@ from .actions import (
     legal_actions,
     victim_of,
 )
-from .game import Game, imagine, is_over, roll_dice, roll_odds, to_move
+from .chance import Live
+from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, roll_odds, to_move
+from .native.playout import NativeCopy, copyable, held
 from .victory import public_victory_points
 from .view import HoldReading
 
@@ -127,6 +139,8 @@ def draws_hidden(game: Game, action: Action) -> bool:
         return False
     if action.type is ActionType.BUY_DEV_CARD:
         return True
+    if type(game) is NativeCopy:
+        return action.b < game.dealt
     return victim_of(game, action.b) is not None
 
 
@@ -159,18 +173,62 @@ def _drawn(before: Game, after: Game, action: Action) -> int:
     Read off the state because `apply` returns nothing: exactly one count goes
     up. `-1` is the no-draw outcome, from an emptied hand."""
     player = before.current_player
-    # true state: identifying which card was drawn needs the actual hand/
-    # dev-card delta, not an information-set estimate of it.
-    if action.type is ActionType.BUY_DEV_CARD:
-        was = before.state(player, hidden=False).new_dev_cards[player]
-        now = after.state(player, hidden=False).new_dev_cards[player]
-    else:
-        was = before.state(player, hidden=False).hands[player]
-        now = after.state(player, hidden=False).hands[player]
+    bought = action.type is ActionType.BUY_DEV_CARD
+    was, now = _own_cards(before, player, bought), _own_cards(after, player, bought)
     for index, (old, new) in enumerate(zip(was, now)):
         if new > old:
             return index
     return -1
+
+
+def _own_cards(game, player: int, bought: bool) -> tuple[int, ...]:
+    """`player`'s own resource hand, or with `bought` its development cards
+    bought this turn, from a Python `Game` or a native copy alike."""
+    if type(game) is NativeCopy:
+        facts = game.state.visible_card_facts(player)
+        return tuple(facts.own_new_dev if bought else facts.own_hand)
+    # true state: identifying which card was drawn needs the actual hand/
+    # dev-card delta, not an information-set estimate of it.
+    state = game.state(player, hidden=False)
+    return tuple(state.new_dev_cards[player] if bought else state.hands[player])
+
+
+class _Rolled:
+    """What a native tree position draws a roll from: the one roll the
+    search drew for this edge (`Search._roll`). It draws nothing else."""
+
+    __slots__ = ("total",)
+
+    def __init__(self, total: int) -> None:
+        self.total = total
+
+    def roll_by(self, seat: int | None) -> int:
+        return self.total
+
+    def steal(self, hand):
+        raise RuntimeError("a roll edge drew a steal")
+
+    def deck_order(self, deck):
+        raise RuntimeError("a roll edge drew a deck order")
+
+
+class _NoChance:
+    """What a native tree position plays a chance-free edge with: any draw is
+    an error, since the Python tree draws nothing there either."""
+
+    __slots__ = ()
+
+    def roll_by(self, seat):
+        raise RuntimeError("a chance-free edge drew a roll")
+
+    def steal(self, hand):
+        raise RuntimeError("a chance-free edge drew a steal")
+
+    def deck_order(self, deck):
+        raise RuntimeError("a chance-free edge drew a deck order")
+
+
+_NO_CHANCE = _NoChance()
 
 
 @dataclass
@@ -198,6 +256,10 @@ class Node:
     # remains the vector from this node mover's frame for existing consumers.
     # Appended to preserve the positional constructor of the public Node.
     observer_values: tuple[tuple[float, ...], ...] | None = None
+    # The balanced-dice deck at a native position (`game` a `NativeCopy`), as
+    # the Python tree reads it off `Game._state.dice`: what `Search._roll`
+    # draws by. `None` under independent dice and on every Python node.
+    dice: object = None
 
     @property
     def expanded(self) -> bool:
@@ -290,6 +352,8 @@ def live_seats(game: Game) -> int:
     and `lost_value` -1. Over the board's four seats, 0 would read a 25%
     win chance, below even, and every move the tree has not tried would
     start there."""
+    if type(game) is NativeCopy:
+        return game.dealt - len(game.locked)
     return game.num_players - len(game.locked)
 
 
@@ -477,23 +541,44 @@ class Search:
             out.append((share, world))
         return out
 
-    def _options(self, game: Game) -> tuple[Action, ...]:
+    def _options(self, game) -> tuple[Action, ...]:
         if is_over(game):
             return ()
+        if type(game) is NativeCopy:
+            return game.legal()
         return tuple(legal_actions(game))
 
-    def _node(self, game: Game) -> Node:
+    def _held(self, world: Game):
+        """`world` as this tree's root position: held natively where the
+        evaluator's policy reads native positions and the engine takes the
+        world (module docstring), else the `Game` itself."""
+        contract = getattr(self.evaluator, "native_contract", None)
+        space = getattr(self.evaluator, "space", None)
+        if contract is None or space is None or not copyable(world, contract, space):
+            return world
+        native = held(world)
+        return world if native is None else native
+
+    def _node(self, game, dice: object = None) -> Node:
         options = self._options(game)
+        native = type(game) is NativeCopy
+        if native:
+            mover = 0 if is_over(game) else game.to_move()
+            seats = game.dealt
+        else:
+            mover = 0 if is_over(game) else to_move(game)
+            # true state: `num_players` is a fixed board property.
+            seats = game.state(0, hidden=False).num_players
         node = Node(
             game=game,
-            mover=0 if is_over(game) else to_move(game),
+            mover=mover,
             options=options,
             children=[None] * len(options),
             visits=np.zeros(len(options)),
             virtual=np.zeros(len(options)),
-            # true state: `num_players` is a fixed board property.
-            totals=np.zeros((len(options), game.state(0, hidden=False).num_players)),
+            totals=np.zeros((len(options), seats)),
             ranked=np.zeros(len(options)),
+            dice=dice if native else None,
         )
         if node.terminal:
             node.value = tuple(float(v) for v in self.evaluator.terminal(game))
@@ -506,6 +591,8 @@ class Search:
         chance edge reads the outcome off it before it knows whether it already
         holds a node, and wrapping one costs a `legal_actions`."""
         action = node.options[index]
+        if type(node.game) is NativeCopy:
+            return self._advance_native(node.game, action, roll)
         # The encoder sees only deck size, never order, so the hidden-deck
         # randomisation is deferred until an edge actually draws a card.
         child = imagine(
@@ -519,8 +606,37 @@ class Search:
             apply(child, action)
         return child
 
+    def _advance_native(self, game: NativeCopy, action: Action, roll: int | None):
+        """`_advance` from a native position, drawing what the Python tree
+        draws from `self.rng`, in the same order: nothing on a chance-free
+        edge, the steal off `Live(self.rng)` (what `imagine` gives a copy) on
+        a robber edge that robs someone, the given `roll` on a roll edge, and
+        on a development card's purchase the deck's shuffle, from `self.rng`
+        as `imagine` shuffles a Python copy's before the draw."""
+        if action.type is ActionType.BUY_DEV_CARD:
+            child = game.fork(_NO_CHANCE)
+            child.shuffle_deck(self.rng)
+            child.apply(action)
+            return child
+        if action.type is ActionType.ROLL:
+            chance = _Rolled(roll)
+        elif draws_hidden(game, action):
+            chance = Live(self.rng)
+        else:
+            chance = _NO_CHANCE
+        child = game.fork(chance)
+        child.apply(action)
+        return child
+
+    def _dice_after(self, node: Node, index: int, roll: int | None) -> object:
+        """The balanced-dice deck one edge on from a native node: rolled on a
+        roll edge, as `roll_dice` rolls `Game._state.dice`; unchanged else."""
+        if node.dice is None or node.options[index].type is not ActionType.ROLL:
+            return node.dice
+        return node.dice.rolled(node.game.current_player, roll)
+
     def _step(self, node: Node, index: int, roll: int | None) -> Node:
-        return self._node(self._advance(node, index, roll))
+        return self._node(self._advance(node, index, roll), self._dice_after(node, index, roll))
 
     def _draws_hidden(self, game: Game, action: Action) -> bool:
         """See `draws_hidden`."""
@@ -538,7 +654,7 @@ class Search:
         held = slot.outcomes.get(outcome)
         if held is not None:
             return held
-        fresh = self._node(child)
+        fresh = self._node(child, node.dice)
         slot.outcomes[outcome] = fresh
         return fresh
 
@@ -613,7 +729,7 @@ class Search:
                     slot = _Chance()
                     node.children[index] = slot
                 assert isinstance(slot, _Chance)
-                roll = self._roll(node.game)
+                roll = self._roll(node)
                 child = slot.outcomes.get(roll)
                 if child is None:
                     child = self._step(node, index, roll)
@@ -633,9 +749,14 @@ class Search:
                 node = slot
         return path, node
 
-    def _roll(self, game: Game) -> int:
-        """A roll for the seat on turn, at the position's odds (`roll_odds`)."""
-        odds = roll_odds(game)
+    def _roll(self, node: Node) -> int:
+        """A roll for the seat on turn, at the position's odds (`roll_odds`;
+        at a native node, its tracked dice deck's)."""
+        game = node.game
+        if type(game) is NativeCopy:
+            odds = ROLL_ODDS if node.dice is None else node.dice.odds(game.current_player)
+        else:
+            odds = roll_odds(game)
         draw = self.rng.random()
         cumulative = 0.0
         for roll, weight in odds:
@@ -807,7 +928,8 @@ class Search:
         runs: list[_Run] = []
         for game in games:
             group = [
-                _Run(self._node(world), budget=self.simulations, share=share)
+                # true state: the balanced-dice deck is public.
+                _Run(self._node(self._held(world), world._state.dice), budget=self.simulations, share=share)
                 for share, world in self.worlds(game)
             ]
             groups.append(group)

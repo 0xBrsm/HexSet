@@ -518,6 +518,37 @@ def test_leaf_evaluator_scores_the_mover_and_batches_other_observers(players):
         )
 
 
+def test_leaf_evaluator_reads_no_retired_seat_at_a_duel_table():
+    """A duel dealt four with two retired: only the other live seat is read in
+    its own frame, and each retired seat's row is the mover's."""
+    game = a_duel()
+    seat = next(s for s in range(4) if s not in game.locked)
+    other = next(s for s in range(4) if s not in game.locked and s != seat)
+
+    class Policy:
+        def __init__(self):
+            self.observed = []
+
+        def score_rows(self, rows):
+            return [(np.asarray([1.0]), tuple(float(s == i) for i in range(4))) for _, s, _ in rows]
+
+        def value_rows(self, rows):
+            for _, observer in rows:
+                if observer in game.locked:
+                    raise ValueError("a seat frame needs its counted seats live")
+            self.observed.extend(rows)
+            return [tuple(float(observer == s) for s in range(4)) for _, observer in rows]
+
+    policy = Policy()
+    (result,) = LeafEvaluator(policy).evaluate([Leaf(game, seat, (Action(ActionType.END_TURN),))])
+
+    assert [observer for _, observer in policy.observed] == [other]
+    assert result.observer_values[seat] == result.value
+    assert result.observer_values[other] == tuple(float(other == s) for s in range(4))
+    for retired in game.locked:
+        assert result.observer_values[retired] == result.value
+
+
 def test_root_private_dev_identity_changes_its_value_not_opponent_prior():
     game = a_game()
     altered = copy.deepcopy(game)

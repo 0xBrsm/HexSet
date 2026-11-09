@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -404,6 +405,32 @@ PyObject* core_apply_cards(Core* self,PyObject* args) {
 PyObject* core_control(Core* self,PyObject*) {
     try {return tuple(checked(self).get(Block::game_control));} catch (...) {error();return nullptr;}
 }
+// Referee-only: a search's own sampled world reorders its development deck
+// (`NativeState.shuffle_deck`); the order is never a policy input.
+PyObject* core_deck(Core* self,PyObject*) {
+    try {
+        const auto& state=checked(self);
+        Object deck(tuple(state.get(Block::deck))); if (!deck.value) return nullptr;
+        Object flags(tuple(state.get(Block::deck_enum))); if (!flags.value) return nullptr;
+        return PyTuple_Pack(2,deck.value,flags.value);
+    } catch (...) {error();return nullptr;}
+}
+PyObject* core_set_deck(Core* self,PyObject* args) {
+    PyObject *deck_object,*flag_object;
+    if (!PyArg_ParseTuple(args,"OO",&deck_object,&flag_object)) return nullptr;
+    try {
+        auto deck=integers(deck_object); auto flags=integers(flag_object);
+        auto& state=checked(self);
+        auto& held=state.get(Block::deck); auto& held_flags=state.get(Block::deck_enum);
+        ensure(deck.size()==held.size() && flags.size()==held.size(),"a deck order keeps the deck's size");
+        std::vector<std::pair<Int,Int>> was, now;
+        for (std::size_t i=0;i<held.size();++i) {was.push_back({held[i],held_flags[i]});now.push_back({deck[i],flags[i]});}
+        std::sort(was.begin(),was.end()); std::sort(now.begin(),now.end());
+        ensure(was==now,"a deck order holds the deck's own cards");
+        held=std::move(deck); held_flags=std::move(flags);
+        Py_RETURN_NONE;
+    } catch (...) {error();return nullptr;}
+}
 PyObject* core_phase(Core* self,PyObject*) {
     try {return PyLong_FromLongLong(checked(self).get(Block::game_control)[PhaseColumn]);}
     catch (...) {error();return nullptr;}
@@ -470,6 +497,8 @@ PyMethodDef methods[]={
  {"apply_placement",reinterpret_cast<PyCFunction>(core_apply_placement),METH_VARARGS,"Setup and build placement entry point."},
  {"apply_cards",reinterpret_cast<PyCFunction>(core_apply_cards),METH_VARARGS,"Complete native concrete-deck buy/knight/roadbuilding/monopoly/plenty actions."},
  {"control",reinterpret_cast<PyCFunction>(core_control),METH_NOARGS,"Small control tuple only; contains no private hands, cards or referee labels."},
+ {"deck",reinterpret_cast<PyCFunction>(core_deck),METH_NOARGS,"Referee-only development deck order and card flags."},
+ {"set_deck",reinterpret_cast<PyCFunction>(core_set_deck),METH_VARARGS,"Referee-only reorder of the development deck; the same cards."},
  {"phase",reinterpret_cast<PyCFunction>(core_phase),METH_NOARGS,"Current public phase, without constructing the full control tuple."},
  {"apply_atomic",reinterpret_cast<PyCFunction>(core_apply_atomic),METH_VARARGS,"One native dispatcher for all15 atomic no-trade actions; no Game reconstruction."},
  {"apply_chance",reinterpret_cast<PyCFunction>(core_apply_chance),METH_VARARGS,"Complete native roll, robber and discard with one original Chance callback per draw."},

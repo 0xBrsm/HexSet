@@ -115,12 +115,20 @@ class NativeCopy:
         view._read()
         return view
 
-    def fork(self) -> "NativeCopy":
+    def fork(self, chance=None) -> "NativeCopy":
+        """An independent copy. `chance`, where given, is what its random
+        events draw from (`NativeState.fork`); otherwise copies of this
+        copy's streams."""
         child = NativeCopy()
-        child.state = self.state.fork()
+        child.state = self.state.fork(chance)
         child.topology, child.dealt, child.locked = self.topology, self.dealt, self.locked
         child._control, child._legal = self._control, self._legal
         return child
+
+    def shuffle_deck(self, rng) -> None:
+        """The development deck shuffled by `rng`, as `hexset.game.imagine`
+        shuffles a Python copy's (`NativeState.shuffle_deck`)."""
+        self.state.shuffle_deck(rng)
 
     def _read(self) -> None:
         self._control = self.state.core.control()

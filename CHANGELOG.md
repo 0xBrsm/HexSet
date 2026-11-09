@@ -5,6 +5,24 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.32.0
+
+### Added
+
+- **Native MCTS trees.** `hexset.mcts.Search` holds a world's tree in the
+  native engine (`hexset.native.playout.NativeCopy`) where the evaluator's
+  policy reads native positions and states its `native_contract` and
+  `space`, as `hexset.clients.netbot.LeafEvaluator` now does. The search
+  draws each roll and steal from its own stream and hands the outcome to
+  the native copy (`NativeCopy.fork(chance)`), and shuffles the native
+  deck from the same stream before a development card's draw
+  (`NativeCopy.shuffle_deck`), so a native tree makes the same draws,
+  visits and choices as the Python tree on the same seed, including at a
+  duel dealt four seats with two retired: `LeafEvaluator` reads no retired
+  seat's value in its own frame, and gives that seat's row the mover's,
+  since a retired seat never moves. `HEXSET_NATIVE_PLAYOUTS=0` keeps every
+  node a Python `Game`.
+
 ## 1.31.0
 
 ### Added

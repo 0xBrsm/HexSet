@@ -19,6 +19,7 @@ from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Evaluation, Search, calibrate_own
+from hexset.native.playout import NativeCopy
 from hexset.rollout import PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
@@ -598,6 +599,18 @@ class LeafEvaluator:
         if self.pad_to is not None and self.pad_to < 1:
             raise ValueError("pad_to must be positive")
 
+    @property
+    def native_contract(self) -> str | None:
+        """The contract the policy reads native positions in, or `None`: what
+        `hexset.mcts.Search` holds its tree natively for."""
+        return getattr(self.policy, "native_contract", None)
+
+    @property
+    def space(self):
+        """The policy's action space, which `hexset.native.playout.copyable`
+        checks a native tree against."""
+        return getattr(self.policy, "space", None)
+
     def evaluate(self, leaves):
         if not leaves:
             return []
@@ -613,7 +626,10 @@ class LeafEvaluator:
         # Keep the leaf mover's prior (and value) in its own frame. The value
         # head's other components are evaluated separately in each observer's
         # frame so a root's private cards are not erased on its own path, and
-        # are not exposed to another mover's prior or value.
+        # are not exposed to another mover's prior or value. A retired seat
+        # (`game.locked`) never moves, so the search never reads its row: it
+        # takes the mover's row and is not encoded, since a seat frame needs
+        # its perspective among the live seats.
         observer_rows = []
         observer_slots = []
         values_by_observer = []
@@ -627,6 +643,9 @@ class LeafEvaluator:
             values_by_observer.append(row)
             for observer in range(len(value)):
                 if observer == leaf.seat:
+                    continue
+                if observer in leaf.game.locked:
+                    row[observer] = value
                     continue
                 observer_rows.append((leaf.game, observer))
                 observer_slots.append((i, observer))
@@ -659,8 +678,11 @@ class LeafEvaluator:
         has not finished."""
         if not is_over(game):
             raise ValueError("terminal() called on a game that has not finished")
-        # true state: `num_players` is a fixed, public board property.
-        players = game.state(0, hidden=False).num_players
+        if type(game) is NativeCopy:
+            players = game.dealt
+        else:
+            # true state: `num_players` is a fixed, public board property.
+            players = game.state(0, hidden=False).num_players
         winner = game.won_by
         return tuple(1.0 if seat == winner else 0.0 for seat in range(players))
 

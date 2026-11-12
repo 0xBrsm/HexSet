@@ -43,7 +43,8 @@ from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
-    SearchConfig, closer_config, finish_decisions_config, gate_config, hold_config, robber_tip_config,
+    SearchConfig, closer_config, finish_decisions_config, gate_config, hold_config, robber_hits_config,
+    robber_tip_config,
     search_config, trader_config, trader_veto_config, trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
@@ -306,6 +307,9 @@ class DecisionPolicy:
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
         """`value`, turned to board-seat order (`hexset.encoding.SeatFrame.to_board`)."""
+        return _in_runs(self._value_run, rows)
+
+    def _value_run(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
         if not rows:
             return []
         value = self._run(self._feed(rows, [None] * len(rows)), ["value"])["value"]
@@ -313,10 +317,10 @@ class DecisionPolicy:
 
     def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
         """One move per row: the plan's next, or the first of the decision
-        the graph chooses. Every row that will ask the graph is asked in one
-        batch first; the rows are then played in order as one at a time
-        would play them, so a row whose plan is dropped part-way (`Plans`'s
-        limit) asks the graph on its own."""
+        the graph chooses. Every row that will ask the graph is asked first,
+        in runs of at most `MAX_ROWS`; the rows are then played in order as
+        one at a time would play them, so a row whose plan is dropped
+        part-way (`Plans`'s limit) asks the graph on its own."""
         ask = [i for i, (game, seat, options) in enumerate(rows)
                if len(options) > 1 and not self._plans.planned(game, seat, options)]
         chosen = dict(zip(ask, self._choose_many([rows[i][:2] for i in ask])))
@@ -335,7 +339,10 @@ class DecisionPolicy:
         return self._choose(game, seat)
 
     def _choose_many(self, rows: Sequence[tuple[Game, int]]) -> list["D.Option"]:
-        """The graph's decision at each row, in one forward."""
+        """The graph's decision at each row, `MAX_ROWS` rows to a forward."""
+        return _in_runs(self._choose_run, rows)
+
+    def _choose_run(self, rows: Sequence[tuple[Game, int]]) -> list["D.Option"]:
         if not rows:
             return []
         decisions = [self._decision(game, seat) for game, seat in rows]
@@ -355,12 +362,15 @@ class DecisionPolicy:
 
     def option_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[tuple["D.Option", ...], np.ndarray]]:
         """Every whole option of each row's decision with its probability, as
-        the graph answers them (`hexset.decisions.listed`), in one forward: in
+        the graph answers them (`hexset.decisions.listed`), `MAX_ROWS` to a forward: in
         block order (flat actions by index, the setup or double turn, Road
         Building, the discard). A position inside a decision lists its legal
         moves. Raises for a graph that answers no whole options."""
         if not self.has_options:
             raise ValueError("this graph answers no whole options (`hexset.decisions.OPTION_OUTPUTS`)")
+        return _in_runs(self._option_run, rows)
+
+    def _option_run(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[tuple["D.Option", ...], np.ndarray]]:
         if not rows:
             return []
         decisions = [self._decision(game, seat) for game, seat in rows]
@@ -388,6 +398,11 @@ class DecisionPolicy:
         declares no `prior`."""
         if not self.has_prior:
             raise ValueError("this graph declares no `prior`: it cannot score search leaves")
+        return _in_runs(self._score_run, rows)
+
+    def _score_run(
+        self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
+    ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
         if not rows:
             return []
         decisions = [self._decision(game, seat) for game, seat, _ in rows]
@@ -401,6 +416,25 @@ class DecisionPolicy:
             prior = weights / total if total > 0 else np.full(len(index), 1.0 / len(index))
             out.append((prior, frame.to_board(got["value"][i])))
         return out
+
+
+#: The most rows one forward of a decision graph is asked (`DecisionPolicy`).
+#: On one CPU thread a decision costs least at batches of 16 to 32 rows and
+#: about a third more at 384, a search's step batch at its widest; the
+#: contract-9 graphs measured gave every row bit-identical outputs at batches
+#: from 16 to 384 rows, so the runs answer what one forward would.
+MAX_ROWS = 32
+
+
+def _in_runs(run, rows):
+    """`run` over `rows` in consecutive runs of near-equal size, none over
+    `MAX_ROWS` (so none under half of it once there are more), the answers in
+    row order."""
+    if len(rows) <= MAX_ROWS:
+        return run(rows)
+    runs = -(-len(rows) // MAX_ROWS)
+    bounds = [len(rows) * k // runs for k in range(runs + 1)]
+    return [answer for lo, hi in zip(bounds, bounds[1:]) for answer in run(rows[lo:hi])]
 
 
 def _option_outputs(answered: set[str], double: bool) -> tuple[str, ...]:
@@ -482,6 +516,8 @@ class Loaded:
     trader_veto_pick: bool = False
     #: How far its robber moves lean towards the leader (`robber_tip`).
     robber_tip: float = 0.0
+    #: Whether its robber moves always hit another seat where one can be hit (`robber_hits`).
+    robber_hits: bool = False
     #: How the other seats' held development cards are dealt in its search
     #: and gate worlds (`hold_shape`, `hold_scale`); `None` deals them alike.
     hold: HoldModel | None = None
@@ -588,6 +624,7 @@ def _load_cached(
         trader_veto=trader_veto_config(meta),
         trader_veto_pick=trader_veto_pick_config(meta),
         robber_tip=robber_tip_config(meta),
+        robber_hits=robber_hits_config(meta),
         hold=hold_config(meta),
         modes=modes_of(meta),
     )
@@ -815,6 +852,10 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None)
             anchor=rollout.anchor,
             det=rollout.det,
             salt=rollout.salt,
+            margin=rollout.margin,
+            stop=rollout.stop,
+            moves=rollout.moves,
+            tie=rollout.tie,
         )
     return searcher(
         path,

@@ -15,16 +15,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hexset.actions import Action, ActionType, apply
+import numpy as np
+
+from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Evaluation, Search, calibrate_own
 from hexset.native.playout import NativeCopy
-from hexset.rollout import PairedRollouts, RolloutPool
+from hexset.rollout import TIE, PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
-    closer_of, gate_config_of, hold_of, robber_tip_of, trader_of, trader_veto_of, trader_veto_pick_of,
+    closer_of, gate_config_of, hold_of, robber_hits_of, robber_tip_of, trader_of, trader_veto_of,
+    trader_veto_pick_of,
 )
+from hexset.robber import occupants
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
@@ -41,6 +45,7 @@ __all__ = [
     "bot_for",
     "searcher_for",
     "tip_robber",
+    "hit_robber",
     "register_entrants",
     "declared_trader",
     "declared_closer",
@@ -99,6 +104,9 @@ class NetworkBot(trading.DeclaredTrade):
     #: How far this seat's robber moves lean towards the leader (`tip_robber`);
     #: `0.0` plays them as the policy picks.
     robber_tip: float = 0.0
+    #: Whether this seat's robber moves always hit another seat where one can
+    #: be hit (`hit_robber`); `False` plays them as the policy picks.
+    robber_hits: bool = False
     #: `0.0` plays the policy's top move. Above it, the seat samples its move
     #: from the policy's probabilities raised to `1 / temperature`: a whole
     #: option where the policy lists them (`option_rows`, its remaining moves
@@ -149,6 +157,12 @@ class NetworkBot(trading.DeclaredTrade):
         self.seat_at(game)
         seat = to_move(game)
         options = tuple(options_for(game))
+        narrowed = hit_robber(game, options) if self.robber_hits else options
+        if len(narrowed) < len(options):
+            # A policy that keeps plans answers `act_rows` from the game's own
+            # options; the narrowed ones are scored instead (`_scored_pick`).
+            ((prior, value),) = self.policy.score_rows([(game, seat, narrowed)])
+            return self._scored_pick(narrowed, prior, value, seat)
         if self.temperature:
             return self._sampled_many([(self, game, seat, options)])[0]
         if self.robber_tip and options[0].type is ActionType.MOVE_ROBBER:
@@ -172,8 +186,10 @@ class NetworkBot(trading.DeclaredTrade):
             bot.seat_at(game)
             seat = to_move(game)
             options = tuple(options_for(game))
-            how = ("sampled" if bot.temperature else
+            narrowed = hit_robber(game, options) if bot.robber_hits else options
+            how = ("narrowed" if len(narrowed) < len(options) else "sampled" if bot.temperature else
                    "tipped" if bot.robber_tip and options[0].type is ActionType.MOVE_ROBBER else "top")
+            options = narrowed
             groups.setdefault((id(bot.policy), how), []).append((i, bot, game, seat, options))
         for (_, how), members in groups.items():
             policy = members[0][1].policy
@@ -182,6 +198,9 @@ class NetworkBot(trading.DeclaredTrade):
                 answers = cls._sampled_many([(bot, game, seat, options) for _, bot, game, seat, options in members])
                 for (i, *_), action in zip(members, answers):
                     out[i] = action
+            elif how == "narrowed":
+                for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
+                    out[i] = bot._scored_pick(options, prior, value, seat)
             elif how == "tipped":
                 for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
                     picked = max(range(len(options)), key=lambda k: prior[k])
@@ -190,6 +209,15 @@ class NetworkBot(trading.DeclaredTrade):
                 for (i, *_), action in zip(members, policy.act_rows(rows)):
                     out[i] = action
         return out  # type: ignore[return-value]
+
+    def _scored_pick(self, options: Sequence[Action], prior, value, seat: int) -> Action:
+        """The move this seat plays from robber `options` it scored itself
+        (`score_rows`): the prior's best, or one drawn from it above
+        `temperature` 0, then tipped to the leader (`robber_tip`)."""
+        picked = self._draw(prior) if self.temperature else max(range(len(options)), key=lambda i: prior[i])
+        if self.robber_tip:
+            picked = tip_robber(options, prior, value, seat, picked, self.robber_tip)
+        return options[picked]
 
     def _draw(self, probabilities) -> int:
         """An index drawn from `probabilities` raised to `1 / temperature`, off this seat's stream."""
@@ -610,6 +638,12 @@ class LeafEvaluator:
         return getattr(self.policy, "native_contract", None)
 
     @property
+    def lists_options(self) -> bool:
+        """Whether the policy lists a decision's whole options
+        (`option_rows`), which a whole-decision search reads."""
+        return callable(getattr(self.policy, "option_rows", None)) and bool(getattr(self.policy, "has_options", False))
+
+    @property
     def space(self):
         """The policy's action space, which `hexset.native.playout.copyable`
         checks a native tree against."""
@@ -618,14 +652,30 @@ class LeafEvaluator:
     def evaluate(self, leaves):
         if not leaves:
             return []
-        count = len(leaves)
-        padded = list(leaves)
-        if self.pad_to is not None and count < self.pad_to:
-            padded.extend([leaves[-1]] * (self.pad_to - count))
-        rows = [(leaf.game, leaf.seat, leaf.options) for leaf in padded]
-        scored = self.policy.score_rows(rows)
-        if len(scored) != len(rows):
-            raise ValueError(f"policy answered {len(scored)} of {len(rows)} MCTS leaves")
+        # A whole leaf (`hexset.mcts.Leaf.whole`) is answered with its whole
+        # options and their probabilities (`option_rows`) and its seat's value;
+        # every other leaf with a prior over its moves (`score_rows`).
+        plain = [leaf for leaf in leaves if not leaf.whole]
+        whole = [i for i, leaf in enumerate(leaves) if leaf.whole]
+        scored: list = [None] * len(leaves)
+        if plain:
+            padded = list(plain)
+            if self.pad_to is not None and len(plain) < self.pad_to:
+                padded.extend([plain[-1]] * (self.pad_to - len(plain)))
+            rows = [(leaf.game, leaf.seat, leaf.options) for leaf in padded]
+            answered = self.policy.score_rows(rows)
+            if len(answered) != len(rows):
+                raise ValueError(f"policy answered {len(answered)} of {len(rows)} MCTS leaves")
+            at = iter(answered)
+            for i, leaf in enumerate(leaves):
+                if not leaf.whole:
+                    scored[i] = next(at)
+        listed_at = {}
+        if whole:
+            asks = [(leaves[i].game, leaves[i].seat) for i in whole]
+            for i, (listed, probs), value in zip(whole, self.policy.option_rows(asks), self.policy.value_rows(asks)):
+                listed_at[i] = tuple(listed)
+                scored[i] = (np.asarray(probs, dtype=np.float64), value)
 
         # Keep the leaf mover's prior (and value) in its own frame. The value
         # head's other components are evaluated separately in each observer's
@@ -673,6 +723,7 @@ class LeafEvaluator:
                 prior=prior,
                 value=tuple(float(v) for v in value),
                 observer_values=tuple(rows_for_leaf),
+                options=listed_at.get(i),
             ))
         return answers
 
@@ -745,15 +796,26 @@ class GatedSearch(_Gated, trading.DeclaredTrade, Search):
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
-        decision = self.decide(game)
+        return Search.choose(self, game)
+
+    def _pick(self, game: Game, decision) -> int:
         picked = decision.chosen
+        first = decision.options[0]
+        robber = isinstance(first, Action) and first.type is ActionType.MOVE_ROBBER
+        if self.gate.robber_hits and robber:
+            # The tree's root holds every legal move: the most-visited one
+            # that hits, where any does.
+            hits = set(hit_robber(game, decision.options))
+            if decision.options[picked] not in hits:
+                picked = max((i for i, o in enumerate(decision.options) if o in hits),
+                             key=lambda i: (decision.visits[i], -i))
         tip = self.gate.robber_tip
-        if tip and decision.options[0].type is ActionType.MOVE_ROBBER:
+        if tip and robber:
             # The root's own prior and value: no forward beyond the search's.
             picked = tip_robber(
                 decision.options, decision.prior, decision.value, decision.seat, picked, tip
             )
-        return decision.options[picked]
+        return picked
 
 
 class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
@@ -772,6 +834,22 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
         if self.opponents is not None:
             self.opponents.seen(game, actor, action, viewer)
 
+    def root_options(self, game: Game) -> tuple[Action, ...]:
+        """Every legal move, less the robber moves `hit_robber` rules out
+        where the checkpoint declares `robber_hits`."""
+        options = super().root_options(game)
+        return hit_robber(game, options) if self.gate.robber_hits else options
+
+    def _own(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
+        """The policy's own move, as `PairedRollouts._own`; at a robber root
+        `root_options` narrowed, the prior's best of the narrowed moves: a
+        policy that keeps plans answers `act_rows` from the game's own options."""
+        if self.gate.robber_hits and options[0].type is ActionType.MOVE_ROBBER \
+                and len(options) < len(legal_actions(game)):
+            ((prior, _),) = self.policy.score_rows([(game, seat, options)])
+            return options[max(range(len(options)), key=lambda i: prior[i])]
+        return super()._own(game, seat, options)
+
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
         if self.opponents is not None:
@@ -787,6 +865,28 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
                 self._drop(game)
                 return decision.options[picked]
         return decision.move
+
+
+def hit_robber(game: Game, options: Sequence[Action]) -> tuple[Action, ...]:
+    """`options`, less every robber move onto a hex where the mover has a
+    building or no other seat has one, when some robber move lands on a hex
+    where another seat has a building and the mover has none.
+
+    The robber is never put on the mover's own hexes by this rule: where
+    every hex another seat is on holds a building of the mover's too, or no
+    legal hex holds another seat's (a friendly robber shielding everyone,
+    say), `options` stand whole, as they do for any decision that is not a
+    robber move. Whether a seat holds cards does not matter: the robber on
+    its hex blocks its production either way. Buildings are public, so this
+    reads nothing the mover cannot see."""
+    options = tuple(options)
+    if not options or options[0].type is not ActionType.MOVE_ROBBER:
+        return options
+    state = game._state  # the board's buildings: public to every seat
+    mover = to_move(game)
+    on = {h: occupants(state, h) for h in {o.a for o in options}}
+    clean = tuple(o for o in options if mover not in on[o.a] and any(p != mover for p in on[o.a]))
+    return clean or options
 
 
 def tip_robber(
@@ -842,6 +942,7 @@ def bot_for(
         rng=random.Random() if rng is None else rng,
         own_calibration=own_calibration,
         robber_tip=robber_tip_of(checkpoint),
+        robber_hits=robber_hits_of(checkpoint),
         temperature=temperature,
         hold=hold,
     )
@@ -859,6 +960,10 @@ def searcher_for(
     own_calibration: tuple[float, float] | None = None,
     decisive: float | None = None,
     hold: HoldReading | None = None,
+    top: int | None = None,
+    stages: str | None = None,
+    root: str | None = None,
+    whole: bool = False,
 ) -> GatedSearch:
     """`checkpoint` as a batched PUCT search, trading through its own value-head
     gate. `rng` seeds both the search and, derived from it, the gate's sampling
@@ -867,7 +972,11 @@ def searcher_for(
     `k` is how many determinizations of the seat's own belief each decision is
     searched in (`hexset.mcts.Search.worlds`); the tree is never rooted on the
     true state from here. `decisive` plays a root whose prior on one move
-    reaches it without searching (`hexset.mcts.Search`). The other
+    reaches it without searching (`hexset.mcts.Search`); `top` searches the
+    root by sequential halving over that many moves and `stages="setup"`
+    searches only the setup placements, `root="gumbel"` makes the halving
+    root Gumbel MuZero's, and `whole` searches decisions of several moves as
+    whole options (all `hexset.mcts.Search`). The other
     seats' held development cards are dealt in those worlds, and in the
     gate's, by the hold model the checkpoint declares (`hold_shape`,
     `hold_scale`; `hexset.holding.HoldModel`), else alike; `hold` replaces
@@ -891,6 +1000,10 @@ def searcher_for(
         rng=rng,
         own_calibration=own_calibration,
         decisive=decisive,
+        top=top,
+        stages=stages,
+        root=root,
+        whole=whole,
     )
 
 
@@ -912,6 +1025,10 @@ def rollouts_for(
     det: bool = False,
     salt: int = 0,
     hold: HoldReading | None = None,
+    margin: float = 0.0,
+    stop: float = 0.0,
+    moves: bool = False,
+    tie: float = TIE,
 ) -> GatedRollouts:
     """`checkpoint` deciding by paired rollouts of its own policy
     (`hexset.rollout.PairedRollouts`), trading through its own value-head
@@ -925,7 +1042,14 @@ def rollouts_for(
     its `pool` must load the same pair. `mix` above 0 plays a mixed strategy
     over the searched candidates (`hexset.rollout.PairedRollouts.mix`), anchored
     to the prior raised to `anchor`. `det` seeds each searched decision
-    from what the seat can see and `salt` (`PairedRollouts.det`). The other
+    from what the seat can see and `salt` (`PairedRollouts.det`). `margin`
+    above 0 plays another candidate than the policy's own move only where it
+    clears that many standard errors (`PairedRollouts.margin`); `stop` above
+    0, under a margin, stops playing a candidate that trails that move by more
+    than that many standard errors at a check (`PairedRollouts.stop`); `moves`
+    searches every root as a single move (`PairedRollouts.moves`); `tie`, under
+    a margin, decides a root whose candidates win within that chance of the
+    policy's move by the point lead (`PairedRollouts.tie`). The other
     seats' held development cards are dealt in every world, the gate's too,
     by the hold model the checkpoint declares, else alike; `hold` replaces
     it (`searcher_for`)."""
@@ -947,6 +1071,10 @@ def rollouts_for(
         det=det,
         salt=salt,
         hold=hold,
+        margin=margin,
+        stop=stop,
+        moves=moves,
+        tie=tie,
     )
 
 
@@ -986,6 +1114,8 @@ def register_entrants(loader) -> None:
             checkpoint,
             simulations=entrant.simulations, wave=entrant.wave, k=entrant.k,
             rng=rng, trade=entrant.trade, decisive=entrant.option("decisive"),
+            top=entrant.option("top"), stages=entrant.option("stages"), root=entrant.option("root"),
+            whole=bool(entrant.option("whole", False)),
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
                       veto_picks=trader_veto_pick_of(checkpoint))
@@ -1002,6 +1132,9 @@ def register_entrants(loader) -> None:
             rng=rng, trade=entrant.trade, mix=float(entrant.option("mix", 0.0)),
             anchor=float(entrant.option("anchor", 1.0)),
             det=bool(entrant.option("det", False)), salt=int(entrant.option("salt", 0)),
+            margin=float(entrant.option("margin", 0.0)), stop=float(entrant.option("stop", 0.0)),
+            moves=bool(entrant.option("moves", False)),
+            tie=float(entrant.option("tie", TIE)),
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
                       veto_picks=trader_veto_pick_of(checkpoint))

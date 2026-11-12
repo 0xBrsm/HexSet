@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Collection, Protocol, Sequence
 
 from ..actions import Action, options_for
-from ..game import Game
+from ..game import Game, Phase
 from ..trading import (
     RESPONSE_ACCEPT, RESPONSE_COUNTER, RESPONSE_PASS, Bundle, Response, clears_floor, valued_many,
 )
@@ -31,6 +31,7 @@ __all__ = [
     "TradesBy",
     "Handoff",
     "handed_off",
+    "SETUP",
     "Closes",
     "PlaysAgainst",
     "ChoosesMany",
@@ -196,18 +197,27 @@ class Vetoed:
         return [g if keep else -1.0 for g, keep in zip(own, ok)]
 
 
-def handed_off(game: Game, at: int) -> bool:
+#: A handoff's `at` that hands over when the setup placements end, not at a round.
+SETUP = "setup"
+
+
+def handed_off(game: Game, at: int | str) -> bool:
     """Whether `game` is past round `at`: every playing seat has had `at`
     main-phase turns. Read off `Game.turns`, which counts turns the playing
     seats take, so the answer is the same for every seat and for any copy of
     the game (a search's imagined one, a rejoined table's). A seat retired
-    mid-game shortens the rounds after it."""
+    mid-game shortens the rounds after it. `at` = `SETUP` is past once the
+    setup placements are over: the first roll and everything after."""
+    if at == SETUP:
+        return game.phase not in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
     playing = game.num_players - len(game.locked)
     return game.turns >= at * max(playing, 1)
 
 
 class Handoff:
-    """``first``'s moves through round ``at``, ``second``'s after it.
+    """``first``'s moves through round ``at``, ``second``'s after it; with
+    ``at`` = `SETUP`, ``first``'s setup placements and ``second``'s every
+    move from the first roll on.
 
     A seat's own turns 1..``at`` and every decision it makes in those rounds
     (discards, robber moves on another's seven) are ``first``'s; from round
@@ -221,9 +231,9 @@ class Handoff:
 
     __slots__ = ("first", "second", "at")
 
-    def __init__(self, first: Bot, second: Bot, at: int) -> None:
-        if at < 0:
-            raise ValueError(f"a handoff round is a count of rounds, not {at}")
+    def __init__(self, first: Bot, second: Bot, at: int | str) -> None:
+        if at != SETUP and (not isinstance(at, int) or at < 0):
+            raise ValueError(f"a handoff round is a count of rounds or {SETUP!r}, not {at!r}")
         object.__setattr__(self, "first", first)
         object.__setattr__(self, "second", second)
         object.__setattr__(self, "at", at)

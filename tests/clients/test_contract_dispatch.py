@@ -301,6 +301,71 @@ def test_search_priors_are_the_graphs_prior_at_each_option_renormalised():
     assert value == policy.value_rows([(game, seat)])[0]
 
 
+def test_a_decision_graph_is_asked_at_most_max_rows_rows_a_forward_in_near_equal_runs():
+    """`onnxbot._in_runs` cuts a call of more than `MAX_ROWS` rows into
+    consecutive runs of near-equal size, none over `MAX_ROWS` or under half
+    of it, and answers in row order."""
+    from hexset.clients import onnxbot
+
+    for n in range(1, 300):
+        runs = []
+        got = onnxbot._in_runs(lambda rows: (runs.append(len(rows)), list(rows))[1], list(range(n)))
+        assert got == list(range(n)) and sum(runs) == n
+        assert max(runs) <= onnxbot.MAX_ROWS
+        assert n <= onnxbot.MAX_ROWS or min(runs) >= onnxbot.MAX_ROWS // 2
+
+
+def test_rows_asked_in_runs_get_the_answers_one_forward_gives(monkeypatch):
+    """Decisions, priors, values and whole options for many positions of
+    every kind (Road Building sets and discards among them, whose candidates
+    index their own run) are the same asked in runs as in one forward."""
+    import copy
+
+    from hexset.cards import DevCard
+    from hexset.clients import onnxbot
+    from hexset.actions import legal_actions
+    from hexset.game import to_move
+
+    board = _board()
+    policy = load(str(STUB9), board.topology).policy
+    rng = random.Random(5)
+    rows = []
+    while len(rows) < 70:
+        game = start(board, 4, random.Random(len(rows)))
+        for _ in range(rng.choice((0, 3, 6, 12, 40, 90))):
+            if game.won_by is not None:
+                break
+            seat = next(s for s, n in enumerate(game.discard_quota) if n) if game.phase is Phase.DISCARD else None
+            apply(game, rng.choice(legal_actions(game, seat)), seat)
+        if game.won_by is not None:
+            continue
+        if game.phase is Phase.MAIN and not game.dev_card_played and rng.random() < 0.5:
+            game._state.dev_cards[to_move(game)][DevCard.ROAD_BUILDING] += 1
+        seat = next(s for s, n in enumerate(game.discard_quota) if n) if game.phase is Phase.DISCARD else to_move(game)
+        rows.append((copy.deepcopy(game), seat))
+    scored = [(g, s, tuple(legal_actions(g, s if g.phase is Phase.DISCARD else None))) for g, s in rows]
+
+    def answers():
+        return (policy._choose_many(rows), policy.score_rows(scored), policy.value_rows(rows),
+                policy.option_rows(rows) if policy.has_options else None)
+
+    monkeypatch.setattr(onnxbot, "MAX_ROWS", 10 ** 6)
+    whole = answers()
+    sizes = []
+    run = policy._run
+    monkeypatch.setattr(policy, "_run", lambda feed, outputs: (sizes.append(len(feed["observation"])),
+                                                              run(feed, outputs))[1])
+    monkeypatch.setattr(onnxbot, "MAX_ROWS", 8)
+    parts = answers()
+    assert sizes and max(sizes) <= 8 and min(sizes) >= 4
+    assert parts[0] == whole[0] and parts[2] == whole[2]
+    for (p1, v1), (p2, v2) in zip(parts[1], whole[1]):
+        assert list(p1) == list(p2) and v1 == v2
+    if whole[3] is not None:
+        for (o1, w1), (o2, w2) in zip(parts[3], whole[3]):
+            assert o1 == o2 and list(w1) == list(w2)
+
+
 @pytest.mark.parametrize("change,message", [
     ({"width": 1028}, "observation"),
     ({"extra": "mystery"}, "mystery"),

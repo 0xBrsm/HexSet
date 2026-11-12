@@ -885,6 +885,122 @@ def test_without_decisive_every_root_is_searched_as_before():
     assert visits() == visits(decisive=None)
 
 
+class Prefers(Stub):
+    """A peaked prior on option `favour`, and a value that rewards seat 0 for
+    settling vertex `vertex` and nothing else."""
+
+    def __init__(self, vertex: int, favour: int = 0) -> None:
+        super().__init__(value=(0.0, 0.0, 0.0, 0.0), favour=favour)
+        self.vertex = vertex
+
+    def evaluate(self, leaves):
+        out = []
+        for (prior, _), leaf in zip(super().evaluate(leaves), leaves):
+            settled = leaf.game.state(0, hidden=False).vertex_owner[self.vertex] == 0
+            out.append((prior, (0.9, -0.3, -0.3, -0.3) if settled else (0.0, 0.0, 0.0, 0.0)))
+        return out
+
+    def terminal(self, game):
+        return (0.0, 0.0, 0.0, 0.0)
+
+
+def test_halving_searches_the_top_moves_whatever_the_prior_and_finds_the_better_one():
+    """A peaked prior keeps PUCT on its favourite; halving gives each of the
+    top moves descents of their own and keeps the one whose mean is best."""
+    game = a_game()
+    target = legal_actions(game)[3]
+    assert target.type is ActionType.SETUP_SETTLEMENT
+
+    def decide(**kwargs):
+        return Search(Prefers(target.a), simulations=64, wave=8, rng=random.Random(1), **kwargs).decide(game)
+
+    assert decide().options[decide().chosen] != target
+    halved = decide(top=4)
+    assert halved.options[halved.chosen] == target
+    assert halved.visits.sum() == 64
+    assert set(np.flatnonzero(halved.visits)) == {0, 1, 2, 3}  # the favourite, then ties by index
+
+
+def test_halving_splits_each_round_evenly_and_spends_the_whole_budget():
+    stub = Stub(favour=0)
+    search = Search(stub, simulations=96, wave=8, rng=random.Random(2), top=6)
+    _, _, visits = search.run(a_game())
+    assert visits.sum() == 96
+    # Three halvings over six moves: 96 // (3 * 6) = 5 descents each first.
+    assert sorted(visits[visits > 0].tolist())[:3] == [5.0, 5.0, 5.0]
+    assert np.count_nonzero(visits) == 6
+
+
+def test_a_halving_tie_on_visits_goes_to_the_lower_index_at_equal_means():
+    search = Search(Stub(favour=0), simulations=32, wave=8, rng=random.Random(3), top=2)
+    decision = search.decide(a_game())
+    assert sorted(decision.visits[decision.visits > 0].tolist()) == [16.0, 16.0]
+    assert decision.chosen == int(np.flatnonzero(decision.visits)[0])
+
+
+def test_setup_only_plays_every_later_root_by_its_prior_without_search():
+    stub = Stub(value=(0.5, -0.5, 0.25, -0.25), favour=2)
+    search = Search(stub, simulations=64, rng=random.Random(1), stages="setup", top=4)
+    game, _ = a_midgame()
+    decision = search.decide(game)
+    assert len(decision.options) > 3
+    assert decision.visits[2] == 64.0 and decision.visits.sum() == 64.0
+    assert [len(wave) for wave in stub.waves] == [1]
+    assert not decision.searched
+
+
+def test_setup_only_searches_a_setup_root():
+    stub = Stub(favour=2)
+    decision = Search(stub, simulations=64, rng=random.Random(1), stages="setup").decide(a_game())
+    assert decision.searched and len(stub.waves) > 1
+
+
+def test_without_top_or_stages_every_root_is_searched_as_before():
+    def visits(**kwargs):
+        stub = Stub(favour=2)
+        return Search(stub, simulations=48, rng=random.Random(3), **kwargs).run(a_game())[2].tolist()
+
+    assert visits() == visits(top=None, stages=None)
+
+
+@pytest.mark.parametrize("kwargs", [{"top": 1}, {"top": 0}, {"stages": "main"}])
+def test_top_and_stages_are_checked(kwargs):
+    with pytest.raises(ValueError, match="top|stages"):
+        Search(Stub(), **kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [{"root": "gumbel"}, {"root": "other", "top": 4}, {"root": "gumbel", "top": 4, "k": 2}])
+def test_a_gumbel_root_needs_top_and_one_world(kwargs):
+    with pytest.raises(ValueError, match="root|Gumbel"):
+        Search(Stub(), **kwargs)
+
+
+def test_the_gumbel_root_plays_its_best_score_and_spends_the_budget():
+    """The candidates are the top noisy logits, the budget is spent on them alone, and the move played is the
+    highest noise + logit + sigma(q) among the last ones in; the same seed draws the same noise."""
+    game = a_game()
+    target = legal_actions(game)[3]
+
+    def decide(seed):
+        search = Search(Prefers(target.a), simulations=64, wave=8, rng=random.Random(seed), top=4, root="gumbel")
+        return search, search.decide(game)
+
+    search, decision = decide(1)
+    assert decision.visits.sum() == 64 and np.count_nonzero(decision.visits) <= 4
+    again = decide(1)[1]
+    assert again.chosen == decision.chosen and again.visits.tolist() == decision.visits.tolist()
+    chosen = [decide(seed)[1] for seed in range(12)]
+    # the noise reaches past the prior's favourite, and when the better vertex is a candidate it wins
+    assert any(d.options[d.chosen] == target for d in chosen)
+
+
+def test_the_halving_root_is_unchanged_by_naming_it():
+    def visits(**kwargs):
+        return Search(Stub(favour=2), simulations=48, rng=random.Random(3), top=4, **kwargs).run(a_game())[2].tolist()
+
+    assert visits() == visits(root="halving")
+
+
 @pytest.mark.parametrize("decisive", [0.0, -0.5, 1.5])
 def test_decisive_is_a_prior(decisive):
     with pytest.raises(ValueError, match="decisive"):

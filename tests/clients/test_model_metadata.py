@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from hexset.rollout import TIE
 from hexset.clients._modelmeta import (
     MAX_SIMULATIONS,
     MAX_TOP,
@@ -221,6 +222,49 @@ def test_a_rollout_file_can_ask_for_a_deterministic_search():
     off = search_config({"search": "rollout"}).rollout
     assert (off.det, off.salt) == (False, 0)
     assert not search_config({"search": "rollout", "det": "0"}).rollout.det
+
+
+def test_a_rollout_file_can_ask_for_a_margin():
+    assert search_config({"search": "rollout", "margin": "1.5"}).rollout.margin == 1.5
+    assert search_config({"search": "rollout"}).rollout.margin == 0.0
+    assert search_config({"search": "rollout", "margin": "0", "mix": "0.01"}).rollout.margin == 0.0
+
+
+def test_a_rollout_file_can_ask_to_stop_early_under_a_margin():
+    assert search_config({"search": "rollout", "margin": "1.5", "stop": "1"}).rollout.stop == 1.0
+    assert search_config({"search": "rollout", "margin": "1.5"}).rollout.stop == 0.0
+    assert search_config({"search": "rollout", "stop": "0"}).rollout.stop == 0.0
+
+
+@pytest.mark.parametrize("keys", [{"margin": "1.5", "stop": "-1"}, {"margin": "1.5", "stop": "soon"},
+                                  {"margin": "1.5", "stop": "inf"}, {"stop": "1"}, {"margin": "0", "stop": "1"}])
+def test_an_unreadable_stop_fails_the_load(keys):
+    with pytest.raises(ValueError, match="stop"):
+        search_config({"search": "rollout", **keys})
+
+
+def test_a_rollout_file_can_ask_for_ties_decided_by_the_lead():
+    assert search_config({"search": "rollout", "margin": "1.5", "tie": "0.005"}).rollout.tie == 0.005
+    # On by default (it acts only under a margin), off at 0.
+    assert search_config({"search": "rollout", "margin": "1.5"}).rollout.tie == TIE == 0.005
+    assert search_config({"search": "rollout"}).rollout.tie == TIE
+    assert search_config({"search": "rollout", "margin": "1.5", "tie": "0"}).rollout.tie == 0.0
+    assert search_config({"search": "rollout", "tie": "0"}).rollout.tie == 0.0
+
+
+@pytest.mark.parametrize("keys", [{"margin": "1.5", "tie": "-0.01"}, {"margin": "1.5", "tie": "close"},
+                                  {"margin": "1.5", "tie": "1"}, {"margin": "1.5", "tie": "nan"},
+                                  {"tie": "0.005"}, {"margin": "0", "tie": "0.005"}])
+def test_an_unreadable_tie_fails_the_load(keys):
+    with pytest.raises(ValueError, match="tie"):
+        search_config({"search": "rollout", **keys})
+
+
+@pytest.mark.parametrize("keys", [{"margin": "-1"}, {"margin": "wide"}, {"margin": "inf"},
+                                  {"margin": "1.5", "mix": "0.01"}])
+def test_an_unreadable_margin_fails_the_load(keys):
+    with pytest.raises(ValueError, match="margin"):
+        search_config({"search": "rollout", **keys})
 
 
 @pytest.mark.parametrize("keys", [{"det": "yes"}, {"det": "2"}, {"det": "1", "salt": "-1"},

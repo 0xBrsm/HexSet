@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
+import math
 import random
 
 import numpy as np
@@ -12,7 +13,7 @@ from hexset.actions import ActionType, apply, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.game import Phase, imagine, start, to_move
-from hexset.rollout import PairedRollouts, paired_copy
+from hexset.rollout import TIE, PairedRollouts, paired_copy
 
 
 def after_setup(seed: int = 0):
@@ -788,3 +789,386 @@ def test_a_position_rebuilt_from_its_record_keeps_its_digest(tmp_path):
         again.append(observed_digest(game, to_move(game) if actor is None else actor))
         advance(game, action, trades, actor, shown.get(step, ()))
     assert len(played) == len(again) > 100 and played == again
+
+
+# --- a margin over the policy's own move -------------------------------------------------------
+
+
+def with_table(search, monkeypatch, table):
+    """`search` playing out to `table` (worlds by candidates, the policy's
+    own move first) whatever it is asked to play."""
+    from hexset.rollout import Lanes
+
+    table = np.asarray(table, dtype=np.float64)
+
+    def lanes(tasks, moves, seat, start):
+        assert table.shape == (len(tasks), len(moves))
+        return Lanes(outcomes=table.reshape(-1), after=None,
+                     reads=np.zeros((len(search.marks), table.size)), steps=0, row_steps=0,
+                     mark_row_steps=tuple(0 for _ in search.marks), truncated=0)
+
+    monkeypatch.setattr(search, "_lanes", lanes)
+    return search
+
+
+def margin_search(margin, **kwargs):
+    return PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=4, top=3, horizon=1,
+                          marks=(), rng=random.Random(3), margin=margin, **kwargs)
+
+
+# Candidate 1 leads the own move by 0.5 a world with no spread: it clears any
+# margin. Candidate 2 has the best mean (0.5 over the own move) but a paired
+# difference of (+2, 0, 0, 0): mean 0.5, standard error 0.5, so 1 error.
+CLEAR = [[0.0, 0.5, 2.0], [0.0, 0.5, 0.0], [0.0, 0.5, 0.0], [0.0, 0.5, 0.0]]
+NOISY = [[0.0, 0.0, 2.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+
+
+def test_margin_zero_decides_and_logs_as_the_search_without_one():
+    for seed in (3, 9):
+        plain = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=6, top=3, horizon=2,
+                               marks=(2,), rng=random.Random(seed))
+        zero = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=6, top=3, horizon=2,
+                              marks=(2,), rng=random.Random(seed), margin=0.0)
+        a, b = plain.decide(a_road_or_not(seed)), zero.decide(a_road_or_not(seed))
+        assert logged(a) == logged(b) and a.chosen == b.chosen
+        assert b.margin == 0.0 and "margin" not in b.to_json() and "greedy" not in b.to_json()
+
+
+def test_a_switch_inside_the_margin_is_held_back_and_logged(monkeypatch):
+    search = with_table(margin_search(1.5), monkeypatch, NOISY)
+    decision = search.decide(a_road_or_not())
+    own, _, noisy = decision.candidates
+    assert decision.scores[2] == max(decision.scores)
+    assert decision.chosen == own and decision.greedy == noisy and decision.margin == 1.5
+    line = decision.to_json()
+    assert line["margin"] == 1.5 and line["greedy"] == noisy and line["chosen"] == own
+    # Under the margin's 1 error the same candidate is played.
+    loose = with_table(margin_search(0.9), monkeypatch, NOISY).decide(a_road_or_not())
+    assert loose.chosen == noisy and loose.greedy is None and loose.to_json()["margin"] == 0.9
+
+
+def test_the_best_mean_of_the_candidates_that_clear_the_margin_is_played(monkeypatch):
+    decision = with_table(margin_search(1.5), monkeypatch, CLEAR).decide(a_road_or_not())
+    own, clear, noisy = decision.candidates
+    # Candidates 1 and 2 tie on the mean; only candidate 1 clears the margin.
+    assert decision.chosen == clear and decision.greedy is None
+    unclear = with_table(margin_search(1.5), monkeypatch,
+                         [[0.0, 0.25, 2.0], [0.0, 0.25, 0.0], [0.0, 0.25, 0.0], [0.0, 0.25, 0.0]])
+    held = unclear.decide(a_road_or_not())
+    assert held.chosen == held.candidates[1] and held.greedy == held.candidates[2]
+
+
+def test_a_margin_leaves_setup_roots_to_the_best_mean(monkeypatch):
+    opening = start(random_base_board(random.Random(4)), 4, random.Random(4))
+    assert opening.phase is Phase.SETUP_SETTLEMENT
+    search = with_table(PairedRollouts(Stub(sure_of_the_first), worlds=4, top=3, horizon=1, marks=(),
+                                       rng=random.Random(5), margin=1.5), monkeypatch, NOISY)
+    decision = search.decide(opening)
+    assert decision.chosen == decision.candidates[2]
+    assert decision.margin == 0.0 and decision.greedy is None and "margin" not in decision.to_json()
+
+
+@pytest.mark.parametrize("kwargs, match", [
+    ({"margin": -0.5}, "margin"), ({"margin": float("nan")}, "margin"), ({"margin": float("inf")}, "margin"),
+    ({"margin": 1.5, "mix": 0.01}, "mix"), ({"margin": 1.5, "worlds": 1}, "two worlds"),
+])
+def test_a_margin_is_checked(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        PairedRollouts(Stub(lambda options: np.ones(len(options)) / len(options)), **kwargs)
+
+
+# --- stopping early under a margin -------------------------------------------------------------
+
+
+def staged_table(search, monkeypatch, table):
+    """`search` playing out to `table` (worlds by candidates, the policy's own
+    move first), stage by stage: each call plays the next run of worlds for
+    the moves asked. Returns the calls made, as (worlds, columns)."""
+    from hexset.rollout import Lanes
+
+    table = np.asarray(table, dtype=np.float64)
+    calls, order = [], []
+
+    def lanes(tasks, moves, seat, start):
+        if not order:
+            order.extend(moves)
+        begin = sum(n for n, _ in calls)
+        columns = [order.index(m) for m in moves]
+        calls.append((len(tasks), columns))
+        part = table[begin:begin + len(tasks)][:, columns]
+        return Lanes(outcomes=part.reshape(-1), after=None, reads=np.zeros((len(search.marks), part.size)),
+                     steps=1, row_steps=part.size, mark_row_steps=tuple(0 for _ in search.marks), truncated=0)
+
+    monkeypatch.setattr(search, "_lanes", lanes)
+    return calls
+
+
+def stop_search(stop, worlds=16, margin=1.5):
+    return PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=worlds, top=3, horizon=1,
+                          marks=(), rng=random.Random(3), margin=margin, stop=stop)
+
+
+# Over 16 worlds (one check, at 8): candidate 1 trails the own move by 0.25 to
+# 0.75 a world, candidate 2 leads it by the same.
+TRAIL = [[0.0, -0.25 - 0.5 * (w % 2), 0.25 + 0.5 * (w % 2)] for w in range(16)]
+
+
+def test_a_candidate_that_trails_at_a_check_plays_no_further(monkeypatch):
+    search = stop_search(1.0)
+    calls = staged_table(search, monkeypatch, TRAIL)
+    decision = search.decide(a_road_or_not())
+    own, trailing, leading = decision.candidates
+    assert calls == [(8, [0, 1, 2]), (8, [0, 2])]
+    assert decision.played == (16, 8, 16) and decision.chosen == leading and decision.stop == 1.0
+    assert all(math.isnan(row[1]) for row in decision.outcomes[8:])
+    assert decision.scores[1] == pytest.approx(-0.5) and decision.scores[2] == pytest.approx(0.5)
+    line = decision.to_json()
+    assert line["stop"] == 1.0 and line["played"] == [16, 8, 16]
+    assert [row[1] for row in line["outcomes"][8:]] == [None] * 8 and line["outcomes"][8][2] == 0.25
+
+
+def test_a_root_stops_once_only_the_policy_s_own_move_is_left(monkeypatch):
+    search = stop_search(1.0, worlds=64)
+    behind = [[0.0, -0.25 - 0.5 * (w % 2), -0.5 - 0.5 * (w % 2)] for w in range(64)]
+    calls = staged_table(search, monkeypatch, behind)
+    decision = search.decide(a_road_or_not())
+    assert calls == [(8, [0, 1, 2])]
+    assert decision.played == (8, 8, 8) and decision.chosen == decision.candidates[0]
+    assert len(decision.outcomes) == 64 and all(math.isnan(x) for row in decision.outcomes[8:] for x in row)
+
+
+def test_a_candidate_level_with_the_own_move_in_every_world_so_far_stops(monkeypatch):
+    level = [[0.0, 0.0, 0.25 + 0.5 * (w % 2)] for w in range(16)]
+    search = stop_search(1.0)
+    calls = staged_table(search, monkeypatch, level)
+    decision = search.decide(a_road_or_not())
+    assert calls == [(8, [0, 1, 2]), (8, [0, 2])] and decision.played == (16, 8, 16)
+
+
+def test_stopping_judges_the_candidates_left_by_the_margin_over_every_world(monkeypatch):
+    # Candidate 2 leads by +2 in one world of 16 and nothing elsewhere: it is
+    # never more than 1 error behind, so it plays on, and the margin holds it back.
+    noisy = [[0.0, -0.25 - 0.5 * (w % 2), 2.0 if w == 3 else 0.0] for w in range(16)]
+    search = stop_search(1.0)
+    staged_table(search, monkeypatch, noisy)
+    decision = search.decide(a_road_or_not())
+    assert decision.played == (16, 8, 16)
+    assert decision.chosen == decision.candidates[0] and decision.greedy == decision.candidates[2]
+
+
+def test_a_candidate_played_in_every_world_sees_the_full_search_s_worlds():
+    def run(stop):
+        search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=16, top=3, horizon=2,
+                                marks=(2,), rng=random.Random(5), margin=0.5, stop=stop, det=True)
+        return search.decide(a_road_or_not(5))
+    full, staged = run(0.0), run(0.25)
+    assert full.candidates == staged.candidates and staged.played
+    for j, n in enumerate(staged.played):
+        assert [row[j] for row in staged.outcomes[:n]] == [row[j] for row in full.outcomes[:n]]
+        assert [row[j] for row in staged.mark_values[0][:n]] == [row[j] for row in full.mark_values[0][:n]]
+        if n == 16 and full.chosen == full.candidates[j]:
+            assert staged.chosen == full.chosen
+
+
+def test_stop_zero_decides_and_logs_as_the_margin_without_one():
+    for seed in (3, 9):
+        plain = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=16, top=3, horizon=2,
+                               marks=(2,), rng=random.Random(seed), margin=1.5)
+        zero = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=16, top=3, horizon=2,
+                              marks=(2,), rng=random.Random(seed), margin=1.5, stop=0.0)
+        a, b = plain.decide(a_road_or_not(seed)), zero.decide(a_road_or_not(seed))
+        assert logged(a) == logged(b) and a.chosen == b.chosen
+        assert b.stop == 0.0 and b.played == () and "stop" not in b.to_json()
+
+
+def test_stopping_leaves_setup_roots_whole(monkeypatch):
+    opening = start(random_base_board(random.Random(4)), 4, random.Random(4))
+    search = PairedRollouts(Stub(sure_of_the_first), worlds=16, top=3, horizon=1, marks=(),
+                            rng=random.Random(5), margin=1.5, stop=1.0)
+    calls = staged_table(search, monkeypatch, TRAIL)
+    decision = search.decide(opening)
+    assert calls == [(16, [0, 1, 2])] and decision.stop == 0.0 and decision.played == ()
+
+
+@pytest.mark.parametrize("kwargs, match", [
+    ({"margin": 1.5, "stop": -1.0}, "stop"), ({"margin": 1.5, "stop": float("nan")}, "stop"),
+    ({"stop": 1.0}, "margin"),
+])
+def test_a_stop_is_checked(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        PairedRollouts(Stub(lambda options: np.ones(len(options)) / len(options)), **kwargs)
+
+
+# --- ties on winning, decided by the point lead ------------------------------------------------
+
+
+def with_tables(search, monkeypatch, table, leads):
+    """`search` playing out to `table` and ending at point leads `leads`
+    (both worlds by candidates, the policy's own move first), stage by
+    stage where it stops early. Returns the calls made, as (worlds, columns)."""
+    from hexset.rollout import Lanes
+
+    table, leads = np.asarray(table, dtype=np.float64), np.asarray(leads, dtype=np.float64)
+    calls, order = [], []
+
+    def lanes(tasks, moves, seat, start):
+        if not order:
+            order.extend(moves)
+        begin = sum(n for n, _ in calls)
+        columns = [order.index(m) for m in moves]
+        calls.append((len(tasks), columns))
+        part = table[begin:begin + len(tasks)][:, columns]
+        return Lanes(outcomes=part.reshape(-1), after=None, reads=np.zeros((len(search.marks), part.size)),
+                     steps=1, row_steps=part.size, mark_row_steps=tuple(0 for _ in search.marks), truncated=0,
+                     leads=leads[begin:begin + len(tasks)][:, columns].reshape(-1))
+
+    monkeypatch.setattr(search, "_lanes", lanes)
+    return calls
+
+
+def tie_search(tie, worlds=8, margin=1.5, stop=0.0):
+    return PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=worlds, top=3, horizon=1,
+                          marks=(), rng=random.Random(3), margin=margin, stop=stop, tie=tie)
+
+
+def wobble(w: int, size: float) -> float:
+    return size if w % 2 else -size
+
+
+# A decided root: every candidate wins all but a hair alike.
+DECIDED = [[0.999, 0.999 + wobble(w, 0.0001), 0.999 + wobble(w + 1, 0.0001)] for w in range(8)]
+# Candidate 1 ends one point further ahead in every world, candidate 2 two
+# points ahead in half the worlds and level in the rest (mean 1, error 0.38).
+AHEAD = [[3.0, 4.0, 5.0 if w % 2 else 3.0] for w in range(8)]
+
+
+def test_candidates_that_win_alike_are_decided_by_the_lead(monkeypatch):
+    search = tie_search(0.005)
+    with_tables(search, monkeypatch, DECIDED, AHEAD)
+    decision = search.decide(a_road_or_not())
+    own, steady, _ = decision.candidates
+    assert decision.tied == (1, 2) and decision.tie == 0.005
+    # Both clear the margin on the lead and tie on its mean; the earlier is played.
+    assert decision.chosen == steady
+    line = decision.to_json()
+    assert line["tie"] == 0.005 and line["tied"] == [1, 2] and line["leads"][0] == [3.0, 4.0, 3.0]
+
+
+def test_the_best_lead_of_those_clearing_the_margin_is_played(monkeypatch):
+    search = tie_search(0.005)
+    with_tables(search, monkeypatch, DECIDED, [[3.0, 4.0, 5.0] for _ in range(8)])
+    decision = search.decide(a_road_or_not())
+    assert decision.chosen == decision.candidates[2]
+    assert decision.greedy == decision.candidates[decision.scores.index(max(decision.scores))]
+
+
+def test_a_lead_inside_the_margin_keeps_the_policy_s_move(monkeypatch):
+    noisy = [[3.0, 5.0 if w == 0 else 3.0, 3.0] for w in range(8)]
+    search = tie_search(0.005)
+    with_tables(search, monkeypatch, DECIDED, noisy)
+    decision = search.decide(a_road_or_not())
+    assert decision.tied == (1, 2) and decision.chosen == decision.candidates[0]
+
+
+def test_scores_too_uncertain_to_call_tied_leave_the_margin_rule_alone(monkeypatch):
+    # An undecided root: 0/1 outcomes, nothing clears the margin, nothing is tied.
+    open_game = [[w % 2, (w // 2) % 2, (w + 1) % 2] for w in range(8)]
+    tied, plain = tie_search(0.005), tie_search(0.0)
+    with_tables(tied, monkeypatch, open_game, AHEAD)
+    a = tied.decide(a_road_or_not())
+    with_tables(plain, monkeypatch, open_game, AHEAD)
+    b = plain.decide(a_road_or_not())
+    assert a.tied == () and a.chosen == b.chosen == a.candidates[0]
+
+
+def test_a_candidate_that_clears_the_margin_on_winning_is_played_whatever_the_lead(monkeypatch):
+    clear = [[0.5, 0.75, 0.5] for _ in range(8)]
+    behind = [[3.0, 1.0, 6.0] for _ in range(8)]
+    search = tie_search(0.005)
+    with_tables(search, monkeypatch, clear, behind)
+    decision = search.decide(a_road_or_not())
+    assert decision.chosen == decision.candidates[1] and decision.tied == ()
+
+
+def test_a_tied_candidate_ahead_on_the_lead_plays_on_past_a_check(monkeypatch):
+    # Over 16 worlds (one check, at 8): both candidates trail the own move by
+    # a hair on winning, with no spread, so stop alone would end both. Both
+    # are tied; candidate 1 is a point ahead, candidate 2 a point behind.
+    table = [[0.999, 0.9989, 0.9989] for _ in range(16)]
+    leads = [[3.0, 4.0, 2.0] for _ in range(16)]
+    search = tie_search(0.005, worlds=16, stop=1.0)
+    calls = with_tables(search, monkeypatch, table, leads)
+    decision = search.decide(a_road_or_not())
+    assert calls == [(8, [0, 1, 2]), (8, [0, 1])]
+    assert decision.played == (16, 16, 8) and decision.tied == (1,) and decision.chosen == decision.candidates[1]
+    assert all(math.isnan(row[2]) for row in decision.leads[8:])
+    plain = tie_search(0.0, worlds=16, stop=1.0)
+    assert with_tables(plain, monkeypatch, table, leads) is not None
+    assert plain.decide(a_road_or_not()).played == (8, 8, 8)
+
+
+def test_the_tie_break_is_on_by_default_and_plays_no_part_without_a_margin():
+    search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=8, top=3, horizon=2,
+                            marks=(), rng=random.Random(5))
+    assert search.tie == TIE
+    decision = search.decide(a_road_or_not(5))
+    assert decision.tie == 0.0 and decision.tied == () and decision.leads == ()
+
+
+def test_a_tied_candidate_level_on_the_lead_stops_at_a_check(monkeypatch):
+    # Candidate 2 trails by a hair on winning and is level on the lead on
+    # average (a point up in half the worlds, down in the rest): not ahead,
+    # so it plays no further, though it does not trail on the lead either.
+    table = [[0.999, 0.9989, 0.9989] for _ in range(16)]
+    leads = [[3.0, 4.0, 4.0 if w % 2 else 2.0] for w in range(16)]
+    search = tie_search(0.005, worlds=16, stop=1.0)
+    calls = with_tables(search, monkeypatch, table, leads)
+    decision = search.decide(a_road_or_not())
+    assert calls == [(8, [0, 1, 2]), (8, [0, 1])] and decision.played == (16, 16, 8)
+
+
+def test_tie_zero_turns_the_lead_off_under_a_margin():
+    for seed in (3, 9):
+        def run(**kwargs):
+            return PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=16, top=3, horizon=2,
+                                  marks=(2,), rng=random.Random(seed), margin=0.5, stop=0.25, det=True,
+                                  **kwargs).decide(a_road_or_not(seed))
+        a, b = run(), run(tie=0.0)
+        assert a.tie == TIE and len(a.leads) == 16
+        assert b.tie == 0.0 and b.leads == () and "tie" not in b.to_json() and "leads" not in b.to_json()
+
+
+def test_a_tie_on_real_playouts_logs_every_lead_it_played():
+    search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=8, top=3, horizon=2,
+                            marks=(), rng=random.Random(4), margin=1.5, tie=0.5)
+    decision = search.decide(a_road_or_not(4))
+    assert len(decision.leads) == 8 and all(len(row) == 3 for row in decision.leads)
+    assert all(math.isfinite(x) for row in decision.leads for x in row)
+
+
+@pytest.mark.parametrize("kwargs, match", [
+    ({"margin": 1.5, "tie": -0.01}, "tie"), ({"margin": 1.5, "tie": 1.0}, "tie"),
+    ({"margin": 1.5, "tie": float("nan")}, "tie"),
+])
+def test_a_tie_is_checked(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        PairedRollouts(Stub(lambda options: np.ones(len(options)) / len(options)), **kwargs)
+
+
+def test_the_lead_is_the_mover_s_points_less_the_other_live_seats_mean():
+    from hexset.rollout import _lead_of
+    from hexset.rules import DUEL_VARIANT_GAME
+    from hexset.victory import victory_points
+
+    game = after_setup(2)
+    state = game._state
+    # Seat 1's first settlement made a city: one point clear of the rest.
+    state.vertex_building[state.vertex_owner.index(1)] = 2
+    points = [victory_points(state, s) for s in range(4)]
+    assert points[1] == points[0] + 1
+    assert _lead_of(game, 1) == points[1] - (points[0] + points[2] + points[3]) / 3
+    rng = random.Random(8)
+    duel = start(random_base_board(rng), 4, rng, game_type=DUEL_VARIANT_GAME, locked=frozenset({1, 3}))
+    while duel.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(duel, legal_actions(duel)[0])
+    assert _lead_of(duel, 0) == victory_points(duel._state, 0) - victory_points(duel._state, 2)

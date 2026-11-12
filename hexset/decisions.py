@@ -77,6 +77,7 @@ __all__ = [
     "closes",
     "options",
     "apply_option",
+    "option_json",
     "key",
     "tensors",
     "frame_for",
@@ -279,6 +280,14 @@ def apply_option(game: Game, option: Option, seat: int | None = None) -> None:
                 return
     else:
         apply(game, option, seat)
+
+
+def option_json(option: Option) -> list:
+    """A decision as a search log writes it: an action `[type, a, b]`, or a
+    compound `[kind, [[type, a, b], ...]]`."""
+    if isinstance(option, Compound):
+        return [option.kind.name, [[p.type.name, p.a, p.b] for p in option.parts]]
+    return [option.type.name, option.a, option.b]
 
 
 # The moves that show something whoever makes them: the dice, the dev card

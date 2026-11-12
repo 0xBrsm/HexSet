@@ -308,3 +308,60 @@ def test_a_mixed_search_draws_a_whole_decision_and_plays_it_out_of_its_plan():
             seen_other = True
             assert policy.plans.peek(game, to_move(game)) == ()
     assert seen_other, "no draw left the policy's own turn"
+
+
+@pytest.mark.parametrize("double_turn", [False, True], ids=["two setup turns", "double turn"])
+def test_moves_leaves_an_unsearched_seat_playing_as_the_policy_alone(double_turn):
+    """`moves` changes only the searched roots: with every root decisive the
+    searcher still plays what the policy plays alone, plans included."""
+    for seed in (4, 7):
+        played = moves(alone(Whole(double_turn=double_turn)), seed, 120)
+        search = PairedRollouts(Whole(double_turn=double_turn), worlds=2, decisive=1e-6, moves=True,
+                                rng=random.Random(seed))
+        assert moves(search.choose, seed, 120) == played
+        assert all(d.worlds == 0 for d in search.decision_log)
+
+
+def test_moves_searches_the_setup_settlement_and_its_road_apart():
+    """Under `moves` with `setup=full`, the settlement is a root of single
+    moves led by the policy's own first move, and the road is searched as a
+    root of its own."""
+    policy = Whole()
+    search = PairedRollouts(policy, worlds=2, top=3, horizon=1, marks=(), decisive=1e-6, full_setup=True,
+                            moves=True, rng=random.Random(6))
+    game = opening()
+    own = policy.best(game, to_move(game)).parts[0]
+    settlement = search.decide(game)
+    assert not settlement.whole and settlement.worlds == 2 and len(settlement.candidates) == 3
+    picked = [settlement.options[i] for i in settlement.candidates]
+    assert picked[0] == own and len(set(picked)) == 3
+    assert all(o.type is ActionType.SETUP_SETTLEMENT for o in picked)
+    line = json.loads(json.dumps(settlement.to_json()))
+    assert "whole" not in line and line["actions"][0] == [own.type.name, own.a, own.b]
+    apply(game, settlement.move)
+    road = search.decide(game)
+    assert not road.whole and road.worlds == 2
+    assert all(road.options[i].type is ActionType.SETUP_ROAD for i in road.candidates)
+
+
+def test_moves_searches_a_discard_a_card_at_a_time():
+    policy = Whole()
+    search = PairedRollouts(policy, worlds=2, top=3, horizon=1, marks=(), moves=True, rng=random.Random(2))
+    game = discarding()
+    decision = search.decide(game)
+    assert not decision.whole and decision.worlds == 2
+    assert all(decision.options[i].type is ActionType.DISCARD for i in decision.candidates)
+
+
+def test_roots_moves_reads_from_a_spec_and_from_metadata():
+    from hexset.arena import _rollout
+    from hexset.clients._modelmeta import _moves
+
+    entrant = _rollout("rollout:net.pt@64:top=6:setup=full:roots=moves")
+    assert entrant.option("moves") is True and entrant.name.endswith("A")
+    assert _rollout("rollout:net.pt@64:roots=whole").option("moves", False) is False
+    with pytest.raises(ValueError):
+        _rollout("rollout:net.pt@64:roots=atomic")
+    assert _moves("moves") is True and _moves("whole") is False and _moves(None) is False
+    with pytest.raises(ValueError):
+        _moves("atomic")

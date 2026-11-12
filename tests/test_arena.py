@@ -64,6 +64,24 @@ def test_an_mcts_entrant_can_play_its_confident_roots_without_search():
             entrant_from_name(f"mcts:/tmp/x.pt@128:decisive={bad}")
 
 
+def test_an_mcts_entrant_can_halve_its_root_and_search_only_setup():
+    """`top` and `stages` ride as entrant options, as `decisive` does."""
+    both = entrant_from_name("mcts:/tmp/x.pt@4096:top=16:stages=setup")
+    assert (both.name, both.simulations, both.option("top"), both.option("stages")) == (
+        "mcts4096t16-setup", 4096, 16, "setup")
+    assert entrant_from_name("mcts:/tmp/x.pt@:top=6").name == "mctst6"
+    assert entrant_from_name("mcts:/tmp/x.pt@128:decisive=0.9:top=4").options == (("decisive", 0.9), ("top", 4))
+    assert pickle.loads(pickle.dumps(both)) == both
+    for bad in ("top=1", "top=six", "stages=main", "stages", "root=puct"):
+        with pytest.raises(ValueError, match="root=gumbel, stages=setup or whole=1"):
+            entrant_from_name(f"mcts:/tmp/x.pt@128:{bad}")
+    gumbel = entrant_from_name("mcts:/tmp/x.pt@1024:top=16:root=gumbel")
+    assert (gumbel.name, gumbel.option("top"), gumbel.option("root")) == ("mcts1024g16", 16, "gumbel")
+    for bad in ("root=gumbel", "k=2:top=16:root=gumbel"):
+        with pytest.raises(ValueError, match="needs top"):
+            entrant_from_name(f"mcts:/tmp/x.pt@128:{bad}")
+
+
 def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
     plain = entrant_from_name("rollout:/tmp/x.onnx")
     assert (plain.name, plain.kind, plain.simulations, plain.option("top")) == ("rollout32t3", "rollout", 32, 3)
@@ -88,10 +106,25 @@ def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
     plain_det = entrant_from_name("rollout:/tmp/x.onnx@64:det=1")
     assert plain_det.name == "rollout64t3D" and plain_det.option("salt") is None
     assert entrant_from_name("rollout:/tmp/x.onnx@64:det=0") == entrant_from_name("rollout:/tmp/x.onnx@64")
+    held = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:det=1:margin=1.5")
+    assert held.name == "rollout64t6h8DM1.5" and held.option("margin") == 1.5
+    assert entrant_from_name("rollout:/tmp/x.onnx@64:margin=0") == entrant_from_name("rollout:/tmp/x.onnx@64")
+    stopping = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:det=1:margin=1.5:stop=1")
+    assert stopping.name == "rollout64t6h8DM1.5S1" and stopping.option("stop") == 1.0
+    assert entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5:stop=0") == entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5")
+    # The tie-break is on at `TIE` under a margin: the default names nothing.
+    assert entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5:tie=0.005") == entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5")
+    tying = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:det=1:margin=1.5:stop=1:tie=0.01")
+    assert tying.name == "rollout64t6h8DM1.5S1T0.01" and tying.option("tie") == 0.01
+    untied = entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5:tie=0")
+    assert untied.name == "rollout64t3M1.5T0" and untied.option("tie") == 0.0
     for bad in ("@0", "@:top=1", "@:decisive=2", "@:horizon=0", "@:top=2:top=3", "@:depth=3",
                 "@:setup=half", "@:setup", "@:mix=-0.1", "@:mix=hot", "@:mix=inf", "@:mix",
                 "@:anchor=0.5", "@:mix=0:anchor=0.5", "@:mix=0.01:anchor=-1", "@:mix=0.01:anchor=flat",
-                "@:det=2", "@:det", "@:salt=3", "@:det=0:salt=3", "@:det=1:salt=-3", "@:det=1:salt=x"):
+                "@:det=2", "@:det", "@:salt=3", "@:det=0:salt=3", "@:det=1:salt=-3", "@:det=1:salt=x",
+                "@:margin=-1", "@:margin=wide", "@:margin", "@:mix=0.01:margin=1.5", "@1:margin=1.5",
+                "@:stop=1", "@:margin=1.5:stop=-1", "@:margin=1.5:stop=soon",
+                "@:tie=0.005", "@:margin=1.5:tie=-0.1", "@:margin=1.5:tie=1", "@:margin=1.5:tie=close"):
         with pytest.raises(ValueError):
             entrant_from_name(f"rollout:/tmp/x.onnx{bad}")
 

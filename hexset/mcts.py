@@ -36,7 +36,8 @@ from .actions import (
     victim_of,
 )
 from .chance import Live
-from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, roll_odds, to_move
+from .decisions import Compound, Option, Plans, apply_option, inside, option_json
+from .game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, roll_odds, to_move
 from .native.playout import NativeCopy, copyable, held
 from .victory import public_victory_points
 from .view import HoldReading
@@ -56,6 +57,7 @@ __all__ = [
     "calibrate_own",
     "Decision",
     "Search",
+    "SETUP_PHASES",
     "visit_policy",
 ]
 
@@ -67,6 +69,10 @@ class Leaf:
     game: Game
     seat: int
     options: tuple[Action, ...]
+    # Whether the leaf opens a whole decision the search lists as whole
+    # options (`Search.whole`): the evaluator answers them in
+    # `Evaluation.options`, not a prior over `options`.
+    whole: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,9 @@ class Evaluation:
     prior: Sequence[float]
     value: Sequence[float]
     observer_values: Sequence[Sequence[float]] | None = None
+    # At a `Leaf.whole` leaf, the whole options (`hexset.decisions.Option`)
+    # `prior` is over, which become the node's edges; `None` elsewhere.
+    options: Sequence[Option] | None = None
 
     # Keep the historical two-item evaluator result usable by callers that
     # unpack, index, or take its length. Observer rows are additive metadata.
@@ -135,7 +144,7 @@ def draws_hidden(game: Game, action: Action) -> bool:
     that names nobody steals nothing, so its child stays on the deterministic
     path. The tree's own test for a chance edge, for a caller expanding
     children outside it (`sampled_children`)."""
-    if action.type not in HIDDEN_DRAW:
+    if isinstance(action, Compound) or action.type not in HIDDEN_DRAW:
         return False
     if action.type is ActionType.BUY_DEV_CARD:
         return True
@@ -260,6 +269,17 @@ class Node:
     # the Python tree reads it off `Game._state.dice`: what `Search._roll`
     # draws by. `None` under independent dice and on every Python node.
     dice: object = None
+    # A Gumbel root's final score per option (`Search(root="gumbel")`): the
+    # options still in when the budget ran out carry noise + logit + sigma(q),
+    # every other option -inf. `None` on every other node.
+    gumbel: np.ndarray | None = None
+    # The roll's odds at this node once a descent has drawn one (`Search._roll`):
+    # a node's position never changes, so neither do they.
+    roll_chances: tuple[tuple[int, float], ...] | None = None
+    # Whether this node opens a whole decision searched as whole options
+    # (`Search.whole`): its atomic `options` until it is expanded, then the
+    # evaluator's whole options.
+    whole: bool = False
 
     @property
     def expanded(self) -> bool:
@@ -270,6 +290,10 @@ class Node:
         return not self.options
 
 
+#: The setup placements: what `Search(stages="setup")` searches.
+SETUP_PHASES = frozenset({Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD})
+
+
 @dataclass
 class _Run:
     root: Node
@@ -277,6 +301,15 @@ class _Run:
     # This world's own simulation budget; see `Search.run_many`.
     budget: int = 0
     share: float = 1.0
+    # Whether the decision is a setup placement (`Search.stages`).
+    setup: bool = False
+    # Sequential halving at the root (`Search.top`): the root edges still in,
+    # the halvings left, and the root edges queued for this round's descents.
+    survivors: list[int] | None = None
+    halvings: int = 0
+    queue: list[int] = field(default_factory=list)
+    # The Gumbel root's noise plus log prior per root option (`Search.root`).
+    noisy_logits: np.ndarray | None = None
 
 
 def _own_rows(vectors: np.ndarray, seat: int) -> np.ndarray:
@@ -408,7 +441,7 @@ class Decision:
                          key=lambda i: (-self.visits[i], i))
         out.update(
             candidates=visited,
-            actions=[[self.options[i].type.name, self.options[i].a, self.options[i].b] for i in visited],
+            actions=[option_json(self.options[i]) for i in visited],
             prior=[r(self.prior[i]) for i in visited],
             visits=[r(self.visits[i]) for i in visited],
             means=[r(self.means[i]) for i in visited],
@@ -453,8 +486,42 @@ class Search:
     with one legal move is, and no simulation is spent. `None`, the default,
     searches every root with more than one move.
 
+    `stages="setup"` searches only the setup placements (`SETUP_PHASES`):
+    every other root is played as `decisive` plays a confident one, its top
+    prior move credited with the whole budget. `None`, the default, searches
+    every stage.
+
+    `top` replaces PUCT at the root with sequential halving over the root's
+    `top` highest-prior moves: the budget is split into `ceil(log2(top))`
+    rounds, each round gives every move still in the same number of
+    descents, and after each round the half with the lower mean (the
+    mover's stance reading) is dropped; what is left of the budget goes to
+    the last move standing. Below the root the tree selects by PUCT as
+    before. Each candidate is searched whatever its prior, so a peaked prior
+    cannot keep the search from looking at the alternatives. The chosen move
+    is the most visited, ties broken by the higher mean. `None`, the
+    default, selects by PUCT at the root too.
+
+    `root="gumbel"` (with `top`) is Gumbel MuZero's root instead: the `top`
+    candidates are the highest Gumbel noise plus log prior, drawn from `rng`,
+    each round keeps the half with the highest noise + log prior +
+    sigma(q), and the move played is the highest of that score among the
+    moves still in when the budget runs out. q is each move's mean (the
+    mover's stance reading) rescaled to [0, 1] over the root's visited
+    moves, and sigma(q) = (50 + the root's most visits) * 0.1 * q. One world
+    only (`k=1`). `root="halving"`, the default with `top`, is the rule above.
+
     `decision_log` keeps every decision `decide` (and so `choose`) made, in
     order, as a `Decision`; `run` and `run_many` log nothing.
+
+    `whole` searches every node that opens a decision of several moves (a
+    setup turn, a discard, a position where Road Building can be played) over
+    the decision's whole options, as the evaluator lists them with their
+    probabilities (`Leaf.whole`, `Evaluation.options`; the evaluator must
+    state `lists_options`), each edge applying the whole decision, and plays
+    a chosen whole option a move at a time: `choose` returns its first move
+    and answers the asks inside it from the rest, unsearched. Off by default,
+    every node searches atomic moves.
 
     `against` names seats the search plays against as one side (`side_value`):
     at a node whose mover is not one of them, the mover ranks a position by
@@ -479,6 +546,10 @@ class Search:
         against: Collection[int] = (),
         own_calibration: tuple[float, float] | None = None,
         decisive: float | None = None,
+        stages: str | None = None,
+        top: int | None = None,
+        root: str | None = None,
+        whole: bool = False,
     ) -> None:
         if stance not in STANCE_ROWS:
             raise ValueError(
@@ -491,6 +562,18 @@ class Search:
             raise ValueError("a search needs at least one determinized world")
         if decisive is not None and not 0.0 < decisive <= 1.0:
             raise ValueError(f"decisive is a prior in (0, 1], not {decisive!r}")
+        if stages not in (None, "setup"):
+            raise ValueError(f"stages is None or 'setup', not {stages!r}")
+        if top is not None and top < 2:
+            raise ValueError(f"top is at least 2 moves, not {top!r}")
+        if root not in (None, "halving", "gumbel"):
+            raise ValueError(f"root is None, 'halving' or 'gumbel', not {root!r}")
+        if root is not None and top is None:
+            raise ValueError("a halving or Gumbel root needs top")
+        if root == "gumbel" and k != 1:
+            raise ValueError("the Gumbel root searches one world (k=1)")
+        if whole and not getattr(evaluator, "lists_options", False):
+            raise ValueError("a whole-decision search needs an evaluator that lists whole options")
         self.evaluator = evaluator
         self.simulations = simulations
         self.wave = wave
@@ -508,6 +591,12 @@ class Search:
             else (float(own_calibration[0]), float(own_calibration[1]))
         )
         self.decisive = None if decisive is None else float(decisive)
+        self.stages = stages
+        self.top = None if top is None else int(top)
+        self.root = None if top is None else (root or "halving")
+        self.whole = bool(whole)
+        #: The rest of each whole option `choose` played the first move of.
+        self._plans = Plans()
         self.decision_log: list[Decision] = []
         self.play_against(against)
 
@@ -550,6 +639,19 @@ class Search:
             return game.legal()
         return tuple(legal_actions(game))
 
+    @staticmethod
+    def _opens_whole(game, options: Sequence[Action]) -> bool:
+        """Whether a position opens a decision of several moves
+        (`hexset.decisions.opens`): a setup turn, a discard, or one where Road
+        Building can be played, and not inside a decision begun a move at a
+        time. Read off the phase and the atomic `options`, so it answers for a
+        native position too."""
+        if inside(game):
+            return False
+        if game.phase in (Phase.SETUP_SETTLEMENT, Phase.DISCARD):
+            return True
+        return any(option.type is ActionType.PLAY_ROAD_BUILDING for option in options)
+
     def _held(self, world: Game):
         """`world` as this tree's root position: held natively where the
         evaluator's policy reads native positions and the engine takes the
@@ -581,6 +683,7 @@ class Search:
             totals=np.zeros((len(options), seats)),
             ranked=np.zeros(len(options)),
             dice=dice if native else None,
+            whole=bool(options) and self.whole and self._opens_whole(game, options),
         )
         if node.terminal:
             node.value = tuple(float(v) for v in self.evaluator.terminal(game))
@@ -593,6 +696,8 @@ class Search:
         chance edge reads the outcome off it before it knows whether it already
         holds a node, and wrapping one costs a `legal_actions`."""
         action = node.options[index]
+        if isinstance(action, Compound):
+            return self._advance_whole(node, action)
         if type(node.game) is NativeCopy:
             return self._advance_native(node.game, action, roll)
         # The encoder sees only deck size, never order, so the hidden-deck
@@ -630,10 +735,30 @@ class Search:
         child.apply(action)
         return child
 
+    def _advance_whole(self, node: Node, option: Compound):
+        """The position after a whole option (`Search.whole`): its parts
+        applied in order, a discard's by the node's mover, stopping where the
+        game ends. No part draws chance (a setup turn, Road Building's roads,
+        a discard), so the edge is deterministic."""
+        if type(node.game) is NativeCopy:
+            child = node.game.fork(_NO_CHANCE)
+            for part in option.parts:
+                if child.over():
+                    break
+                child.apply(part, node.mover if part.type is ActionType.DISCARD else None)
+            return child
+        child = imagine(node.game, self.rng, randomize_deck=False)
+        for part in option.parts:
+            if is_over(child):
+                break
+            apply(child, part, node.mover if part.type is ActionType.DISCARD else None)
+        return child
+
     def _dice_after(self, node: Node, index: int, roll: int | None) -> object:
         """The balanced-dice deck one edge on from a native node: rolled on a
         roll edge, as `roll_dice` rolls `Game._state.dice`; unchanged else."""
-        if node.dice is None or node.options[index].type is not ActionType.ROLL:
+        action = node.options[index]
+        if node.dice is None or isinstance(action, Compound) or action.type is not ActionType.ROLL:
             return node.dice
         return node.dice.rolled(node.game.current_player, roll)
 
@@ -717,16 +842,69 @@ class Search:
                 self.noise_fraction * draw / total
             )
 
-    def _descend(self, root: Node) -> tuple[list[tuple[Node, int]], Node]:
+    def _halving_start(self, run: _Run) -> None:
+        """Sequential halving's candidates at `run`'s root: its `top`
+        highest-prior moves, ties to the lower index."""
+        prior = run.root.prior
+        assert prior is not None
+        m = min(self.top, len(run.root.options))
+        if self.root == "gumbel":
+            logits = np.log(np.maximum(np.asarray(prior, dtype=np.float64), 1e-30))
+            noise = np.array([-math.log(-math.log(max(self.rng.random(), 1e-300))) for _ in range(len(logits))])
+            run.noisy_logits = noise + logits
+            run.survivors = [int(i) for i in np.argsort(-run.noisy_logits, kind="stable")[:m]]
+        else:
+            run.survivors = [int(i) for i in np.argsort(-prior, kind="stable")[:m]]
+        run.halvings = max(1, math.ceil(math.log2(m)))
+        run.queue = []
+
+    def _halving_next(self, run: _Run) -> None:
+        """Queue the next round's root edges: drop the lower-mean half first
+        when a round has been played, then give each move still in an equal
+        share of the rounds' remaining budget; with one move left, all of it."""
+        root, survivors = run.root, run.survivors
+        assert survivors is not None
+        if root.visits[survivors[0]] > 0 and len(survivors) > 1:
+            score = self._gumbel_scores(run) if self.root == "gumbel" else {
+                i: float(root.ranked[i] / root.visits[i]) for i in survivors}
+            ranked = sorted(survivors, key=lambda i: (-score[i], survivors.index(i)))
+            run.survivors = survivors = ranked[: math.ceil(len(survivors) / 2)]
+            run.halvings -= 1
+        remaining = run.budget - run.done
+        if len(survivors) == 1 or run.halvings <= 0:
+            run.queue = [survivors[0]] * remaining
+            return
+        each = max(1, remaining // (run.halvings * len(survivors)))
+        run.queue = [i for _ in range(each) for i in survivors][:remaining]
+
+    def _gumbel_scores(self, run: _Run) -> dict[int, float]:
+        """Noise + log prior + sigma(q) for each move still in at `run`'s root."""
+        root = run.root
+        visited = np.flatnonzero(root.visits > 0)
+        means = root.ranked[visited] / root.visits[visited]
+        low, high = float(means.min()), float(means.max())
+        scale = (50.0 + float(root.visits.max())) * 0.1
+        out = {}
+        for i in run.survivors:
+            q = 0.0 if root.visits[i] == 0 or high <= low else (float(root.ranked[i] / root.visits[i]) - low) / (high - low)
+            out[i] = float(run.noisy_logits[i]) + scale * q
+        return out
+
+    def _descend(self, root: Node, first: int | None = None) -> tuple[list[tuple[Node, int]], Node]:
+        """One descent from `root`, by PUCT at every node, except that `first`,
+        when given, is the root's edge (sequential halving's schedule)."""
         path: list[tuple[Node, int]] = []
         node = root
         while node.expanded and not node.terminal:
-            index = self._select(node)
+            if first is not None and node is root:
+                index = first
+            else:
+                index = self._select(node)
             node.virtual[index] += 1
             path.append((node, index))
             slot = node.children[index]
             action = node.options[index]
-            if action.type is ActionType.ROLL:
+            if not isinstance(action, Compound) and action.type is ActionType.ROLL:
                 if slot is None:
                     slot = _Chance()
                     node.children[index] = slot
@@ -754,11 +932,14 @@ class Search:
     def _roll(self, node: Node) -> int:
         """A roll for the seat on turn, at the position's odds (`roll_odds`;
         at a native node, its tracked dice deck's)."""
-        game = node.game
-        if type(game) is NativeCopy:
-            odds = ROLL_ODDS if node.dice is None else node.dice.odds(game.current_player)
-        else:
-            odds = roll_odds(game)
+        odds = node.roll_chances
+        if odds is None:
+            game = node.game
+            if type(game) is NativeCopy:
+                odds = ROLL_ODDS if node.dice is None else node.dice.odds(game.current_player)
+            else:
+                odds = roll_odds(game)
+            node.roll_chances = odds = tuple(odds)
         draw = self.rng.random()
         cumulative = 0.0
         for roll, weight in odds:
@@ -802,11 +983,25 @@ class Search:
                 total -= float(vector[retired])
             node.ranked[index] += visits * (vector[node.mover] * seats - total) / (seats - 1)
 
+    @staticmethod
+    def _reopen(node: Node, options: tuple[Option, ...]) -> None:
+        """A whole node's edges replaced by its whole options, before any
+        descent has crossed it: expansion comes before selection."""
+        if not options:
+            raise ValueError("a whole decision with no options")
+        count, seats = len(options), node.totals.shape[1]
+        node.options = options
+        node.children = [None] * count
+        node.visits = np.zeros(count)
+        node.virtual = np.zeros(count)
+        node.totals = np.zeros((count, seats))
+        node.ranked = np.zeros(count)
+
     def _expand(self, nodes: Sequence[Node], seats: Sequence[int] | None = None) -> None:
         """Give a whole wave of leaves its prior and value in one call.
         `seats`, one per node, is the seat each node's decision is searched
         for: the seat `own_calibration` recalibrates."""
-        wanted = [Leaf(node.game, node.mover, node.options) for node in nodes]
+        wanted = [Leaf(node.game, node.mover, node.options, node.whole) for node in nodes]
         scored = self.evaluator.evaluate(wanted)
         if len(scored) != len(wanted):
             raise ValueError(f"evaluator answered {len(scored)} of {len(wanted)} leaves")
@@ -814,7 +1009,13 @@ class Search:
             if isinstance(result, Evaluation):
                 prior, value = result.prior, result.value
                 observer_values = result.observer_values
+                if node.whole:
+                    if result.options is None:
+                        raise ValueError("a whole leaf was answered without its whole options")
+                    self._reopen(node, tuple(result.options))
             else:
+                if node.whole:
+                    raise ValueError("a whole leaf was answered without its whole options")
                 prior, value = result
                 observer_values = None
             node.prior = np.asarray(prior, dtype=np.float64)
@@ -835,7 +1036,7 @@ class Search:
                     raise ValueError(
                         f"observer values must be a finite {seats_count}x{seats_count} matrix"
                     )
-                if not np.allclose(matrix[node.mover], vector, rtol=0.0, atol=1e-7):
+                if any(abs(a - b) > 1e-7 for a, b in zip(matrix[node.mover].tolist(), vector.tolist())):
                     raise ValueError("value must match the leaf mover's observer row")
                 node.observer_values = tuple(
                     tuple(float(v) for v in row) for row in matrix
@@ -931,7 +1132,8 @@ class Search:
         for game in games:
             group = [
                 # true state: the balanced-dice deck is public.
-                _Run(self._node(self._held(world), world._state.dice), budget=self.simulations, share=share)
+                _Run(self._node(self._held(world), world._state.dice), budget=self.simulations, share=share,
+                     setup=game.phase in SETUP_PHASES)
                 for share, world in self.worlds(game)
             ]
             groups.append(group)
@@ -957,7 +1159,18 @@ class Search:
                         self._credit(run.root, best, vector, run.budget)
                         run.done = run.budget
                 open_roots = [run for run in open_roots if run.done < run.budget]
+            if self.stages == "setup":
+                for run in open_roots:
+                    if not run.setup:
+                        best = int(np.argmax(run.root.prior))
+                        vector = np.asarray(run.root.value, dtype=np.float64)
+                        self._credit(run.root, best, vector, run.budget)
+                        run.done = run.budget
+                open_roots = [run for run in open_roots if run.done < run.budget]
             self._perturb([run.root for run in open_roots])
+            if self.top is not None:
+                for run in open_roots:
+                    self._halving_start(run)
 
         while any(run.done < run.budget for run in runs):
             # Virtual loss makes collisions rare, not impossible: a wave wider
@@ -969,8 +1182,14 @@ class Search:
             wanted: list[Node] = []
             wanted_seats: list[int] = []
             for run in runs:
-                for _ in range(min(self.wave, run.budget - run.done)):
-                    path, leaf = self._descend(run.root)
+                count = min(self.wave, run.budget - run.done)
+                if run.survivors is not None and count > 0:
+                    if not run.queue:
+                        self._halving_next(run)
+                    count = min(count, len(run.queue))
+                for _ in range(count):
+                    first = run.queue.pop(0) if run.survivors is not None else None
+                    path, leaf = self._descend(run.root, first)
                     if leaf.expanded:
                         self._backup(path, leaf.observer_values or leaf.value or ())
                         run.done += 1
@@ -990,6 +1209,12 @@ class Search:
                         self._backup(path, leaf.observer_values or leaf.value or ())
                         run.done += 1
 
+        for run in runs:
+            if run.noisy_logits is not None:
+                final = np.full(len(run.root.options), -math.inf)
+                for i, v in self._gumbel_scores(run).items():
+                    final[i] = v
+                run.root.gumbel = final
         answers = [self._combine(group) for group in groups]
         return [(root, root.options, root.visits) for root in answers]
 
@@ -1016,10 +1241,20 @@ class Search:
                 and float(world.prior.max()) >= self.decisive
             )
             for _, world in root.worlds
-        )
+        ) and (self.stages is None or game.phase in SETUP_PHASES)
+        chosen = int(np.argmax(visits))
+        world = root.worlds[0][1] if root.worlds else root
+        if self.root == "gumbel" and world.gumbel is not None:
+            chosen = options.index(world.options[int(np.argmax(world.gumbel))])
+        elif self.top is not None:
+            # Halving can leave the last two moves level on visits: the
+            # higher mean is the one the last round kept.
+            most = visits == visits[chosen]
+            chosen = max(np.flatnonzero(most), key=lambda i: (np.nan_to_num(means[i], nan=-math.inf), -i))
+            chosen = int(chosen)
         decision = Decision(
             options, np.asarray(root.prior, dtype=np.float64), tuple(root.value),
-            np.asarray(visits, dtype=np.float64), means, int(np.argmax(visits)), searched,
+            np.asarray(visits, dtype=np.float64), means, chosen, searched,
             len(root.worlds), turn=game.turns, phase=game.phase.name, seat=seat,
             points=tuple(public_victory_points(seen, s) for s in range(seen.num_players)),
             simulations=self.simulations, cpu_seconds=time.process_time() - began,
@@ -1028,10 +1263,26 @@ class Search:
         return decision
 
     def choose(self, game: Game) -> Action:
-        """The most-visited root action: a rarely-visited edge can hold a high
-        mean off one lucky rollout, and PUCT's guarantees are about visits."""
+        """The most-visited root option (`_pick`): a rarely-visited edge can
+        hold a high mean off one lucky rollout, and PUCT's guarantees are
+        about visits. A whole option (`whole`) is played a move at a time: its
+        first move now, the rest held for the asks inside it, each answered
+        from the plan without a search."""
+        seat = to_move(game)
+        options = tuple(legal_actions(game))
+        if self._plans.planned(game, seat, options):
+            return self._plans.act(game, seat, options, None, None)
+        self._plans.drop(game)      # a plan the game has moved past is never played
         decision = self.decide(game)
-        return decision.options[decision.chosen]
+        option = decision.options[self._pick(game, decision)]
+        if isinstance(option, Compound):
+            self._plans.keep(game, decision.seat, option.parts[1:])
+            return option.parts[0]
+        return option
+
+    def _pick(self, game: Game, decision: Decision) -> int:
+        """Which of `decision`'s options `choose` plays at `game`: its `chosen`."""
+        return decision.chosen
 
 
 def visit_policy(visits: np.ndarray, temperature: float = 1.0) -> np.ndarray:

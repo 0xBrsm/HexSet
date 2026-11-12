@@ -1663,13 +1663,14 @@ def _coalition(name: str) -> Entrant:
 
 #: `handoff:<round>:<first>|<second>`: `<first>`'s moves through round
 #: `<round>`, `<second>`'s after it, trading `<first>`'s throughout
-#: (`hexset.bots.Handoff`).
+#: (`hexset.bots.Handoff`); `handoff:setup:<first>|<second>` hands over when
+#: the setup placements end.
 HANDOFF = "handoff:"
 HANDOFF_KIND = "handoff"
-_HANDOFF_FORM = "handoff:<round>:<first>|<second>"
+_HANDOFF_FORM = "handoff:<round|setup>:<first>|<second>"
 
 
-def handoff(first: str, second: str, at: int, name: str | None = None) -> Entrant:
+def handoff(first: str, second: str, at: int | str, name: str | None = None) -> Entrant:
     """The seat that plays `first`'s moves through round `at` and `second`'s
     after it (`hexset.bots.Handoff`); named `handoff:<at>:<first>|<second>`
     unless `name` says otherwise."""
@@ -1680,14 +1681,14 @@ def handoff(first: str, second: str, at: int, name: str | None = None) -> Entran
 def _handoff(name: str) -> Entrant:
     at, colon, parts = name[len(HANDOFF):].partition(":")
     first, bar, second = parts.partition("|")
-    if not (colon and bar and at.isdigit() and first and second):
+    if not (colon and bar and (at.isdigit() or at == "setup") and first and second):
         raise ValueError(f"{name!r}: a handoff reads {_HANDOFF_FORM}")
     for part in (first, second):
         # Refuse an unknown bot here, not at the deal. A coalition member is
         # one because its seat is a `Coalition`, which a handoff's is not.
         if entrant_from_name(part).kind == COALITION_KIND:
             raise ValueError(f"{name!r}: a coalition member is seated whole, not handed a round")
-    return handoff(first, second, int(at))
+    return handoff(first, second, at if at == "setup" else int(at))
 
 
 def _coalition_trader(name: str) -> str:
@@ -1747,7 +1748,7 @@ def _network(name: str) -> Entrant:
     )
 
 
-_MCTS_FORM = "mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>][:decisive=<prior>]]"
+_MCTS_FORM = "mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>][:decisive=<prior>][:top=<n>[:root=gumbel]][:stages=setup][:whole=1]]"
 
 
 def _mcts(name: str) -> Entrant:
@@ -1755,7 +1756,11 @@ def _mcts(name: str) -> Entrant:
     # part after the path is optional. `k` is `Entrant.k`: determinized worlds
     # searched per decision. `decisive` is the prior at which a root is played
     # without searching (`hexset.mcts.Search`), carried as the entrant option
-    # of that name so an entrant without it is unchanged.
+    # of that name so an entrant without it is unchanged; so are `top`
+    # (sequential halving over that many root moves; `root=gumbel` for
+    # Gumbel MuZero's root), `stages=setup`
+    # (search only the setup placements) and `whole=1` (search decisions of
+    # several moves as whole options, `hexset.mcts.Search.whole`).
     path, at, search = name[len(MCTS) :].partition("@")
     if not at and any("=" in part for part in path.split(":")[1:]):
         raise ValueError(
@@ -1770,6 +1775,10 @@ def _mcts(name: str) -> Entrant:
     width = int(wave) if separator else 16
     worlds = 1
     decisive = None
+    top = None
+    stages = None
+    root = None
+    whole = False
     seen = set()
     for option in (part for part in options.split(":") if part):
         key, assigned, value = option.partition("=")
@@ -1780,10 +1789,21 @@ def _mcts(name: str) -> Entrant:
             worlds = int(value)
         elif key == "decisive" and assigned and _prior(value) is not None:
             decisive = _prior(value)
+        elif key == "top" and assigned and value.isdigit() and int(value) >= 2:
+            top = int(value)
+        elif key == "stages" and assigned and value == "setup":
+            stages = value
+        elif key == "root" and assigned and value == "gumbel":
+            root = value
+        elif key == "whole" and assigned and value == "1":
+            whole = True
         else:
             raise ValueError(
-                f"unknown MCTS option: {option!r}; use k=<n> or decisive=<prior in (0, 1]>"
+                f"unknown MCTS option: {option!r}; use k=<n>, decisive=<prior in (0, 1]>, "
+                "top=<n at least 2>, root=gumbel, stages=setup or whole=1"
             )
+    if root is not None and (top is None or worlds != 1):
+        raise ValueError(f"{name!r}: root=gumbel needs top=<n> and one world")
     label = f"mcts{simulations}w{width}" if separator else f"mcts{budget}"
     if worlds > 1:
         label = f"{label}k{worlds}" if (budget or separator) else f"mctsk{worlds}"
@@ -1791,6 +1811,18 @@ def _mcts(name: str) -> Entrant:
     if decisive is not None:
         label = f"{label if named else 'mcts'}d{_value_text(decisive)}"
         named = True
+    if top is not None:
+        label = f"{label if named else 'mcts'}{'g' if root else 't'}{top}"
+        named = True
+    if stages is not None:
+        label = f"{label if named else 'mcts'}-{stages}"
+        named = True
+    if whole:
+        label = f"{label if named else 'mcts'}whole"
+        named = True
+    options = (() if decisive is None else (("decisive", decisive),)) \
+        + (() if top is None else (("top", top),)) + (() if root is None else (("root", root),)) \
+        + (() if stages is None else (("stages", stages),)) + ((("whole", True),) if whole else ())
     return Entrant(
         name=label if named else "mcts",
         kind="mcts",
@@ -1798,12 +1830,12 @@ def _mcts(name: str) -> Entrant:
         simulations=simulations,
         wave=width,
         k=worlds,
-        options=() if decisive is None else (("decisive", decisive),),
+        options=options,
     )
 
 
 _ROLLOUT_FORM = (
-    "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full][:mix=<temperature>[:anchor=<exponent>]][:det=1[:salt=<n>]]]"
+    "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full][:mix=<temperature>[:anchor=<exponent>]][:det=1[:salt=<n>]][:margin=<standard errors>[:stop=<standard errors>][:tie=<win chance>]][:roots=moves]]"
 )
 
 
@@ -1816,8 +1848,19 @@ def _rollout(name: str) -> Entrant:
     # `PairedRollouts.mix`, where 0 is the greedy search it is without one;
     # `anchor=<exponent>` raises the prior it is anchored to, 1 by default;
     # `det=1` seeds each searched decision from what the seat can see and
-    # `salt=<n>`, 0 by default, `PairedRollouts.det`).
+    # `salt=<n>`, 0 by default, `PairedRollouts.det`; `margin=<standard errors>`
+    # plays another move than the policy's own only where it clears that many
+    # standard errors of the paired difference, `PairedRollouts.margin`;
+    # `stop=<standard errors>` under a margin stops playing a candidate that
+    # trails the policy's move by more than that many at a check,
+    # `PairedRollouts.stop`; `tie=<win chance>` under a margin decides a root
+    # whose candidates win alike by the point lead, `PairedRollouts.tie`, on
+    # at `TIE` unless given, `tie=0` off; `roots=moves` searches every root as
+    # a single move, whole options or not, `PairedRollouts.moves`, and
+    # `roots=whole` is the default).
     # `worlds` rides as `Entrant.simulations`, the rest as entrant options.
+    from .rollout import TIE  # the search's own default, read where it is parsed
+
     path, at, spec = name[len(ROLLOUT) :].partition("@")
     if not at and any("=" in part for part in path.split(":")[1:]):
         raise ValueError(f"{name!r}: options follow the `@`, as in {_ROLLOUT_FORM}")
@@ -1826,7 +1869,8 @@ def _rollout(name: str) -> Entrant:
         raise ValueError(f"{name!r}: the worlds read {_ROLLOUT_FORM}")
     worlds = int(budget) if budget else 32
     top, decisive, horizon, full_setup, mix, anchor = 3, None, None, False, 0.0, 1.0
-    det, salt = False, 0
+    det, salt, margin, stop, moves, tie = False, 0, 0.0, 0.0, False, TIE
+    tie_given = False
     seen = set()
     for option in (part for part in options.split(":") if part):
         key, assigned, value = option.partition("=")
@@ -1849,17 +1893,34 @@ def _rollout(name: str) -> Entrant:
             det = value == "1"
         elif key == "salt" and assigned and value.isdigit():
             salt = int(value)
+        elif key == "margin" and assigned and _temperature(value) is not None:
+            margin = _temperature(value)
+        elif key == "stop" and assigned and _temperature(value) is not None:
+            stop = _temperature(value)
+        elif key == "roots" and assigned and value in ("whole", "moves"):
+            moves = value == "moves"
+        elif key == "tie" and assigned and _temperature(value) is not None and _temperature(value) < 1.0:
+            tie, tie_given = _temperature(value), True
         else:
             raise ValueError(
                 f"unknown rollout option: {option!r}; use top=<n of 2 or more>, "
                 "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more>, setup=full "
                 "mix=<temperature, 0 or more> with anchor=<exponent, 0 or more>, "
-                "or det=<0 or 1> with salt=<whole number>"
+                "det=<0 or 1> with salt=<whole number>, or margin=<standard errors, 0 or more> "
+                "with stop=<standard errors, 0 or more>, tie=<win chance in [0, 1)>, or roots=<whole or moves>"
             )
     if "anchor" in seen and not mix:
         raise ValueError(f"{name!r}: anchor shapes a mixed strategy; give it a mix=<temperature> above 0")
     if "salt" in seen and not det:
         raise ValueError(f"{name!r}: salt seeds a deterministic search; give it det=1")
+    if margin and mix:
+        raise ValueError(f"{name!r}: a margin and a mixed strategy do not combine; give one of margin and mix")
+    if margin and worlds < 2:
+        raise ValueError(f"{name!r}: a margin needs at least two worlds")
+    if stop and not margin:
+        raise ValueError(f"{name!r}: stop ends candidates under a margin; give it a margin=<standard errors> above 0")
+    if tie_given and tie and not margin:
+        raise ValueError(f"{name!r}: tie breaks what a margin leaves tied; give it a margin=<standard errors> above 0")
     label = f"rollout{worlds}t{top}"
     if decisive is not None:
         label = f"{label}d{_value_text(decisive)}"
@@ -1873,6 +1934,14 @@ def _rollout(name: str) -> Entrant:
         label = f"{label}a{_value_text(anchor)}"
     if det:
         label = f"{label}D{salt if salt else ''}"
+    if margin:
+        label = f"{label}M{_value_text(margin)}"
+    if stop:
+        label = f"{label}S{_value_text(stop)}"
+    if moves:
+        label = f"{label}A"
+    if margin and tie != TIE:
+        label = f"{label}T{_value_text(tie)}"
     return Entrant(
         name=label,
         kind="rollout",
@@ -1885,7 +1954,11 @@ def _rollout(name: str) -> Entrant:
         + ((("mix", mix),) if mix else ())
         + ((("anchor", anchor),) if anchor != 1.0 else ())
         + ((("det", True),) if det else ())
-        + ((("salt", salt),) if det and salt else ()),
+        + ((("salt", salt),) if det and salt else ())
+        + ((("margin", margin),) if margin else ())
+        + ((("stop", stop),) if stop else ())
+        + ((("moves", True),) if moves else ())
+        + ((("tie", tie),) if margin and tie != TIE else ()),
     )
 
 

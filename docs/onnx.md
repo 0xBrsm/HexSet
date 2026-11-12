@@ -65,12 +65,17 @@ engine's board indexing.
 | `anchor` | The exponent on the prior that `mix` is anchored to: `1` the prior itself, `0` every candidate alike, under `search=rollout` | Absent: `1`. A value that is not a finite number of 0 or more fails the load |
 | `det` | `1`: each searched root draws its worlds, their seeds and its `mix` draw from a stream seeded by what the deciding seat can see (`hexset.game.observed_digest`) and `salt`, under `search=rollout` | Absent or `0`: the searcher's own running stream. Any other value fails the load |
 | `salt` | A whole number mixed into `det`'s seed | Absent: `0`. A value that is not a whole number, or one given without `det = 1`, fails the load |
+| `margin` | Standard errors: a searched root outside the setup phases plays another candidate than the policy's own move only where it beats that move by more than this many standard errors of their paired difference over the worlds (`hexset.rollout.PairedRollouts.margin`), under `search=rollout` | Absent or `0`: the best-scoring candidate. A value that is not a finite number of 0 or more, or one above 0 with a `mix` above 0, fails the load |
+| `stop` | Standard errors: under a `margin`, a candidate that trails the policy's own move by more than this many standard errors at a check is played no further (`hexset.rollout.PairedRollouts.stop`), under `search=rollout` | Absent or `0`: every candidate plays every world. A value that is not a finite number of 0 or more, or one above 0 without a `margin` above 0, fails the load |
+| `roots` | `moves`: every searched root a single move, whole options or not (`hexset.rollout.PairedRollouts.moves`), under `search=rollout` | Absent or `whole`: whole decisions where the policy lists them. Any other value fails the load |
+| `tie` | A win chance in [0, 1): under a `margin`, a root where no candidate passes it is decided by the point lead among the candidates whose score lies within this of the policy's own move, with `margin` standard errors to spare (`hexset.rollout.PairedRollouts.tie`), under `search=rollout` | Absent: 0.005 (`hexset.rollout.TIE`), which acts only under a `margin`. `0`: the lead plays no part. A value that is not a number in [0, 1), or one above 0 without a `margin` above 0, fails the load |
 | `opponents`, `opponent_encoder` | Two files beside this one that play every other seat of a playout, under `search=rollout` ([opponent models](#opponent-models)) | Absent: the file's own policy plays every seat. One without the other, or a name with a path in it, fails the load |
 | `own_calibration` | `"a,b"`: the seat's own win chance read as `sigmoid(a + b * logit(p))` (`hexset.mcts.calibrate_own`), the other seats scaled so the vector keeps its sum. Under `search=mcts`, at every evaluated position and in the trade gate; otherwise in the trade gate and robber deals alone | Absent: no recalibration. A value that is not two finite numbers with `b > 0` fails the load |
 | `finish_decisions` | Read the graph's values where a setup turn or Road Building card is finished, not inside it (`hexset.clients.finishing.Finishing`): for a value head taught only where decisions start | Off; `1`/`true`/`yes`/`on` enable it |
 | `committee` | Member files beside this one, joined by `+`, that vote with it ([committees](#committees)) | Absent: the file plays alone |
 | `closer` | A bot, named as a lineup names it, whose move is played in place of the checkpoint's wherever the closer has one (`hexset.arena.closed`, `hexset.bots.Closes`) | Absent or empty: none |
 | `robber_tip` | Under one forward per decision, how far a robber move leans towards the leader (the other seat with the highest value): the leader's best robber move by prior is played in place of the chosen one where its prior is at least this fraction of the chosen one's (`hexset.clients.netbot.tip_robber`) | `0.0`, off; held to `[0.0, 1.0]`; an unreadable value is off |
+| `robber_hits` | Where a hex with another seat's building and none of the mover's is legal, a robber move goes only to such a hex (`hexset.clients.netbot.hit_robber`): never to an empty hex or one the mover shares. A seat with no cards still counts: the robber blocks its hex. Where no such hex is legal, every move stays, so the rule never forces the robber onto the mover's own hexes. One forward scores the remaining moves and plays the best by prior; `search=rollout` searches only the remaining moves; `search=mcts` plays the most-visited remaining move | Off; `1`/`true` enable it |
 | `hold_shape`, `hold_scale` | How other seats' held development cards are dealt in every world the seat samples (its search, its trade gate, its opponent model): a card of kind `k` is still unplayed after `c` of its owner's turns with probability `scale[k] ** (c ** shape)` (`hexset.holding.HoldModel`; `HoldModel.meta` writes both keys). `hold_scale` is one chance in (0, 1] per kind, comma separated, by `DevCard` | Absent: every unseen card is dealt alike. One key without the other, a shape that is not a positive number or a scale that is not one chance in (0, 1] per kind fails the load |
 
 Search keys are read only under the `search` that uses them, so a stale
@@ -126,7 +131,7 @@ raises there, naming the file; load the registering module with
 - a missing or non-integer `players` or board count, or a board count that
   does not match the topology;
 - a present `iteration` that is not an integer;
-- a `decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt` or `own_calibration` that does not read,
+- a `decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt`, `margin`, `stop`, `tie`, `roots` or `own_calibration` that does not read,
   and a lone `opponents` or `opponent_encoder`: these change what the seat
   does, so the load fails rather than playing on a guess;
 - a `committee` that names a member not beside the file, or a member that
@@ -143,7 +148,7 @@ raises there, naming the file; load the registering module with
 Everything else falls back. A missing, malformed, zero or negative search
 budget (`simulations`, `wave`, `worlds`, `top`) takes its default; a trade
 key takes its default when absent or unreadable and is clamped to its
-bounds; an unreadable `robber_tip` is off.
+bounds; an unreadable `robber_tip` or `robber_hits` is off.
 
 The device is the host's `--device` option and the `device` argument of
 `load`/`spawn`; metadata never sets it. `load(..., threads=1)` caps both ONNX

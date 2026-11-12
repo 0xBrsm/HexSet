@@ -64,6 +64,33 @@ what the deciding seat can see (`hexset.game.observed_digest`) and a fixed
 always searches the same worlds and plays the same move, in any process,
 on any fresh searcher, and a position rebuilt from a record searches as it
 was searched.
+
+**A margin.** Under `margin`, a searched root outside the setup phases
+plays another candidate than the policy's own move only where it beats that
+move by more than `margin` standard errors of their paired difference over
+the worlds; of the candidates that do, the best mean score is played, and
+where none does, the policy's own move. Setup roots keep the best mean.
+
+**Stopping early.** Under a margin, `stop` plays the worlds in stages
+(`STOP_CHECKS`) and, at each check, stops playing a candidate whose paired
+difference from the policy's own move is more than `stop` standard errors
+below zero, and the whole root once no other candidate is left. The
+candidates still in play at the last world are judged by the margin over
+every world. The worlds are the ones the full search draws, in the same
+order, so a candidate that plays every world plays the same worlds.
+
+**Ties on winning.** Under a margin, `tie` breaks a root where the
+candidates win alike by the point lead they play out to. Where no candidate
+clears the margin on its score, a candidate whose paired score difference
+from the policy's own move lies inside `tie` either way, with `margin`
+standard errors to spare, is tied with it; of the tied candidates, one is
+played over the policy's own move only where its point lead at the
+playout's end (its points less the mean of the other live seats') beats
+that move's by more than `margin` standard errors of their paired
+difference. Where the game is decided, every move scores alike and the lead
+decides; where it is not, the scores' error is wider than `tie` and nothing
+changes. It is on by default (`TIE`, 0.005) wherever a margin is; `tie` 0
+turns it off.
 """
 
 from __future__ import annotations
@@ -84,14 +111,14 @@ import numpy as np
 
 from .actions import Action, ActionType, apply, legal_actions
 from .chance import Balanced, Live
-from .decisions import Compound, Option, Plans, first_move, inside, opens
+from .decisions import Compound, Option, Plans, first_move, inside, opens, option_json
 from .game import Game, Phase, imagine, is_over, observed_digest, to_move
 from .native.playout import NativeCopy, copyable, held
-from .victory import public_victory_points
+from .victory import public_victory_points, victory_points
 from .view import HoldReading
 
 __all__ = [
-    "MARKS", "SETUP_PHASES", "STEP_LIMIT", "Decision", "Lanes", "PairedRollouts", "RolloutPool", "RolloutBatch",
+    "MARKS", "SETUP_PHASES", "STEP_LIMIT", "STOP_CHECKS", "TIE", "Decision", "Lanes", "PairedRollouts", "RolloutPool", "RolloutBatch",
     "SharedPools",
     "mixed_strategy", "paired_copy", "play_lanes",
 ]
@@ -104,6 +131,15 @@ STEP_LIMIT = 3000
 #: each playout's value is read for the decision log, at the mover's first
 #: turn start at least that far on.
 MARKS = (2, 4, 8, 16)
+
+#: The world counts at which `PairedRollouts.stop` checks the candidates still
+#: in play; a root checks those below its `worlds`.
+STOP_CHECKS = (8, 16, 24, 32, 48, 64, 96, 128, 192)
+
+#: `PairedRollouts.tie` by default: under a margin, candidates whose score
+#: lies within this win chance of the policy's own move are tied with it and
+#: the point lead decides between them. A seat turns it off with `tie` 0.
+TIE = 0.005
 
 #: The opening's phases, which `PairedRollouts(full_setup=True)` always searches.
 SETUP_PHASES = (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
@@ -147,7 +183,26 @@ class Decision:
     Under a mixed strategy (`PairedRollouts.mix`), `mix` is each candidate's
     probability (`mixed_strategy`, in `candidates` order), `chosen` the
     candidate drawn from it and `greedy` the one the best mean score would
-    have played; both are empty (`()`, `None`) for a greedy decision."""
+    have played; both are empty (`()`, `None`) for a greedy decision.
+
+    Under a margin (`PairedRollouts.margin`), `margin` is the margin applied
+    at the root (0 where none was: a setup root, or a root decided alone),
+    and where it held back the best mean score, `greedy` is the candidate
+    that score would have played.
+
+    Under early stopping (`PairedRollouts.stop`), `stop` is the threshold
+    applied at the root (0 where none was) and `played` the worlds each
+    candidate was played out in; a world a candidate was not played in holds
+    `nan` in `outcomes`, `mark_values` and `after_values` (`null` in the log),
+    and its `scores` are over the worlds it played.
+
+    Under a tie-break (`PairedRollouts.tie`), `tie` is the score margin
+    applied at the root (0 where none was), `leads` the point lead each
+    candidate's playout ended at in each world (`nan` where it was not
+    played), and `tied` the candidates the margin found tied with the
+    policy's own move, by index into `candidates`; where the lead played
+    another candidate than the policy's own move, `greedy` is the candidate
+    the best mean score would have played."""
 
     options: tuple[Option, ...]
     prior: np.ndarray
@@ -174,6 +229,12 @@ class Decision:
     greedy: int | None = None
     det_key: str = ""
     salt: int | None = None
+    margin: float = 0.0
+    stop: float = 0.0
+    played: tuple[int, ...] = ()
+    tie: float = 0.0
+    leads: tuple[tuple[float, ...], ...] = ()
+    tied: tuple[int, ...] = ()
 
     @property
     def move(self) -> Action:
@@ -199,7 +260,7 @@ class Decision:
         r = lambda x: round(float(x), 4)  # noqa: E731
         out.update(
             candidates=list(self.candidates),
-            actions=[_option_json(self.options[i]) for i in self.candidates],
+            actions=[option_json(self.options[i]) for i in self.candidates],
             prior=[r(self.prior[i]) for i in self.candidates],
             value=[r(v) for v in self.value],
             scores=[r(s) for s in self.scores],
@@ -215,18 +276,80 @@ class Decision:
             out.update(mix=[round(float(x), 6) for x in self.mix], greedy=self.greedy)
         if self.det_key:
             out.update(det_key=self.det_key, salt=self.salt)
+        if self.margin:
+            out["margin"] = self.margin
+            if self.greedy is not None:
+                out["greedy"] = self.greedy
+        if self.stop:
+            out.update(stop=self.stop, played=list(self.played))
+        if self.tie:
+            out.update(tie=self.tie, tied=list(self.tied),
+                       leads=[[_outcome(x) for x in row] for row in self.leads])
         return out
 
 
-def _option_json(option: Option) -> list:
-    if isinstance(option, Compound):
-        return [option.kind.name, [[p.type.name, p.a, p.b] for p in option.parts]]
-    return [option.type.name, option.a, option.b]
+def _clearing(table: np.ndarray, scores: np.ndarray, margin: float) -> int:
+    """The candidate column of `table` (worlds by candidates, the policy's
+    own move first) a margin plays: of the candidates whose mean paired
+    difference over column 0 exceeds `margin` standard errors of it, the
+    one with the highest mean score (the earlier on a tie); 0 where none
+    does."""
+    worlds = table.shape[0]
+    passing = []
+    for j in range(1, table.shape[1]):
+        d = table[:, j] - table[:, 0]
+        if d.mean() > margin * (d.std(ddof=1) / math.sqrt(worlds)):
+            passing.append(j)
+    if not passing:
+        return 0
+    return max(passing, key=lambda j: (scores[j], -j))
 
 
-def _outcome(x: float) -> float | int:
+def _tied(table: np.ndarray, j: int, margin: float, tie: float) -> bool:
+    """Whether column `j` of `table` (worlds by candidates, the policy's own
+    move first; `nan` where unplayed) scores within `tie` of column 0 either
+    way, with `margin` standard errors of their paired difference to spare,
+    over the worlds both played."""
+    d = table[:, j] - table[:, 0]
+    d = d[~np.isnan(d)]
+    if len(d) < 2:
+        return False
+    return abs(d.mean()) + margin * (d.std(ddof=1) / math.sqrt(len(d))) < tie
+
+
+def _trails(d: np.ndarray, stop: float) -> bool:
+    """Whether paired differences `d` from the policy's own move put a
+    candidate more than `stop` standard errors below it; with no spread,
+    whether it fails to lead."""
+    error = d.std(ddof=1) / math.sqrt(len(d))
+    return (d.mean() <= 0.0) if error == 0.0 else (d.mean() < -stop * error)
+
+
+def _lead_holds(d: np.ndarray) -> bool:
+    """Whether a tied candidate whose paired lead differences from the
+    policy's own move are `d` (`nan` where unplayed) plays on at a check
+    though its score trails: while its mean lead is above that move's."""
+    d = d[~np.isnan(d)]
+    return len(d) > 0 and float(d.mean()) > 0.0
+
+
+def _lead_of(game, seat: int) -> float:
+    """`seat`'s point lead in a playout copy: its victory points less the
+    mean of the other live seats', every card counted."""
+    if type(game) is NativeCopy:
+        points = game.state.referee_points().true_points
+    else:
+        points = tuple(victory_points(game._state, s) for s in range(game._state.num_players))
+    others = [points[s] for s in range(len(points)) if s != seat and s not in game.locked]
+    return float(points[seat] - sum(others) / len(others))
+
+
+def _outcome(x: float) -> float | int | None:
     """A playout's score as the log writes it: a finished game's 1 or 0
-    exactly, a value head's read to three places."""
+    exactly, a value head's read to three places, and `None` for a world an
+    early-stopped candidate was not played in."""
+    if math.isnan(x):
+        return None
     return int(x) if x in (0.0, 1.0) else round(float(x), 3)
 
 
@@ -308,6 +431,13 @@ class PairedRollouts:
     decision begun a move at a time without such a plan, the root is
     searched a move at a time.
 
+    Under `moves`, every searched root is a single move, whole options or
+    not: a setup turn's settlement is searched with each candidate's road
+    left to the playout's policy, and the road is a root of its own; Road
+    Building's card and each of its roads, and each card of a discard, the
+    same. Only the roots change: the playouts and an unsearched root play as
+    the policy plays (`act_rows`), its plans included.
+
     A playout runs to the game's end, scored 1 where the mover won and 0
     otherwise, or under `horizon` stops at the first turn start of the mover
     at least `horizon` turns (every seat's, counted as `Game.turns` counts
@@ -331,6 +461,36 @@ class PairedRollouts:
     draws nothing from `rng`, so the same visible position searches the same
     worlds and plays the same move on any searcher, in any process, and a
     run stays a function of the seeds that dealt its games.
+
+    Under `margin`, a number of standard errors above 0, a searched root
+    outside `SETUP_PHASES` compares each other candidate j with the policy's
+    own move (candidate 0) world by world: the differences
+    `d_j = outcomes[:, j] - outcomes[:, 0]`, their mean `m_j` and standard
+    error `s_j = std(d_j, ddof=1) / sqrt(worlds)`. A candidate passes where
+    `m_j > margin * s_j`; the passing candidate with the highest mean score
+    is played (the earlier on a tie), and where none passes, the policy's
+    own move. A margin needs at least two worlds and does not combine with
+    `mix`. At 0, the default, the best mean score is played as above.
+
+    Under `stop`, a number of standard errors above 0 that needs a margin,
+    a root the margin applies to plays its worlds in stages: at each count
+    of `STOP_CHECKS` below `worlds`, a candidate j still in play whose
+    `m_j < -stop * s_j` over the worlds played so far (or, where `s_j` is 0,
+    whose `m_j` is not above 0) is played no further,
+    and the root stops once only the policy's own move is left. The
+    candidates in play at the end are judged by the margin over every world.
+    At 0, the default, every candidate plays every world.
+
+    Under `tie`, a win chance in [0, 1) that acts only under a margin, a root
+    the margin applies to where no candidate passes it is decided by the point lead
+    instead: candidate j is tied with the policy's own move where
+    `|m_j| + margin * s_j < tie` over the worlds; of the tied candidates, the
+    margin rule is applied to the lead each playout ended at (the mover's
+    victory points less the mean of the other live seats', every card
+    counted), and where none passes, the policy's own move is played. Under
+    `stop`, a tied candidate whose score trails plays on at a check only
+    while its mean lead difference is above zero. The default is `TIE`; at 0,
+    or without a margin, the lead plays no part.
 
     `truncated_rollouts` counts the playouts scored that way over this
     searcher's life, `last_truncated_rollouts` those of its last decision.
@@ -368,6 +528,10 @@ class PairedRollouts:
         anchor: float = 1.0,
         det: bool = False,
         salt: int = 0,
+        margin: float = 0.0,
+        stop: float = 0.0,
+        moves: bool = False,
+        tie: float = TIE,
     ) -> None:
         if worlds < 1:
             raise ValueError("paired rollouts need at least one world")
@@ -388,6 +552,21 @@ class PairedRollouts:
             raise ValueError(f"anchor is an exponent of 0 or more, not {anchor!r}")
         if isinstance(salt, bool) or not isinstance(salt, int) or salt < 0:
             raise ValueError(f"salt is a whole number of 0 or more, not {salt!r}")
+        margin = float(margin)
+        if not (math.isfinite(margin) and margin >= 0.0):
+            raise ValueError(f"margin is a number of standard errors of 0 or more, not {margin!r}")
+        if margin > 0.0 and mix > 0.0:
+            raise ValueError("a margin and a mixed strategy do not combine: set one of margin and mix")
+        if margin > 0.0 and worlds < 2:
+            raise ValueError(f"a margin needs at least two worlds for a standard error, not {worlds!r}")
+        stop = float(stop)
+        if not (math.isfinite(stop) and stop >= 0.0):
+            raise ValueError(f"stop is a number of standard errors of 0 or more, not {stop!r}")
+        if stop > 0.0 and margin <= 0.0:
+            raise ValueError("stop ends a candidate the margin could not play: it needs a margin above 0")
+        tie = float(tie)
+        if not (math.isfinite(tie) and 0.0 <= tie < 1.0):
+            raise ValueError(f"tie is a win chance in [0, 1), not {tie!r}")
         self.policy = policy
         self.worlds = worlds
         self.top = top
@@ -402,6 +581,10 @@ class PairedRollouts:
         self.anchor = anchor
         self.det = bool(det)
         self.salt = salt
+        self.margin = margin
+        self.stop = stop
+        self.moves = bool(moves)
+        self.tie = tie
         # The mixed strategy's stream: off `rng`'s state, salted, so a draw never
         # moves the worlds and the worlds never move a draw.
         self._draws = random.Random(
@@ -441,7 +624,7 @@ class PairedRollouts:
         began = time.process_time()
         self.last_truncated_rollouts = 0
         seat = to_move(game)
-        options = tuple(legal_actions(game))
+        options = self.root_options(game)
         if not options:
             raise ValueError("no legal action to choose from")
         seen = game.state(seat).state
@@ -479,7 +662,9 @@ class PairedRollouts:
                 candidates: tuple[int, ...], context: dict, began: float, *, whole: bool) -> Decision:
         """`candidates` of `options` played out in shared worlds, the best
         mean score chosen (the earlier candidate on a tie) or, under `mix`,
-        one drawn from `mixed_strategy`, and logged."""
+        one drawn from `mixed_strategy`, or, under `margin` outside the setup
+        phases, the best of those clearing the margin over the policy's own
+        move (candidate 0), and logged."""
         # Worlds and seeds are drawn here, in order, whoever plays them out:
         # a pool's decision is the one this process would have made alone.
         draws, key = self._draws, ""
@@ -496,12 +681,22 @@ class PairedRollouts:
                 tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
             finally:
                 self.rng = running
-        lanes = self._lanes(tasks, tuple(options[i] for i in candidates), seat, game.turns)
-        self._keep(lanes)
-        after = lanes.after
-        outcomes = lanes.outcomes
-        table = outcomes.reshape(self.worlds, len(candidates))
-        scores = table.mean(axis=0)
+        margin = self.margin if self.margin and game.phase not in SETUP_PHASES else 0.0
+        stop = self.stop if margin else 0.0
+        tie = self.tie if margin else 0.0
+        moves = tuple(options[i] for i in candidates)
+        if stop:
+            table, after, reads, played, leads = self._staged(tasks, moves, seat, game.turns, stop, margin, tie)
+            scores = np.array([table[: played[j], j].mean() for j in range(len(candidates))])
+        else:
+            lanes = self._lanes(tasks, moves, seat, game.turns)
+            self._keep(lanes)
+            after = None if lanes.after is None else lanes.after.reshape(self.worlds, len(candidates))
+            table = lanes.outcomes.reshape(self.worlds, len(candidates))
+            reads = [self._mark_reads[m].reshape(self.worlds, len(candidates)) for m in range(len(self.marks))]
+            played = ()
+            scores = table.mean(axis=0)
+            leads = None if lanes.leads is None else lanes.leads.reshape(self.worlds, len(candidates))
         best = max(range(len(candidates)), key=lambda j: (scores[j], -j))
         mixed: tuple[float, ...] = ()
         picked = best
@@ -509,28 +704,102 @@ class PairedRollouts:
             probabilities = mixed_strategy(scores, prior[list(candidates)], self.mix, self.anchor)
             mixed = tuple(float(x) for x in probabilities)
             picked = self._draw(probabilities, draws)
-        reads = self._mark_reads
+        if margin:
+            # The policy's own move, and the candidates still in play at the last world.
+            alive = [0] + [j for j in range(1, len(candidates)) if not played or played[j] == self.worlds]
+            picked = alive[_clearing(table[:, alive], scores[alive], margin)]
+        tied: tuple[int, ...] = ()
+        if tie and picked == 0 and leads is not None:
+            # Nothing clears the margin on winning: the lead decides among the
+            # candidates that win alike with the policy's own move.
+            tied = tuple(j for j in alive[1:] if _tied(table, j, margin, tie))
+            if tied:
+                among = [0, *tied]
+                picked = among[_clearing(leads[:, among], leads[:, among].mean(axis=0), margin)]
+        held_back = bool(margin) and picked != best
         decision = Decision(
             options, prior, value, candidates,
             tuple(float(s) for s in scores), candidates[picked], self.worlds, whole, **context,
             outcomes=tuple(tuple(float(x) for x in row) for row in table),
             marks=self.marks,
             mark_values=tuple(
-                tuple(tuple(float(x) for x in row)
-                      for row in reads[m].reshape(self.worlds, len(candidates)))
+                tuple(tuple(float(x) for x in row) for row in reads[m])
                 for m in range(len(self.marks))
             ),
             after_values=() if after is None else tuple(
-                tuple(float(x) for x in row) for row in after.reshape(self.worlds, len(candidates))
+                tuple(float(x) for x in row) for row in after
             ),
             steps=self._steps, truncated=self.last_truncated_rollouts,
             row_steps=self._row_steps, mark_row_steps=self._mark_row_steps,
             cpu_seconds=time.process_time() - began,
-            mix=mixed, greedy=candidates[best] if mixed else None,
-            det_key=key, salt=self.salt if key else None,
+            mix=mixed, greedy=candidates[best] if mixed or held_back else None,
+            det_key=key, salt=self.salt if key else None, margin=margin,
+            stop=stop, played=tuple(played), tie=tie, tied=tied,
+            leads=() if not tie or leads is None else tuple(tuple(float(x) for x in row) for row in leads),
         )
         self.decision_log.append(decision)
         return decision
+
+    def _staged(self, tasks, moves, seat: int, start: int, stop: float,
+                margin: float = 0.0, tie: float = 0.0):
+        """`moves` played out in `tasks`' worlds in stages (`STOP_CHECKS`),
+        each stage playing its worlds for the candidates still in play: a
+        candidate whose paired difference from the policy's own move (column
+        0) is more than `stop` standard errors below zero at a check plays no
+        further. Returns the outcome table, the after-move reads (or `None`)
+        and the mark reads, each worlds by candidates with `nan` where a
+        candidate was not played, each candidate's worlds played, and the
+        point leads the playouts ended at, the same shape. Under `tie`, a
+        candidate tied with column 0 by the margin (`_tied`) also plays on
+        while its mean lead difference is above zero (`_lead_holds`)."""
+        worlds, k = len(tasks), len(moves)
+        table = np.full((worlds, k), np.nan)
+        after = None
+        reads = [np.full((worlds, k), np.nan) for _ in self.marks]
+        leads = np.full((worlds, k), np.nan)
+        played = [0] * k
+        alive = list(range(1, k))
+        steps = row_steps = truncated = 0
+        mark_row_steps = [0] * len(self.marks)
+        begin = 0
+        for end in [c for c in STOP_CHECKS if c < worlds] + [worlds]:
+            columns = [0] + alive
+            lanes = self._lanes(tasks[begin:end], tuple(moves[j] for j in columns), seat, start)
+            shape = (end - begin, len(columns))
+            table[begin:end, columns] = lanes.outcomes.reshape(shape)
+            if lanes.leads is not None:
+                leads[begin:end, columns] = lanes.leads.reshape(shape)
+            if lanes.after is not None:
+                if after is None:
+                    after = np.full((worlds, k), np.nan)
+                after[begin:end, columns] = lanes.after.reshape(shape)
+            for m in range(len(self.marks)):
+                reads[m][begin:end, columns] = lanes.reads[m].reshape(shape)
+            steps += lanes.steps
+            row_steps += lanes.row_steps
+            truncated += lanes.truncated
+            mark_row_steps = [a + b for a, b in zip(mark_row_steps, lanes.mark_row_steps)]
+            for j in columns:
+                played[j] = end
+            begin = end
+            if end == worlds:
+                break
+            keep = []
+            for j in alive:
+                # A trailing candidate plays on only where it is tied on
+                # winning and ahead on the lead.
+                if not _trails(table[:end, j] - table[:end, 0], stop) or (
+                    tie and _tied(table[:end], j, margin, tie)
+                    and _lead_holds(leads[:end, j] - leads[:end, 0])
+                ):
+                    keep.append(j)
+            alive = keep
+            if not alive:
+                break
+        self.last_truncated_rollouts = truncated
+        self.truncated_rollouts += truncated
+        self._steps, self._row_steps, self._mark_row_steps = steps, row_steps, tuple(mark_row_steps)
+        return table, after, reads, played, leads
 
     def _draw(self, probabilities: np.ndarray, draws: random.Random) -> int:
         """An index drawn from `probabilities` off `draws` (this searcher's own
@@ -551,6 +820,13 @@ class PairedRollouts:
                             cpu_seconds=time.process_time() - began)
         self.decision_log.append(decision)
         return decision
+
+    def root_options(self, game: Game) -> tuple[Action, ...]:
+        """The moves a decision at `game` chooses among: every legal move. A
+        seat with a rule that takes moves off the table (`hexset.clients.netbot`'s
+        `robber_hits`) narrows them here, so the prior, the policy's own move
+        and the candidates searched are all of the narrowed set."""
+        return tuple(legal_actions(game))
 
     def _own(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
         """The policy's own move at the root, as it plays alone (`act_rows`):
@@ -575,9 +851,11 @@ class PairedRollouts:
             plans.drop(game)
 
     def _opens_whole(self, game: Game, options: tuple[Action, ...]) -> bool:
-        """Whether the root is searched over whole decisions: the policy lists
-        them, and the root opens a compound one (not inside one begun)."""
-        return (callable(getattr(self.policy, "option_rows", None))
+        """Whether the root is searched over whole decisions: not under
+        `moves`, the policy lists them, and the root opens a compound one (not
+        inside one begun)."""
+        return (not self.moves
+                and callable(getattr(self.policy, "option_rows", None))
                 and getattr(self.policy, "has_options", True)
                 and not inside(game)
                 and any(opens(game, action) is not None for action in options))
@@ -671,7 +949,8 @@ class Lanes:
     `after`, the value head's read right after the candidate (`None` with
     no `marks`); `reads`, the read at each mark, `(len(marks), copies)`; and
     the counts `Decision` keeps (`steps`, `row_steps`, `mark_row_steps`,
-    `truncated`)."""
+    `truncated`); and `leads`, each copy's point lead for the mover where it
+    stopped (`_lead_of`), or `None`."""
 
     outcomes: np.ndarray
     after: np.ndarray | None
@@ -680,6 +959,7 @@ class Lanes:
     row_steps: int
     mark_row_steps: tuple[int, ...]
     truncated: int
+    leads: np.ndarray | None = None
 
     @staticmethod
     def joined(parts: Sequence["Lanes"]) -> "Lanes":
@@ -693,6 +973,7 @@ class Lanes:
             row_steps=sum(p.row_steps for p in parts),
             mark_row_steps=tuple(int(sum(c)) for c in zip(*(p.mark_row_steps for p in parts))),
             truncated=sum(p.truncated for p in parts),
+            leads=None if any(p.leads is None for p in parts) else np.concatenate([p.leads for p in parts]),
         )
 
 
@@ -914,7 +1195,8 @@ class RolloutBatch:
         return Lanes(outcomes=scores, after=None if self.after is None else self.after[selected].copy(),
                      reads=reads, steps=int(counts.max(initial=0)), row_steps=int(counts.sum()),
                      mark_row_steps=tuple(int(np.where(row >= 0, np.minimum(row, counts), counts).sum()) for row in at),
-                     truncated=sum(not is_over(self.games[i]) for i in selected))
+                     truncated=sum(not is_over(self.games[i]) for i in selected),
+                     leads=np.array([_lead_of(self.games[i], self.seat) for i in selected], dtype=np.float64))
 
 
 def _play(

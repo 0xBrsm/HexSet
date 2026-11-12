@@ -16,6 +16,7 @@ from hexset import contract9, decisions as D
 from hexset.actions import ActionType, apply, build_space, legal_actions
 from hexset.board.board import base_board
 from hexset.game import Phase, imagine, is_over, start
+from hexset.clients.netbot import LeafEvaluator
 from hexset.mcts import Search, _Chance
 from hexset.native.playout import SWITCH, NativeCopy, held
 from hexset.rules import DUEL_VARIANT_GAME, STANDARD_GAME
@@ -82,9 +83,73 @@ class ProbeEvaluator:
         return tuple(1.0 if seat == game.won_by else 0.0 for seat in range(seats))
 
 
+class ProbePolicy:
+    """A policy for `LeafEvaluator` in tests, Python and native positions
+    alike: priors, values and whole options' probabilities (`option_rows`,
+    through `hexset.decisions.listed`) a pure function of each row's
+    observation bytes. No double turn, as a native position states none."""
+
+    has_options = True
+
+    def __init__(self, space, contract):
+        self.space, self.native_contract = space, contract
+
+    def _row(self, game, seat):
+        return contract9.observation_row(game, seat, self.native_contract)
+
+    def score_rows(self, rows):
+        out = []
+        for (game, seat, options), value in zip(rows, self.value_rows([(g, s) for g, s, _ in rows])):
+            row = self._row(game, seat)
+            weights = np.array([1 + _draw(row, np.array(tuple(option), dtype=np.int64)) % 97
+                                for option in options], dtype=np.float64)
+            out.append((weights / weights.sum(), value))
+        return out
+
+    def value_rows(self, rows):
+        out = []
+        for game, seat in rows:
+            row = self._row(game, seat)
+            frame = D.frame_for(game, seat, self.space)
+            out.append(frame.to_board([(_draw(row, np.int64(k)) % 1000) / 1000.0 for k in range(len(frame.seats))]))
+        return out
+
+    def option_rows(self, rows):
+        out = []
+        for game, seat in rows:
+            decision = D.decision_at(game, seat, self.space, double_turn=False)
+            draw = np.random.default_rng(_draw(self._row(game, seat)))
+            blocks = {"option_flat": draw.random(len(decision.flat)),
+                      "option_setup": draw.random(len(decision.setup)),
+                      "option_road_building": draw.random(max(1, len(decision.road_building))),
+                      "option_discard": draw.random(max(1, len(decision.discard)))}
+            out.append(D.listed(decision, blocks, game, seat, self.space))
+        return out
+
+
+def dealt(players, seed, placed=0):
+    """A game at its setup, `placed` random setup moves in."""
+    rng = random.Random(seed)
+    game = start(base_board(rng=rng), players, rng,
+                 game_type=DUEL_VARIANT_GAME if players == 2 else STANDARD_GAME)
+    for _ in range(placed):
+        apply(game, rng.choice(legal_actions(game)))
+    return game
+
+
+def discarding(players, seed):
+    """A game played on at random from `seed` to its first discard."""
+    rng = random.Random(seed)
+    game = played(players, seed, 0)
+    while not is_over(game) and game.phase is not Phase.DISCARD:
+        apply(game, rng.choice(legal_actions(game)))
+    return None if is_over(game) else game
+
+
 def edges(root):
     """Every expanded edge of a tree, as `(kind, action type)` counts: `kind`
-    is "roll", "draw" (a steal or a bought card) or "plain"."""
+    is "roll", "draw" (a steal or a bought card), "plain", or "whole" (keyed
+    by the whole option's kind)."""
     counts, stack = {}, [root]
     while stack:
         node = stack.pop()
@@ -94,6 +159,11 @@ def edges(root):
             if isinstance(child, _Chance):
                 kind = "roll" if action.type is ActionType.ROLL else "draw"
                 stack.extend(child.outcomes.values())
+            elif isinstance(action, D.Compound):
+                kind = "whole"
+                stack.append(child)
+                counts[(kind, action.kind.name)] = counts.get((kind, action.kind.name), 0) + 1
+                continue
             else:
                 kind = "plain"
                 stack.append(child)
@@ -159,7 +229,7 @@ class NativeTree(unittest.TestCase):
                         f"no steal edge reached: {sorted(kinds)}")
 
 
-class ProbePolicy:
+class DuelProbePolicy:
     """A policy for `hexset.clients.netbot.LeafEvaluator`, scoring as
     `ProbeEvaluator` does: the mover's prior and value from `score_rows`, every
     other observer's value from `value_rows`, each read in its own seat frame."""
@@ -210,7 +280,7 @@ class NativeDuelFourTree(unittest.TestCase):
                 space = two_seat_space(game)
                 results = []
                 for native in (False, True):
-                    search = Search(LeafEvaluator(ProbePolicy(space, "9d.1")), simulations=256, wave=16,
+                    search = Search(LeafEvaluator(DuelProbePolicy(space, "9d.1")), simulations=256, wave=16,
                                     rng=random.Random(seed))
                     with mock.patch.dict(os.environ, {} if native else {SWITCH: "0"}):
                         if native:
@@ -228,6 +298,39 @@ class NativeDuelFourTree(unittest.TestCase):
                     self.assertEqual(py_rng, nat_rng)
                     searched_positions += 1
         self.assertGreaterEqual(searched_positions, 6)
+
+
+class NativeWholeTree(unittest.TestCase):
+    def test_a_native_whole_tree_searches_as_the_python_tree(self):
+        positions = [(players, seed, "setup", dealt(players, seed, placed)) for players in (2, 4)
+                     for seed, placed in ((11, 0), (12, 2))]
+        positions += [(players, seed, "discard", discarding(players, seed)) for players in (2, 4) for seed in (13, 14)]
+        positions += [(players, seed, "midgame", played(players, seed, 120)) for players in (2, 4) for seed in (15,)]
+        seen = set()
+        for players, seed, where, game in positions:
+            if game is None or is_over(game):
+                continue
+            with self.subTest(players=players, seed=seed, where=where):
+                space = space_of(game)
+                contract = "9d.1" if players == 2 else "9"
+                trees = []
+                for native in (False, True):
+                    search = Search(LeafEvaluator(policy=ProbePolicy(space, contract)), simulations=160,
+                                    wave=16, whole=True, rng=random.Random(seed))
+                    with mock.patch.dict(os.environ, {} if native else {SWITCH: "0"}):
+                        if native:
+                            os.environ.pop(SWITCH, None)
+                        trees.append((search, *search.run(game)))
+                (py, py_root, py_options, py_visits), (nat, nat_root, nat_options, nat_visits) = trees
+                self.assertIs(type(nat_root.game), NativeCopy)
+                self.assertEqual(py_options, nat_options)
+                np.testing.assert_array_equal(py_visits, nat_visits)
+                np.testing.assert_array_equal(py_root.totals, nat_root.totals)
+                self.assertEqual(py.rng.getstate(), nat.rng.getstate())
+                self.assertEqual(edges(py_root), edges(nat_root))
+                seen |= set(edges(nat_root))
+        self.assertIn(("whole", "SETUP"), seen)
+        self.assertIn(("whole", "DISCARD"), seen)
 
 
 if __name__ == "__main__":

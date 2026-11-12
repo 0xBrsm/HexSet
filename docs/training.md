@@ -396,6 +396,12 @@ few dozen worlds separate moves that independent playouts would not.
   in every world before the playout, and the one chosen is played a move at
   a time with no further search. A decision graph that answers
   `hexset.decisions.OPTION_OUTPUTS` lists them ([onnx.md](onnx.md#outputs)).
+- `moves=True` (`rollout:...:roots=moves`, metadata `roots = moves`)
+  searches every root as a single move instead, whole options or not: a
+  setup turn's settlement with each candidate's road left to the playout's
+  policy, then the road as a root of its own; Road Building's card and each
+  road, and a discard's cards, the same. The playouts and every unsearched
+  root still play as the policy plays.
 - Where the search plays another move than the policy's own, the policy's
   plan for the rest of its decision is dropped (`Plans.drop`).
 - `decision_log` keeps every `hexset.rollout.Decision`: each candidate's
@@ -435,6 +441,50 @@ few dozen worlds separate moves that independent playouts would not.
   The searcher's own `rng` is not drawn from, so a run stays a function of
   the seeds that dealt its games. The log keeps the key (`det_key`) and the
   `salt`.
+- `margin=<standard errors>` (`rollout:...:margin=`, metadata `margin`)
+  plays another candidate than the policy's own move only where it beats
+  that move by more than `margin` standard errors. For each other candidate
+  `j`, `d_j` is its outcome less the own move's in each world, `m_j` the
+  mean of `d_j` and `s_j = std(d_j, ddof=1) / sqrt(worlds)`; `j` passes
+  where `m_j > margin * s_j`. The passing candidate with the best mean
+  score is played (the earlier on a tie), and the own move where none
+  passes. Setup roots (`SETUP_PHASES`) keep the best mean score. A margin
+  needs at least two worlds and does not combine with `mix`; 0, the
+  default, is the search without one. The log keeps the margin applied at
+  each root (`margin`), and where the margin held back the best mean score,
+  the candidate it would have played (`greedy`).
+- `stop=<standard errors>` (`rollout:...:margin=<k>:stop=`, metadata
+  `stop`), under a margin, plays the worlds in stages and stops playing a
+  candidate that trails the policy's own move by more than `stop` standard
+  errors at a check: at each world count of `STOP_CHECKS` (8, 16, 24, 32,
+  48, 64, 96, 128, 192) below `worlds`, candidate `j` is dropped where
+  `m_j < -stop * s_j` over the worlds played so far (where `s_j` is 0,
+  unless `m_j > 0`), and the root stops once
+  no other candidate is left. The candidates still in play at the last
+  world are judged by the margin over every world. The worlds are those the
+  full search draws, in the same order, so a candidate that plays every
+  world reads the same worlds as without `stop`. Setup roots, where no
+  margin applies, play every world. `stop` needs a margin; 0, the default,
+  plays every candidate in every world. The log keeps the threshold
+  (`stop`) and each candidate's worlds played (`played`); a world a
+  candidate did not play reads `null`.
+- `tie=<win chance>` (`rollout:...:margin=<k>:tie=`, metadata `tie`),
+  under a margin, decides a root whose candidates win alike by the point
+  lead their playouts end at. Where no candidate passes the margin,
+  candidate `j` is tied with the policy's own move where
+  `|m_j| + margin * s_j < tie`. Each playout's lead is the mover's victory
+  points, every card counted, less the mean of the other live seats', where
+  the playout stopped. The margin rule is then applied to the leads of the
+  own move and the tied candidates: the tied candidate with the best mean
+  lead of those whose lead beats the own move's by more than `margin`
+  standard errors is played, and the own move where none does. At a
+  decided position every candidate scores alike, so the lead decides; at an
+  undecided one the score's error is wider than `tie` and the margin rule
+  is unchanged. Under `stop`, a tied candidate whose score trails plays on
+  at a check only while its mean lead is above the own move's. The default
+  is `hexset.rollout.TIE` (0.005) wherever a margin is; `tie=0` leaves the
+  lead out, and without a margin it plays no part. The log keeps the value (`tie`), the tied candidates
+  (`tied`) and each playout's lead (`leads`).
 - `pool=RolloutPool(load_policy, workers)` plays the worlds out in worker
   processes beside the searching one, each loading its own copy of the
   policy; the worlds and their seeds are still drawn in the searching
@@ -450,7 +500,7 @@ few dozen worlds separate moves that independent playouts would not.
   candidate on ([native.md](native.md#playout-copies)).
 
 `hexset.clients.netbot.rollouts_for(checkpoint, worlds=, top=, decisive=,
-horizon=, full_setup=, mix=, anchor=, det=, salt=)` builds one with the checkpoint's own trade gate
+horizon=, full_setup=, mix=, anchor=, det=, salt=, margin=, stop=, tie=)` builds one with the checkpoint's own trade gate
 (`GatedRollouts`); the arena's `rollout:` entrant and a file's
 `search=rollout` metadata do the same.
 

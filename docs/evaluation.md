@@ -233,7 +233,13 @@ horizon can be scored on the same playouts afterwards. Under a mixed
 strategy (`mix`) it keeps each candidate's probability and the candidate the
 best score would have played, beside the one drawn. Under a deterministic
 search (`det`) it keeps the decision's key and salt, so the decision can be
-searched again from a rebuilt position.
+searched again from a rebuilt position. Under a margin (`margin`) it keeps
+the margin applied at the root and, where the margin held back the best
+score, the candidate that score would have played. Under early stopping
+(`stop`) it keeps the threshold and each candidate's worlds played, with a
+world a candidate did not play read as `null`. Under a tie-break (`tie`) it
+keeps the value, the candidates tied with the policy's own move, and the
+point lead each playout ended at.
 
 `hexset.arena.search_logs(bot)` finds the logs behind a seat, through the
 wrappers it is dealt in (a trader, a veto, a dealer, a coalition, both

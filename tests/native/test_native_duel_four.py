@@ -140,6 +140,7 @@ class DuelFourParity(unittest.TestCase):
                     np.testing.assert_array_equal(native.outcomes, python.outcomes)
                     np.testing.assert_array_equal(native.after, python.after)
                     np.testing.assert_array_equal(native.reads, python.reads)
+                    np.testing.assert_array_equal(native.leads, python.leads)
                     self.assertEqual((native.steps, native.row_steps, native.truncated),
                                      (python.steps, python.row_steps, python.truncated))
 

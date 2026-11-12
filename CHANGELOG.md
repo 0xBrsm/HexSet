@@ -5,6 +5,112 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.34.0
+
+### Added
+
+- **A handoff at the end of setup: `handoff:setup:<first>|<second>`.**
+  `Handoff(first, second, "setup")` (`hexset.bots.SETUP`) gives `first` the
+  setup placements and `second` every move from the first roll on;
+  `handed_off(game, "setup")` reads the game's phase. A handoff at a round
+  count is unchanged.
+
+- **MCTS can search its root by sequential halving and can search setup
+  alone.** `Search(top=n)` (`mcts:<path>@<sims>:top=<n>`) splits the root's
+  budget into `ceil(log2(n))` rounds over the `n` highest-prior moves: each
+  move still in gets the same number of descents, and the half with the
+  lower mean is dropped after each round. Below the root the tree selects
+  by PUCT as before. Each candidate is searched whatever its prior. `Search(stages=
+  "setup")` (`:stages=setup`) searches only the setup placements
+  (`SETUP_PHASES`) and plays every later root by its prior's top move.
+  Both are off by default, and a search without them is unchanged.
+
+- **A Gumbel root for MCTS: `top=<n>:root=gumbel`.** `Search(top=n,
+  root="gumbel")` is Gumbel MuZero's root: the `n` candidates are the
+  highest Gumbel noise plus log prior, each halving round keeps the half
+  with the highest noise + log prior + sigma(q), and the move played is the
+  highest of that score among the last moves in. sigma(q) is the move's
+  mean rescaled to [0, 1] over the root's visited moves, times
+  (50 + the root's most visits) * 0.1. It searches one world (`k=1`).
+
+- **A margin for paired rollouts: `margin=<standard errors>`.**
+  `PairedRollouts(margin=k)` (`rollout:...:margin=<k>`, metadata `margin`,
+  `rollouts_for(margin=)`) plays another candidate than the policy's own
+  move only where its mean paired difference over that move exceeds `k`
+  standard errors of the difference over the worlds; of the candidates
+  that do, the best mean score is played, and the policy's own move where
+  none does. Setup roots keep the best mean score. `Decision.margin` logs
+  the margin applied at a root, and `greedy` the candidate the best mean
+  would have played where the margin held it back. A margin needs at least
+  two worlds and does not combine with `mix`; at 0, the default, the
+  search is unchanged.
+
+- **Paired rollouts can stop a trailing candidate early under a margin:
+  `stop=<standard errors>`.** `PairedRollouts(margin=k, stop=t)`
+  (`rollout:...:margin=<k>:stop=<t>`, metadata `stop`,
+  `rollouts_for(stop=)`) plays a root's worlds in stages (`STOP_CHECKS`)
+  and stops playing a candidate whose paired difference from the policy's
+  own move is more than `t` standard errors below zero at a check; the
+  root stops once no other candidate is left, and the candidates still in
+  play are judged by the margin over every world. A candidate that plays
+  every world reads the same worlds as the full search. Setup roots play
+  every world. `Decision.stop` and `Decision.played` log the threshold and
+  each candidate's worlds; an unplayed world logs `null`. `stop` needs a
+  margin; at 0, the default, the search is unchanged.
+
+- **Whole-decision MCTS: `mcts:<file>@N:whole=1`.** `hexset.mcts.Search(whole=True)`
+  searches a node that opens a decision of several moves (a setup turn, a
+  discard, a position where Road Building can be played) over the policy's
+  whole options with their probabilities (`option_rows`, through
+  `LeafEvaluator.lists_options`), each edge applying the whole decision.
+  `choose` plays the chosen option a move at a time and answers the asks
+  inside it from the rest without searching. `Leaf.whole` and
+  `Evaluation.options` carry the listing; `hexset.decisions.option_json`
+  writes a whole option in the search logs of both `hexset.mcts` and
+  `hexset.rollout`. Off by default.
+
+- **Paired rollouts can search every root as a single move:** `PairedRollouts(moves=True)`,
+  `rollout:...:roots=moves` and metadata `roots = moves` search a setup turn's settlement and its road,
+  Road Building's card and roads, and a discard's cards as roots of their own, even where the policy
+  lists whole options. Playouts and unsearched roots play as before; the default is
+  unchanged.
+
+- **A checkpoint can keep its robber moves on other seats' hexes:
+  `robber_hits`.** A file whose metadata sets `robber_hits=1` moves the
+  robber only to a hex with another seat's building and none of its own
+  wherever one is legal (`hexset.clients.netbot.hit_robber`); a seat
+  holding no cards still counts. Where none is legal, every move stays, so
+  the rule never forces the robber onto the mover's own hexes. One forward
+  plays the best remaining move by prior, paired rollouts search only the
+  remaining moves (`PairedRollouts.root_options`), and MCTS plays its
+  most-visited remaining move.
+
+- **Paired rollouts decide ties on winning by the point lead: `tie=<win
+  chance>`, on by default.** Under a margin, `PairedRollouts(tie=t)`
+  (`rollout:...:margin=<k>:tie=<t>`, metadata `tie`, `rollouts_for(tie=)`)
+  decides a root where no candidate passes the margin by the point lead the
+  playouts end at (the mover's victory points less the mean of the other
+  live seats'), among the candidates whose score lies within `t` of the
+  policy's own move with `k` standard errors to spare; one is played over
+  the own move only where its lead beats the own move's by more than `k`
+  standard errors. Under `stop`, a tied candidate whose score trails plays
+  on only while its mean lead is above the own move's. `Decision.tie`,
+  `Decision.tied` and `Decision.leads` log it, and `Lanes.leads` carries
+  each playout's lead. The default is `hexset.rollout.TIE` (0.005); `tie=0`
+  turns it off, and without a margin it plays no part.
+
+### Changed
+
+- **A decision graph is asked at most 32 rows a forward.**
+  `hexset.clients.onnxbot.DecisionPolicy` cuts a call of more rows (a
+  search's step batch) into near-equal runs of 16 to 32 rows (`MAX_ROWS`,
+  `_in_runs`). A graph whose rows are batch invariant answers each row as
+  one forward of all of them would.
+- **MCTS works out a roll node's odds once.** A roll node keeps its roll's
+  odds (`Node.roll_chances`) after the first descent through it, and the
+  check that a leaf's value matches its mover's observer row compares the
+  two short vectors directly. Searches are unchanged draw for draw.
+
 ## 1.33.0
 
 ### Added

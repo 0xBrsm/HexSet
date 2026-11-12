@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from hexset.holding import HoldModel
 from hexset.trading import UNLIMITED, TradeParams
@@ -57,6 +57,24 @@ class RolloutConfig:
     #: `det`, `PairedRollouts.det`) and `salt` (metadata `salt`).
     det: bool = False
     salt: int = 0
+    #: Every searched root a single move, whole options or not (metadata
+    #: `roots = moves`, `PairedRollouts.moves`); `False`, the default
+    #: (`roots = whole` or absent), searches whole decisions where the
+    #: policy lists them.
+    moves: bool = False
+    #: Standard errors of the paired difference another candidate must clear
+    #: over the policy's own move to be played (metadata `margin`,
+    #: `PairedRollouts.margin`); `0.0` plays the best score.
+    margin: float = 0.0
+    #: Standard errors below the policy's own move at which a candidate stops
+    #: being played out under a margin (metadata `stop`,
+    #: `PairedRollouts.stop`); `0.0` plays every candidate in every world.
+    stop: float = 0.0
+    #: Win chance within which a candidate counts as tied with the policy's
+    #: own move under a margin, the tie then decided by the point lead
+    #: (metadata `tie`, `PairedRollouts.tie`); `hexset.rollout.TIE` by
+    #: default, `0.0` leaves the lead out.
+    tie: float = field(default_factory=lambda: _default_tie())
     #: `(policy, encoder)`: the files that play every other seat of a playout
     #: (`hexset.clients.conditioned.Opponents`), named beside this one by
     #: metadata `opponents` and `opponent_encoder`; `None` for the file's own
@@ -201,6 +219,19 @@ def robber_tip_config(meta: dict[str, str]) -> float:
     return min(max(tip, 0.0), 1.0) if math.isfinite(tip) else 0.0
 
 
+def robber_hits_config(meta: dict[str, str]) -> bool:
+    """Whether `meta` asks its robber moves to hit another seat (`robber_hits`,
+    `hexset.clients.netbot.hit_robber`): `1` or `true` turns it on; absent or
+    anything else is off."""
+    return str(meta.get("robber_hits", "")).strip().lower() in ("1", "true")
+
+
+def robber_hits_of(checkpoint: object) -> bool:
+    """Whether `checkpoint` declares `robber_hits`, read by name like
+    `trader_of`: a loader that carries none plays its robber moves untouched."""
+    return bool(getattr(checkpoint, "robber_hits", False))
+
+
 def robber_tip_of(checkpoint: object) -> float:
     """The robber tip `checkpoint` declares, read by name like `trader_of`:
     a loader that carries none plays its robber moves untouched."""
@@ -253,12 +284,12 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
 
     `search = mcts` reads `simulations`, `wave` and `decisive`; `search =
     rollout` reads `worlds`, `top`, `decisive`, `horizon`, `setup`, `mix`,
-    `anchor`, `det`, `salt` and the `opponents`/`opponent_encoder` pair. Every
+    `anchor`, `det`, `salt`, `margin`, `stop`, `tie` and the `opponents`/`opponent_encoder` pair. Every
     file reads `own_calibration` (`SearchConfig.own_calibration` says where
     it applies). Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
     and an unreadable one takes its default; a setting that changes what the
     seat does (`decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt`,
-    `own_calibration`) fails the
+    `margin`, `stop`, `tie`, `own_calibration`) fails the
     load when it does not read. Any other `search` is no search."""
     method = meta.get("search", "none")
     calibration = _calibration(meta.get("own_calibration"))
@@ -272,9 +303,13 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
                 top=max(2, _clamp(meta.get("top"), DEFAULT_TOP, MAX_TOP) or DEFAULT_TOP),
                 horizon=_horizon(meta.get("horizon")),
                 full_setup=_full_setup(meta.get("setup")),
+                moves=_moves(meta.get("roots")),
                 mix=_mix(meta.get("mix")),
                 anchor=_anchor(meta.get("anchor")),
                 **_det(meta.get("det"), meta.get("salt")),
+                margin=_margin(meta.get("margin"), meta.get("mix")),
+                stop=_stop(meta.get("stop"), meta.get("margin"), meta.get("mix")),
+                tie=_tie(meta.get("tie"), meta.get("margin"), meta.get("mix")),
                 opponents=_opponents(meta.get("opponents"), meta.get("opponent_encoder")),
             ),
         )
@@ -287,6 +322,16 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
         own_calibration=calibration,
         decisive=_decisive(meta.get("decisive")),
     )
+
+
+def _moves(value: str | None) -> bool:
+    """Metadata `roots`: `moves` to search every root as a single move,
+    `whole` or absent for whole decisions where the policy lists them."""
+    if value is None or not value.strip() or value.strip() == "whole":
+        return False
+    if value.strip() != "moves":
+        raise ValueError(f"roots {value!r} is not 'whole' or 'moves'")
+    return True
 
 
 def _full_setup(value: str | None) -> bool:
@@ -326,6 +371,68 @@ def _anchor(value: str | None) -> float:
     if not (math.isfinite(anchor) and anchor >= 0.0):
         raise ValueError(f"anchor {value!r} is not an exponent of 0 or more")
     return anchor
+
+
+def _margin(value: str | None, mix: str | None) -> float:
+    """Metadata `margin`: standard errors of 0 or more that another
+    candidate must clear over the policy's own move
+    (`hexset.rollout.PairedRollouts.margin`), or absent for the best score.
+    A margin above 0 does not combine with a `mix` above 0."""
+    if value is None or not value.strip():
+        return 0.0
+    try:
+        margin = float(value)
+    except ValueError:
+        raise ValueError(f"margin {value!r} is not a number") from None
+    if not (math.isfinite(margin) and margin >= 0.0):
+        raise ValueError(f"margin {value!r} is not a number of standard errors of 0 or more")
+    if margin and _mix(mix):
+        raise ValueError("a margin and a mixed strategy do not combine: set one of margin and mix")
+    return margin
+
+
+def _stop(value: str | None, margin: str | None, mix: str | None) -> float:
+    """Metadata `stop`: standard errors of 0 or more below the policy's own
+    move at which a candidate stops being played out
+    (`hexset.rollout.PairedRollouts.stop`), or absent for none. A stop above
+    0 needs a margin above 0."""
+    if value is None or not value.strip():
+        return 0.0
+    try:
+        stop = float(value)
+    except ValueError:
+        raise ValueError(f"stop {value!r} is not a number") from None
+    if not (math.isfinite(stop) and stop >= 0.0):
+        raise ValueError(f"stop {value!r} is not a number of standard errors of 0 or more")
+    if stop and not _margin(margin, mix):
+        raise ValueError("stop ends a candidate the margin could not play: it needs a margin above 0")
+    return stop
+
+
+def _default_tie() -> float:
+    """`hexset.rollout.TIE`, read where it is defined."""
+    from hexset.rollout import TIE
+
+    return TIE
+
+
+def _tie(value: str | None, margin: str | None, mix: str | None) -> float:
+    """Metadata `tie`: a win chance in [0, 1) within which a candidate is
+    tied with the policy's own move, the tie decided by the point lead
+    (`hexset.rollout.PairedRollouts.tie`); absent, `hexset.rollout.TIE`,
+    which acts only under a margin; `0` for none. A tie given above 0 needs a
+    margin above 0."""
+    if value is None or not value.strip():
+        return _default_tie()
+    try:
+        tie = float(value)
+    except ValueError:
+        raise ValueError(f"tie {value!r} is not a number") from None
+    if not (math.isfinite(tie) and 0.0 <= tie < 1.0):
+        raise ValueError(f"tie {value!r} is not a win chance in [0, 1)")
+    if tie and not _margin(margin, mix):
+        raise ValueError("tie breaks what the margin leaves tied: it needs a margin above 0")
+    return tie
 
 
 def _det(det: str | None, salt: str | None) -> dict:

@@ -60,6 +60,32 @@ def test_moves_are_first_s_through_the_round_and_second_s_after():
     assert max(first.at) < 12 <= min(second.at)
 
 
+def test_a_setup_handoff_gives_first_the_placements_and_second_the_rest():
+    from hexset.game import Phase
+
+    class Phases(RandomBot):
+        def __init__(self, seed):
+            super().__init__(random.Random(seed))
+            self.phases = set()
+
+        def choose(self, game):
+            self.phases.add(game.phase)
+            return super().choose(game)
+
+    first, second = Phases(1), Phases(2)
+    bots = [Handoff(first, second, "setup")] + [RandomBot(random.Random(s)) for s in (3, 4, 5)]
+    game = deal_game(5, 0, 4)
+    seat_bots(game, bots)
+    run_seated(game, bots, tape=Tape())
+    assert first.phases == {Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD}
+    assert second.phases and not second.phases & first.phases
+    entrant = entrant_from_name("handoff:setup:random|random")
+    assert entrant.option("at") == "setup" and spawn(entrant, random_base_board_for_test(), random.Random(4)).at == "setup"
+    for bad in ("main", "-1", 2.5):
+        with pytest.raises(ValueError):
+            Handoff(RandomBot(), RandomBot(), bad if not isinstance(bad, str) or bad == "main" else int(bad))
+
+
 def test_the_round_counts_the_seats_still_playing():
     game = deal_game(5, 0, 4, locked=(3,))
     game.turns = 5
@@ -118,6 +144,7 @@ def test_the_spec_names_the_round_and_both_bots():
 
 @pytest.mark.parametrize("name, match", [
     ("handoff:x:random|random", "reads handoff"),
+    ("handoff:main:random|random", "reads handoff"),
     ("handoff:3:random", "reads handoff"),
     ("handoff:3:|random", "reads handoff"),
     ("handoff::random|random", "reads handoff"),

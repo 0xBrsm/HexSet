@@ -5,6 +5,32 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.35.0
+
+### Added
+
+- **Weighted committees: metadata `committee_weights`.** A committee file may
+  weight its members' log priors in the vote, one positive number per member,
+  the file itself first, joined by `+` (`2+1+1`: the file against the even
+  product of the other two). `hexset.clients.committee.Committee(members,
+  weights)` and `weights_of`; without the key every member weighs alike, as
+  before. Values stay the members' unweighted mean.
+
+### Changed
+
+- **A committee chooses whole decisions where its members list them.**
+  `Committee.option_rows`, `has_options` and `plans`: where every member lists
+  whole options, a decision of several moves is voted over its whole options
+  by the members' weighted product and played a move at a time from a plan,
+  as a single decision graph plays it, and paired rollouts and whole-decision
+  MCTS search it whole. A committee with a member that lists none votes a
+  move at a time, as before.
+
+### Fixed
+
+- `hexset.clients.committee.Committee` sets `space` and `has_prior` when it
+  is built. A committee seat under rollouts raised `AttributeError`.
+
 ## 1.34.0
 
 ### Added

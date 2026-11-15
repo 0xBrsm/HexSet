@@ -37,7 +37,7 @@ from hexset.mcts import Search
 from hexset.rollout import RolloutPool, SharedPools
 from hexset.clients.onnxmeta import modes_of
 from hexset.clients.batching import coalesce, coalesce_rows
-from hexset.clients.committee import Committee, members_of
+from hexset.clients.committee import Committee, members_of, weights_of
 from hexset.clients.finishing import Finishing
 from hexset.onnx_record import record_from_game, record_rows
 from hexset.rules import STANDARD_GAME
@@ -600,7 +600,12 @@ def _load_cached(
         policy = Finishing(policy)
     members = members_of(meta)
     if members:
-        policy = Committee([policy, *(_member(path, name, topology, device, threads) for name in members)])
+        policy = Committee(
+            [policy, *(_member(path, name, topology, device, threads) for name in members)],
+            weights_of(meta, 1 + len(members)),
+        )
+    elif meta.get("committee_weights", "").strip():
+        raise ValueError(f"{path} gives `committee_weights` but names no `committee`")
     if search.searches and not getattr(policy, "has_prior", True):
         raise ValueError(
             f"{path} asks to be searched (`search` {meta.get('search')}) but declares no `prior`"

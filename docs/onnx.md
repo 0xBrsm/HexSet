@@ -73,6 +73,7 @@ engine's board indexing.
 | `own_calibration` | `"a,b"`: the seat's own win chance read as `sigmoid(a + b * logit(p))` (`hexset.mcts.calibrate_own`), the other seats scaled so the vector keeps its sum. Under `search=mcts`, at every evaluated position and in the trade gate; otherwise in the trade gate and robber deals alone | Absent: no recalibration. A value that is not two finite numbers with `b > 0` fails the load |
 | `finish_decisions` | Read the graph's values where a setup turn or Road Building card is finished, not inside it (`hexset.clients.finishing.Finishing`): for a value head taught only where decisions start | Off; `1`/`true`/`yes`/`on` enable it |
 | `committee` | Member files beside this one, joined by `+`, that vote with it ([committees](#committees)) | Absent: the file plays alone |
+| `committee_weights` | One positive number per committee member, this file first, joined by `+` (`2+1+1`): the weights of the members' log priors in the vote ([committees](#committees)) | Absent: every member weighs alike. A count other than the members', a value that is not a positive number, or the key without `committee`, fails the load |
 | `closer` | A bot, named as a lineup names it, whose move is played in place of the checkpoint's wherever the closer has one (`hexset.arena.closed`, `hexset.bots.Closes`) | Absent or empty: none |
 | `robber_tip` | Under one forward per decision, how far a robber move leans towards the leader (the other seat with the highest value): the leader's best robber move by prior is played in place of the chosen one where its prior is at least this fraction of the chosen one's (`hexset.clients.netbot.tip_robber`) | `0.0`, off; held to `[0.0, 1.0]`; an unreadable value is off |
 | `robber_hits` | Where a hex with another seat's building and none of the mover's is legal, a robber move goes only to such a hex (`hexset.clients.netbot.hit_robber`): never to an empty hex or one the mover shares. A seat with no cards still counts: the robber blocks its hex. Where no such hex is legal, every move stays, so the rule never forces the robber onto the mover's own hexes. One forward scores the remaining moves and plays the best by prior; `search=rollout` searches only the remaining moves; `search=mcts` plays the most-visited remaining move | Off; `1`/`true` enable it |
@@ -416,10 +417,21 @@ at no table unless it is stamped with a name itself.
 
 Every legal move is scored by each member's prior, and the move with the
 highest mean log prior is played, so a move needs every member's support.
-The committee's prior, which a search or a robber tip reads, is that product
-renormalised over the options (the members' arithmetic mean where every
-option has a zero product); its values are the members' values averaged seat
-by seat. The vote reads each member's `prior` and `value`.
+`committee_weights` makes that mean a weighted one: `2+1+1` gives this file
+half the vote and each other member a quarter, the same vote as this file
+against the even product of the other two. The committee's prior, which a
+search or a robber tip reads, is that product renormalised over the options
+(the members' arithmetic mean where every option has a zero product); its
+values are the members' values averaged seat by seat, unweighted.
+
+Where every member lists a decision's whole options (`option_rows`), so does
+the committee, and it chooses whole decisions as such a file does alone: a
+setup turn, Road Building or a discard is voted over its whole options by the
+same weighted product of the members' probabilities, renormalised, its first
+move played and the rest kept as a plan. A search then searches that decision
+whole. The members must list the same options in the same order, or the
+listing raises. A position inside a decision with no plan is voted a move at a
+time. The vote reads each member's `prior` and `value`.
 
 ## Opponent models
 

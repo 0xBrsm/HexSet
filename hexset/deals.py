@@ -986,8 +986,12 @@ class ValueDealer:
 
     def _beliefs(self, view, plan: _Plan, others: Sequence[int]) -> None:
         """Each seat's chance of holding each resource, the steal's odds of
-        each card from it, and a drawn world where it holds each."""
-        samples = [view.sample(self.rng) for _ in range(STEAL_SAMPLES)]
+        each card from it, and a drawn world where it holds each: worlds
+        drawn by the network's own reading of the hidden cards (its `hold`,
+        `hexset.view.HoldReading`), alike where it has none."""
+        hold = getattr(self.net, "hold", None)
+        samples = [view.sample(self.rng) if hold is None else view.sample(self.rng, hold)
+                   for _ in range(STEAL_SAMPLES)]
         plan.sample = samples[0]
         for s in others:
             acc = [0.0] * NUM_RESOURCES

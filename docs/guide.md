@@ -303,10 +303,14 @@ it: `View.sample`, `hexset.bots.determinized.distinct_worlds` and
 caller passes a `hexset.view.HoldReading`. A checkpoint may declare one in
 its metadata: `hold_shape` and `hold_scale` give a `hexset.holding.HoldModel`,
 which deals each held card by how long its owner has kept it
-(`GameState.dev_ages`), and the network seats
+(`GameState.dev_ages`), and `hold_asked` and `hold_offered` weigh each
+seat's untyped resource cards by what it has asked for and offered away on
+the ledger (`HoldModel.shown`); the network seats
 (`hexset.clients.netbot.bot_for`, `searcher_for`, `rollouts_for`) deal their
 worlds by it. The engine carries no parameters of its own for it. Every
-world keeps a seat's cards bought this turn unplayable this turn, and deals
+world keeps the cards a seat has offered or given in an answer, which the
+ledger certifies (`PublicLedger.show`), and a seat's cards bought this turn
+unplayable this turn, and deals
 no seat the victory point cards its public points would already have won
 with (`hexset.view.vp_room`). An experiment that reads opponents' true
 cards is reported as such. The `# true state:` comments in
@@ -346,7 +350,7 @@ A bot may also take part in these, each optional:
 - **Watching the table.** A bot whose class defines `seen(game, actor,
   action, viewer)` is shown every move of its game before it is applied,
   from its own seat (`viewer`): its own moves, every other seat's, and each
-  part of a compound decision. The arena (`run_seated`), `LaneEnv` and a
+  part of a compound decision. The arena (`hexset.gym.driver.play_seated`), `LaneEnv` and a
   hosted `Seat` call it through `hexset.bots.watch`, which walks a wrapped
   seat's parts. A bot that models the other seats from their moves learns
   from it; a bot without `seen` is asked nothing.

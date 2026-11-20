@@ -179,6 +179,21 @@ reads a `Game`; it is valid until the lane moves. Under
 its quota is met, on either kind, so an atomic seat discards a card at a
 time as on a Python lane.
 
+### A dealer's games
+
+`LaneEnv(..., dealer=fn)` takes each game from `fn(index)`, a
+`hexset.gym.lanes.Dealt`: a `Game` the caller dealt and seated
+(`hexset.arena.seat_bots`), the bot in each seat, the `Tape` its moves go on,
+the chance stream its record names (`key`) and, optionally, a list for its
+cleared trades (`census`, `hexset.arena.ClearedTrade`). Every seat is its
+bot's (policy id `DEALT`), so a `Driver` over it takes no seats. Each bot is
+asked its own `choose` and the gates stay as the dealer seated them. A
+finished `Episode` carries the `Game` and the cleared trades; its moves are
+filed on the record alone, with no per-seat decisions.
+`hexset.gym.driver.play_seated(game, bots, action_cap, tape=...,
+cleared=None)` plays one seated game to its end this way; the arena plays
+every game through these (evaluation.md).
+
 ### Policy seats and labels
 
 `hexset.gym.seats.PolicySeat(policies, plays, record=False)` is a driver seat

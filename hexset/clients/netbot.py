@@ -336,7 +336,7 @@ class NetworkBot(trading.DeclaredTrade):
         state = view.state
         key = (
             game.turns, game.phase, game.current_player, game.free_roads,
-            seat, view.perspective, tuple(view.sizes), view.signature(),
+            seat, view.perspective, tuple(view.sizes), view.belief_key(self.hold),
             # Road Building moves the board without spending a card, so a
             # hand-only key would go stale.
             tuple(state.edge_owner), tuple(state.vertex_building),
@@ -501,7 +501,7 @@ class NetworkBot(trading.DeclaredTrade):
         two bots draw differently."""
         if self._salt is None:
             self._salt = self.rng.getrandbits(64)
-        key = (self._salt, view.perspective, tuple(view.sizes), view.signature())
+        key = (self._salt, view.perspective, tuple(view.sizes), view.belief_key(self.hold))
         return random.Random(hash(key))
 
     def _continue(
@@ -1104,7 +1104,7 @@ def register_entrants(loader) -> None:
         bot = bot_for(checkpoint, rng=rng, trade=entrant.trade,
                       temperature=float(entrant.option("temperature", 0.0) or 0.0))
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint))
+                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
 
     def spawn_mcts(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "mcts")
@@ -1118,7 +1118,7 @@ def register_entrants(loader) -> None:
             whole=bool(entrant.option("whole", False)),
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint))
+                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
 
     def spawn_rollout(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "rollout")
@@ -1137,7 +1137,7 @@ def register_entrants(loader) -> None:
             tie=float(entrant.option("tie", TIE)),
         )
         return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint))
+                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)

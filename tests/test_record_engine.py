@@ -375,7 +375,8 @@ def test_a_replay_puts_the_offers_back_on_the_ledger():
     cards, wants and wastes included."""
     import random as _random
 
-    from hexset.arena import run_seated as _run, seat_bots as _seat
+    from hexset.arena import seat_bots as _seat
+    from hexset.gym.driver import play_seated as _run
     from hexset.board.board import random_base_board
     from hexset.game import start
     from hexset.record import Tape, recording

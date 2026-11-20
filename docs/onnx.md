@@ -48,6 +48,7 @@ engine's board indexing.
 | `version` | The model's version, shown with it and journalled with each game it plays | Free text |
 | `commit` | The code commit it was built and served from | Free text; kept as model information |
 | `owner`, `url`, `description` | Shown with it in the model list and on its rankings row | Optional; a value a client's profile would refuse leaves the field out |
+| `label` | The name the server shows for it: on the page, in the log, in the model list and on its rankings row. Clients still ask for it by `name` | Optional: shown as `name`. Up to 40 characters |
 
 ### How it plays
 
@@ -78,6 +79,7 @@ engine's board indexing.
 | `robber_tip` | Under one forward per decision, how far a robber move leans towards the leader (the other seat with the highest value): the leader's best robber move by prior is played in place of the chosen one where its prior is at least this fraction of the chosen one's (`hexset.clients.netbot.tip_robber`) | `0.0`, off; held to `[0.0, 1.0]`; an unreadable value is off |
 | `robber_hits` | Where a hex with another seat's building and none of the mover's is legal, a robber move goes only to such a hex (`hexset.clients.netbot.hit_robber`): never to an empty hex or one the mover shares. A seat with no cards still counts: the robber blocks its hex. Where no such hex is legal, every move stays, so the rule never forces the robber onto the mover's own hexes. One forward scores the remaining moves and plays the best by prior; `search=rollout` searches only the remaining moves; `search=mcts` plays the most-visited remaining move | Off; `1`/`true` enable it |
 | `hold_shape`, `hold_scale` | How other seats' held development cards are dealt in every world the seat samples (its search, its trade gate, its opponent model): a card of kind `k` is still unplayed after `c` of its owner's turns with probability `scale[k] ** (c ** shape)` (`hexset.holding.HoldModel`; `HoldModel.meta` writes both keys). `hold_scale` is one chance in (0, 1] per kind, comma separated, by `DevCard` | Absent: every unseen card is dealt alike. One key without the other, a shape that is not a positive number or a scale that is not one chance in (0, 1] per kind fails the load |
+| `hold_asked`, `hold_offered` | How other seats' untyped resource cards (`View.unknown`) are dealt in every world the seat samples, by what each seat has shown the table on its ledger (`hexset.ledger.SeatLedger.want` and `waste`): an untyped card of a resource the seat has asked for counts `hold_asked` times as much as another, and one of a resource it has offered away `hold_offered` times (`HoldModel.shown`; `HoldModel.meta` writes both keys when either differs from 1). Each a positive number | Absent: 1 each, and every untyped card is dealt alike. One key without the other, either without `hold_shape` and `hold_scale`, or a weight that is not a positive number fails the load |
 
 Search keys are read only under the `search` that uses them, so a stale
 `simulations` does not turn a policy into a search.
@@ -138,6 +140,8 @@ raises there, naming the file; load the registering module with
 - a `committee` that names a member not beside the file, or a member that
   declares a committee of its own;
 - a `hold_shape` without `hold_scale`, or the reverse, or either out of range;
+- a `hold_asked` without `hold_offered`, or the reverse, either without a
+  hold shape and scale, or either not a positive number;
 - a decision graph that declares an input HexSet does not supply, an input
   at a width HexSet does not supply it at, no per-row input, no `decision`
   or `value` output, or some but not all of the whole-option outputs;
@@ -158,7 +162,24 @@ not metadata either. `spawn(..., workers=N)` plays a rollout file's worlds
 out in `N` worker processes beside the searching one
 (`hexset.rollout.RolloutPool`, each loading the file at one thread), and
 `spawn(..., pools=SharedPools())` shares one such pool among every bot
-spawned from one file; other files ignore both.
+spawned from one file; other files ignore both. `spawn(..., search=False)`
+plays any file one forward, with its declared closer and trader.
+
+### Remote seats
+
+`hexset.remote` puts a seat's decisions in another process. A `Server` holds
+one bot per game, made by the host's `build(spec)` on the game's first `open`,
+and answers calls on them in priority order (`URGENT`, `HUMAN`, `OTHER`; one
+call at a time, each finishing once started). A `RemoteBot` is the seat on
+the client: it keeps one connection open with a heartbeat each way every
+second, sends each call (`choose`, and any method its fallback bot has) while
+the link is up, and has the fallback answer at once when the link is down or
+drops, when the server refuses the client's `code` or raises, or when the
+decision's clock (`set_clock`) is down to three seconds. `seat_at` and `seen`
+reach both bots, and a server that makes a game's bot afresh is sent every
+earlier one before its next call. The server's search decision logs come back
+with each answer, in `RemoteBot.decision_log`. Frames are pickles: serve on
+loopback and reach the server through an authenticated tunnel.
 
 ### Seat counts
 

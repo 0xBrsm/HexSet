@@ -493,3 +493,37 @@ def test_a_plan_whose_next_move_is_no_longer_legal_is_dropped_and_the_position_d
     assert bot.plans.act(game, seat, rest, bot.decide, bot.finish) in rest
     # Finished from the position as it stands (a lone option is played as it is).
     assert bot.finished == (len(rest) > 1) and id(game) not in bot.plans._plans
+
+
+def test_plans_survive_any_number_of_games_in_flight():
+    """Every game opened inside a decision keeps its plan however many others
+    hold one at once: each road comes from its game's plan, none is finished."""
+    bot = _Decider()
+    games = [start(random_base_board(random.Random(3)), 4, random.Random(3)) for _ in range(600)]
+    for game in games:
+        apply(game, bot.act(game))                 # each opens a setup decision; its road is the plan
+    assert len(bot.plans._plans) == len(games)
+    for game in games:
+        apply(game, bot.act(game))
+    assert bot.finished == 0 and len(bot.decided) == len(games) and not bot.plans._plans
+
+
+def test_a_plan_goes_with_its_game():
+    import gc
+
+    bot = _Decider()
+    game = start(random_base_board(random.Random(3)), 4, random.Random(3))
+    apply(game, bot.act(game))
+    assert id(game) in bot.plans._plans
+    del game
+    gc.collect()
+    assert not bot.plans._plans
+
+
+def test_a_native_copy_can_hold_a_plan():
+    import weakref
+
+    from hexset.native.playout import NativeCopy
+
+    assert "__weakref__" in NativeCopy.__slots__
+    weakref.ref(NativeCopy())

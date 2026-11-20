@@ -94,7 +94,8 @@ class NativeCopy:
     Python copy (`NativeCopy(game)`), or `fork` one: the fork owns its state
     and its chance streams, the same as the original's at the fork."""
 
-    __slots__ = ("state", "topology", "dealt", "locked", "_control", "_legal")
+    # `__weakref__`: a decision plan (`hexset.decisions.Plans`) holds its copy weakly.
+    __slots__ = ("state", "topology", "dealt", "locked", "_control", "_legal", "__weakref__")
 
     def __init__(self, game: Game | None = None) -> None:
         if game is None:

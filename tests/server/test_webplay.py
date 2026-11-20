@@ -438,17 +438,17 @@ def test_the_trade_round_is_in_the_log_and_a_pass_is_an_answer():
     assert {r["seat"]: r["kind"] for r in view["responses"]} == {1: RESPONSE_ACCEPT, 2: RESPONSE_PASS}
     assert next(r for r in view["responses"] if r["seat"] == 2)["bundle"] is None
     line = session.log_for(None)[-1]
-    assert line.endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts.")
+    assert line.endswith("offers 1 Wood for 1 Ore. Green (bot) accepts.")
     assert "passes" not in line and len(session.events) == 3
 
     session.decline_round(0)
-    assert session.log_for(None)[-1].endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts. Player 1 (Ada) declines.")
+    assert session.log_for(None)[-1].endswith("offers 1 Wood for 1 Ore. Green (bot) accepts. Red (Ada) declines.")
     assert session.open_round is None
 
     session.open_round_for(0, received)
     session.execute_round_choice(0, 1, received)
     line = session.log_for(None)[-1]
-    assert line.endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts. Traded with Player 2 (bot).")
+    assert line.endswith("offers 1 Wood for 1 Ore. Green (bot) accepts. Traded with Green (bot).")
     assert game._state.hands[0][Resource.ORE] == 1 and game._state.hands[1][Resource.WOOD] == 1
 
 
@@ -509,7 +509,7 @@ def test_a_manually_executed_trade_appears_in_the_log():
     assert trade.received == tuple(received)
     assert game._state.hands[0][Resource.ORE] == 1
     assert game._state.hands[1][Resource.WOOD] == 1
-    line = next(line for line in session.log_for(None) if " to Player " in line)
+    line = next(line for line in session.log_for(None) if " traded " in line and " to " in line)
     assert "traded" in line and "Wood" in line and "Ore" in line
     assert session.state_view(0)["can_undo"] is False
 
@@ -553,7 +553,7 @@ def test_a_manually_executed_trade_survives_journal_and_resume(tmp_path):
     assert resumed_game._state.hands[1][Resource.WOOD] == 1
     assert resumed_game._state.hands[1][Resource.ORE] == 0
     assert resumed.steps == session.steps == 1
-    line = next(line for line in resumed.log_for(None) if " to Player " in line)
+    line = next(line for line in resumed.log_for(None) if " traded " in line and " to " in line)
     assert "traded" in line
 
 
@@ -602,7 +602,7 @@ def test_no_discard_is_logged_until_the_whole_round_has_resolved():
 
     lines = _discards(session, None, omniscient=True)
     assert len(lines) == 2
-    assert "Player 1 " in lines[0] and "Player 4 " in lines[1]
+    assert "Red " in lines[0] and "Blue " in lines[1]
 
 
 def test_the_revealed_round_is_still_redacted_per_reader():
@@ -612,8 +612,8 @@ def test_the_revealed_round_is_still_redacted_per_reader():
     for seat, resource in ((3, Resource.ORE), (0, Resource.WOOD)) * 2:
         session.submit(seat, _discard_wire(resource))
 
-    mine = next(line for line in _discards(session, 3) if "Player 4" in line)
-    across = next(line for line in _discards(session, 0) if "Player 4" in line)
+    mine = next(line for line in _discards(session, 3) if "Blue (" in line)
+    across = next(line for line in _discards(session, 0) if "Blue (" in line)
 
     assert "Ore" in mine
     assert "discarded 2 cards" in across and not any(r in across for r in RESOURCE_NAMES)
@@ -823,7 +823,9 @@ def test_a_trade_filed_after_a_bank_trade_or_a_build_is_in_the_log():
     from hexset.trading import Trade
 
     def snap(hand):
-        return _Snapshot(hands=[hand, [0, 0, 0, 0, 0]], held=[[0] * 5, [0] * 5])
+        return _Snapshot(hands=[hand, [0, 0, 0, 0, 0]], held=[[0] * 5, [0] * 5],
+                         points=[0, 0], public_points=[0, 0], knights=[0, 0], roads=[0, 0],
+                         longest_road=-1, largest_army=-1)
 
     trade = Trade(0, 1, (1, 0, 0, -1, 0))
     bank = Action(ActionType.BANK_TRADE, 2, 4)
@@ -835,10 +837,10 @@ def test_a_trade_filed_after_a_bank_trade_or_a_build_is_in_the_log():
     ]
     lines = [line.split("\t", 1)[1] for line in render_log(events, None, {0: "A", 1: "B"}, None)]
 
-    assert len([line for line in lines if "to Player 2 (B)" in line]) == 2
+    assert len([line for line in lines if "to Green (B)" in line]) == 2
     assert [line for line in lines if "with the bank" in line] == [
-        "Player 1 (A) traded 4 Sheep for 1 Ore with the bank.",
-        "Player 1 (A) traded 4 Sheep for 1 Ore with the bank.",
+        "Red (A) traded 4 Sheep for 1 Ore with the bank.",
+        "Red (A) traded 4 Sheep for 1 Ore with the bank.",
     ]
 
 
@@ -891,3 +893,12 @@ def test_a_served_bot_offers_again_what_two_seats_took(takers, trades):
     assert len(game.trades) == trades
     offers = [e for e in session.events if e.note is not None and e.note.kind == "offer"]
     assert len(offers) == trades
+
+
+def test_a_seat_keeps_its_colour_name_in_the_log_whichever_seats_are_closed():
+    from hexset.server._webplay import _who, seat_color_name
+
+    labels = {0: "Ada", 2: "rehex", 3: "rehex"}
+    assert [_who(seat, labels) for seat in (0, 2, 3)] == ["Red (Ada)", "Purple (rehex)", "Blue (rehex)"]
+    assert _who(1, {}) == "Green (bot)"
+    assert seat_color_name(4) == "Seat 5"

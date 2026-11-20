@@ -11,15 +11,17 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `GET /api/version` | `{"api": 4}`, this API's contract version |
 | `GET /api/models` | `{"models": [...], "game_types": {...}}`, the names `bots` and `model` accept, with each bot's profile ([below](#opponent-names)) |
 | `GET /api/rankings` | The rankings ([below](#rankings)); 404 where the server keeps none |
+| `GET /api/menu` | `{"tabs": [{"label": "...", "url": "..."}]}`, the tabs the server adds to the page's menu for this client ([below](#menu-tabs)) |
 | `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals an unranked game |
 | `POST /api/join` | `{"code": "abcdef", "name": "Alice", "client": {...}}`; claims a random open seat |
-| `POST /api/reclaim` | `{"code": "abcdef", "secret": "..."}`; a fresh token for the seat whose client id matches |
+| `POST /api/reclaim` | `{"code": "abcdef", "secret": "...", "probe": false}`; a fresh token for the seat whose client id matches |
 | `POST /api/ranked` | `{"game_type": "standard", "client": {...}}`; a ticket for a ranked game ([below](#ranked-play)) |
 | `GET /api/ranked/<ticket>?wait=N` | `waiting`, or once matched the seat's token and state |
 | `POST /api/ranked/<ticket>/leave` | Leaves the queue |
 | `GET /api/state` | The seat's view, including `legal_actions` |
 | `GET /api/board` | Static board layout |
 | `GET /api/record` | The seat's ONNX input record, `options` and `space`; 409 unless the seat may act |
+| `GET /api/chance` | The seat's chance of winning as the table's model rates it ([below](#win-chance)); 409 at a ranked table |
 | `POST /api/action` | `{"action": <legal_actions entry>, "version": n}` |
 | `POST /api/undo` | The web page's: take back the seat's last action; see `can_undo` |
 | `POST /api/name` | `{"name": "Alice"}`; an empty name restores the seat's default |
@@ -47,7 +49,7 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 | 401 | A seat route without a token |
 | 403 | An unknown token; a reclaim secret that matches no seat |
 | 404 | An unknown game code or route |
-| 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move or at a table with fixed seats; the last seat leaving; a trade-round conflict (below) |
+| 409 | A stale `version`; `GET /api/chance` at a ranked table; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move or at a table with fixed seats; the last seat leaving; a trade-round conflict (below) |
 | 429 | `POST /api/games` from an address over its new-game limits, or `POST /api/ranked` from one at its unfinished-games limit (below) |
 | 500 | An unexpected server error |
 
@@ -73,7 +75,7 @@ fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POS
 | --- | --- |
 | `code`, `seat`, `version` | Game code, this seat, the table's change counter |
 | `phase`, `current_player`, `to_move` | Engine phase, the seat whose turn it is, the seat expected to act (`null` while `waiting_for` or `trade_wait` is non-empty) |
-| `seats` | `{seat, kind, name}` per seat; `kind` is `empty`, `bot` or `player` |
+| `seats` | `{seat, kind, name}` per seat; `kind` is `empty`, `bot` or `player`. A bot seat whose profile gives a `label` also carries it as `label`, the name the page shows |
 | `waiting_for` | Empty, unclosed seats holding up setup |
 | `claimed_seats`, `locked`, `started` | Occupied seats, closed or retired seats, whether the first move is made |
 | `game_type`, `board_mode`, `seats_fixed`, `fixed_seats` | The game type and board mode the table was dealt with (`board_mode` is `null` for a board no mode dealt); whether the type is played at one seat count only (duel), and the seats its deal closed for good. A table's other seats can be closed before the first move, down to one person practising alone |
@@ -86,6 +88,7 @@ fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POS
 | `trades`, `pending`, `trade_round`, `trade_wait` | This turn's exchanges and the trade round (below) |
 | `your_move`, `waiting_on` | What the table wants from this seat now (below); while that is `wait`, the seats it waits on |
 | `winner`, `game_over`, `log` | Result and the transcript, redacted for this seat |
+| `feed` | `{"epoch", "events"}`: the newest actions, one entry each, hidden as the log is (below) |
 
 `your_move` is the first of these that holds, in this order:
 
@@ -101,6 +104,29 @@ fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POS
 A seat whose own round still awaits answers may act; the round closes with
 its turn. A client that meets every value but `wait` can play any table:
 nothing else stops play on its seat.
+
+`feed.events` holds the newest 96 actions, each numbered `n` by its place in
+the game, with `round`, `actor` and `kind`: `roll` (`value`, and `gains`, seat
+to cards gained by resource), `build` (`piece`, `at` a vertex or edge,
+`setup`, and a setup settlement's `gains`), `buy` (`card`), `play` (`card`;
+Monopoly's `resource` and `taken`, seat to cards; Year Of Plenty's
+`resources`), `robber` (`hex`, `victim`, `stole`, `card`), `bank` (`gave`,
+`got`), `discard` (`card`), `end`, `round` (a trade round's step: `step`,
+`seat`, `bundle`) and `trade`. An entry may carry `trades`, the exchanges
+cleared with it. A bought, stolen or discarded `card` is `null` except to the
+seat that holds it (and the thief, for a steal); a discard round still open is
+left out until every seat has discarded. An undo rewrites the game's actions
+and starts a new `epoch`.
+
+An entry that changed a seat's row in `players` carries `after`: seat to the
+keys of that row the action changed (`victory_points`, `knights_played`,
+`road_length`, `longest_road`, `largest_army`, `hand_size`, `dev_card_count`,
+`hand`, `dev_cards`), each with its value after the action, hidden as the row
+itself is. Each of an entry's `trades` carries its own `after`, what that
+exchange changed. An entry that changed the bank carries `bank`, its
+resource counts after the action, keyed as the view's `bank`. A client that
+applies each entry's `after` to the rows of the view it held before, and its
+`bank` to the view's, shows the table as it stood after that entry.
 
 `victory_points` counts hidden victory-point cards only for this seat; other
 seats show public points. Once the game is over every seat's hand, cards and
@@ -127,7 +153,31 @@ missing or non-integer `round` is a 400. A token for a seat at that game reads
 the round as that seat; any other reader, or no token, reads it omniscient.
 The replay view has empty `legal_actions`, `can_undo` false, `your_move`
 `wait` (`game_over` at a finished game's end), and a `replay` object with
-`round`, `last_round` and `finished`.
+`round`, `last_round` and `finished`. Read with a seat's token at an unranked
+game, it also carries `chance`, `{"rater", "chance"}` as `GET /api/chance`
+gives them, read at that round.
+
+## Win chance
+
+`GET /api/chance` returns `{"version": 12, "rater": "mynet", "chance":
+0.4312}`: the seat's chance of winning as one model at the table rates it,
+read at table `version`. The rater is the server's `--chance-model`
+([server.md](server.md)) at every game type it is offered at, whether or not
+it sits at the table; elsewhere, and without one, it is the lowest-numbered
+bot seat still in the game that plays a model file from `/api/models` rather
+than a registered bot. The read is one evaluation of that model's value head,
+encoded from the asking seat's own side, so it uses only what that seat may
+see; it runs no search. `rater` is the model's shown name (its profile's
+`label`, else its entry), `null` where no model rates the table. Once the game
+is over, the read is of its last position still in play, rebuilt from the
+journal: the position before the step that ended it, or the nearest earlier
+one a replay can stop at. `chance` is `null` where no model rates the table,
+for a seat that has left, and where the model cannot be read. A table is read
+once per `version`: asking again before the table changes returns the same
+answer. Ranked tables refuse the route with a 409. The page shows the answer
+under the seat's cards to a seated player, at a past round (from the replay
+view's `chance`) and at a finished game, and never to a spectator; a toggle in
+the board's corner hides it for that browser.
 
 ## Trade routes
 
@@ -274,7 +324,12 @@ unknown key is a 401.
 `POST /api/reclaim` takes the code and the secret, finds the seat whose `id`
 matches, and returns a fresh token; the old token stops working. It works on
 live and finished games and refuses bot seats and closed or retired seats.
-The journal records the id, never the secret or the token.
+A secret that matches no seat is a 403, or, with `"probe": true`, a 200 with
+`{"token": null}`, for a client that asks on every arrival whether a seat at
+the game is its own.
+The journal records the id, never the secret or the token. A seat's token
+also stops working when the server restarts or drops an idle game from
+memory ([server.md](server.md#saved-games)): reclaim gets a fresh one.
 
 ## An example client
 
@@ -367,6 +422,14 @@ declining a trade round) counts as one action, and so does a rename: they
 share the 60 seconds of the move that follows them. A ranked game a
 server restart cut short is closed at start and counts for nothing: its
 seats get a 404 and queue again.
+
+## Menu tabs
+
+`GET /api/menu` lists the tabs the server adds to the game page's menu
+for the asking client, in order: each a `label` and the `url` the page
+opens in a frame of the menu. A server given no `--menu-tab`, or whose
+`--menu-tab-for` networks do not hold the client's address, returns
+`{"tabs": []}` ([server.md](server.md#menu-tabs)).
 
 ## Rankings
 

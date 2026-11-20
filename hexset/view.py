@@ -33,7 +33,14 @@ class HoldReading(Protocol):
     (`GameState.dev_ages`) is of kind `card`, before the unseen cards of each
     kind are counted in. The engine has no reading of its own: a checkpoint
     may declare one (`hexset.holding.HoldModel`, metadata `hold_shape` and
-    `hold_scale`), which the network seats pass (`hexset.clients.netbot`)."""
+    `hold_scale`), which the network seats pass (`hexset.clients.netbot`).
+
+    A reading may also weigh another seat's untyped resource cards by what
+    the seat has shown the table: `shown(resource, want, waste)`, the weight
+    of an untyped card of `resource` for a seat whose ledger row shows `want`
+    of it asked for and `waste` offered away (`hexset.ledger.SeatLedger`),
+    with `reads_shown()` saying whether it weighs anything. A reading without
+    them deals every untyped card alike."""
 
     def weight(self, card: int, age: int) -> float: ...
 
@@ -80,12 +87,19 @@ class View:
         self.known: list[list[int]] = []
         self.unknown: list[int] = []
         self.room: list[list[int]] = []
+        #: Per seat, what its public ledger row shows it has asked for and
+        #: offered away (`SeatLedger.want`, `waste`): what a `HoldReading`'s
+        #: `shown` weighs its untyped cards by.
+        self.want: list[list[int]] = []
+        self.waste: list[list[int]] = []
         #: Per seat, whether its upper bounds bind: some resource has room
         #: for fewer than all its unknown cards.
         self.bounded: list[bool] = []
         # What this seat knows: its own rows where a steal showed it a card.
         rows = ledger.for_seat(perspective).seats
         for seat in range(n):
+            self.want.append(rows[seat].want[:])
+            self.waste.append(rows[seat].waste[:])
             if seat == perspective:
                 self.known.append(state.hands[seat][:])
                 self.unknown.append(0)
@@ -183,16 +197,50 @@ class View:
         counts[DevCard.KNIGHT] -= sum(state.knights_played)
         return [max(0, c) for c in counts]
 
+    def belief_key(self, hold: "HoldReading | None" = None) -> tuple:
+        """`signature`, and where `hold` weighs untyped cards by what their
+        seats have shown (`shown_weights`), each such seat's `want` and
+        `waste`: everything a belief drawn with `hold` reads. A cache of
+        worlds keys on it."""
+        weights = self.shown_weights(hold)
+        if weights is None:
+            return self.signature()
+        return self.signature() + (
+            tuple((s, tuple(self.want[s]), tuple(self.waste[s])) for s in sorted(weights)),
+        )
+
+    def shown_weights(self, hold: "HoldReading | None") -> dict[int, list[float]] | None:
+        """Per other seat holding untyped cards, the weight `hold` gives an
+        untyped card of each resource by what the seat has shown
+        (`HoldReading.shown`); only seats some weight differs from 1.0 for.
+        `None` where no seat's does, and the hidden cards are dealt alike."""
+        shown = getattr(hold, "shown", None)
+        if shown is None or not getattr(hold, "reads_shown", lambda: True)():
+            return None
+        out = {}
+        for seat in range(self.num_players):
+            if seat == self.perspective or not self.unknown[seat]:
+                continue
+            want, waste = self.want[seat], self.waste[seat]
+            if not any(want) and not any(waste):
+                continue
+            weights = [float(shown(r, want[r], waste[r])) for r in range(NUM_RESOURCES)]
+            if any(w != 1.0 for w in weights):
+                out[seat] = weights
+        return out or None
+
     def p_holds(
         self, seat: int, bundle: Sequence[int], *, draws: int = 64,
-        rng: random.Random | None = None,
+        rng: random.Random | None = None, hold: "HoldReading | None" = None,
     ) -> float:
         """Probability, on this view, that `seat` holds at least `bundle`
         (a count per resource). Exact where `known` or the upper bounds
         decide it -- always, for the perspective's own seat -- or one card of
-        one type is short of a seat no bound binds; otherwise a Monte-Carlo
-        estimate over `draws` hands dealt from the pool within the seat's
-        bounds, `rng` defaulting to a fixed stream."""
+        one type is short of a seat no bound binds and no `hold` weight
+        applies; otherwise a Monte-Carlo estimate over `draws` hands dealt
+        from the pool within the seat's bounds, `rng` defaulting to a fixed
+        stream. With `hold`, the seat's untyped cards are weighed by what it
+        has shown (`shown_weights`), each draw counted by its weight."""
         known = self.known[seat]
         need = [max(0, b - k) for b, k in zip(bundle, known)]
         short = sum(need)
@@ -206,28 +254,66 @@ class View:
         bounded = self.bounded[seat]
         if bounded and any(n > r for n, r in zip(need, self.room[seat])):
             return 0.0
-        if short == 1 and not bounded:
+        weights = (self.shown_weights(hold) or {}).get(seat)
+        if short == 1 and not bounded and weights is None:
             r = need.index(1)
             return 1.0 - _hypergeometric_miss(self.pool_size, self.pool[r], hidden)
         rng = rng or random.Random(0)
         cards = self._pool_cards()
-        hits = 0
+        hits = total = 0.0
         for _ in range(draws):
             drawn = (
                 _capped_draw(rng, cards, hidden, self.room[seat]) if bounded
                 else rng.sample(cards, hidden)
             )
             counts = known[:]
+            weight = 1.0
             for r in drawn:
                 counts[r] += 1
+                if weights is not None:
+                    weight *= weights[r]
+            total += weight
             if all(c >= b for c, b in zip(counts, bundle)):
-                hits += 1
-        return hits / draws
+                hits += weight
+        return hits / total if total else 0.0
 
     def _pool_cards(self) -> list[int]:
         return [r for r in range(NUM_RESOURCES) for _ in range(self.pool[r])]
 
-    def _deal(self, rng: random.Random) -> list[list[int]]:
+    def _deal(self, rng: random.Random, hold: "HoldReading | None" = None) -> list[list[int]]:
+        """Each seat's hidden cards (`_deal_alike`), weighed by what each seat
+        has shown where `hold` reads it (`shown_weights`): a deal is kept with
+        chance the product of its cards' weights over the most any deal could
+        weigh, so a kept deal is drawn exactly in proportion to its weight
+        among the deals within the bounds. Where none of `DEAL_TRIES` deals is
+        kept, one of them is taken in proportion to its weight, which is
+        approximate. Without such weights this is `_deal_alike`, drawing
+        nothing more from `rng`."""
+        weights = self.shown_weights(hold)
+        if weights is None:
+            return self._deal_alike(rng)
+        top = {}
+        for seat, w in weights.items():
+            reachable = [w[r] for r in range(NUM_RESOURCES) if self.pool[r] and self.room[seat][r]]
+            top[seat] = max(reachable) if reachable else 1.0
+        drawn: list[tuple[float, list[list[int]]]] = []
+        for _ in range(DEAL_TRIES):
+            deal = self._deal_alike(rng)
+            ratio = 1.0
+            for seat, w in weights.items():
+                for r in deal[seat]:
+                    ratio *= w[r] / top[seat]
+            if rng.random() < ratio:
+                return deal
+            drawn.append((ratio, deal))
+        pick = rng.random() * sum(ratio for ratio, _ in drawn)
+        for ratio, deal in drawn:
+            pick -= ratio
+            if pick < 0:
+                return deal
+        return drawn[-1][1]
+
+    def _deal_alike(self, rng: random.Random) -> list[list[int]]:
         """Each seat's hidden cards, dealt from the pool without replacement:
         one shuffle sliced seat by seat where no bound binds. Where one does,
         whole deals are drawn until one keeps every seat within its bounds
@@ -373,7 +459,9 @@ class View:
         (a `hexset.holding.HoldModel`, for one): then, where the ages are
         known (`GameState.dev_ages`), each held card is dealt by kind in
         proportion to the unseen cards of the kind times `hold.weight(kind,
-        age)`. Two public facts bound every deal:
+        age)`, and where the reading weighs untyped resource cards by what
+        their seats have shown (`shown_weights`), the resource cards are
+        dealt by those weights (`_deal`). Two public facts bound every deal:
 
         - The cards a seat bought this turn (`new_dev_cards`, public by
           count) stay unplayable this turn: they are the last of its cards
@@ -387,7 +475,7 @@ class View:
           their exact odds under it (`_vp_bounded`). With one, a seat at its
           bound is dealt no further victory point card."""
         state = copy_state(self.state)
-        for seat, hidden in enumerate(self._deal(rng)):
+        for seat, hidden in enumerate(self._deal(rng, hold)):
             if seat == self.perspective:
                 continue
             hand = self.known[seat][:]

@@ -65,12 +65,14 @@ def browser():
 
 
 def offered(page) -> list[str]:
-    """The options of the first empty seat's picker, past "(empty)" and "(closed)"."""
-    page.wait_for_selector("#players select")
-    return page.eval_on_selector(
-        "#players select",
-        "(select) => [...select.options].map((o) => o.textContent).filter((t) => !t.startsWith('('))",
-    )
+    """The bot cards the first empty seat's picker offers."""
+    page.wait_for_selector("#players .bot-pick")
+    page.click("#players .bot-pick")
+    page.wait_for_selector("#modal.show .bot-card")
+    names = page.eval_on_selector_all(".bot-card", "(cards) => cards.map((c) => c.dataset.model)")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#modal.show", state="hidden")
+    return names
 
 
 def test_a_standard_table_offers_every_name_a_file_declares_there(server, browser):
@@ -99,7 +101,7 @@ def test_a_duel_table_offers_only_what_declares_the_duel(server, browser):
         try:
             watcher.goto(page.url, wait_until="load")
             watcher.wait_for_selector("#players .player-row")
-            if watcher.query_selector("#players select"):
+            if watcher.query_selector("#players .bot-pick"):
                 assert offered(watcher) == names
         finally:
             watcher.context.close()

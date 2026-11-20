@@ -13,11 +13,14 @@ the runner owes only moves and discards.
 
 from __future__ import annotations
 
+import json
+import os
 import random
 import sys
 import threading
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 from hexset.bots import Bot, seat_at
@@ -59,6 +62,45 @@ class LocalTransport:
 # --- Brains: how a seat decides its move -----------------------------------
 
 
+@dataclass
+class DecisionFile:
+    """A game's search decisions on disk: every decision the searchers behind
+    a seat log (`hexset.arena.search_logs`), one JSON line each as
+    `Decision.to_json` gives it, appended and flushed once the move it chose
+    is decided. Several seats of one game may share the file; each line
+    carries its `seat`. A file that cannot be written is reported once and
+    left alone; play goes on."""
+
+    path: Path
+    _written: dict[int, int] = field(default_factory=dict, repr=False)
+    _off: bool = field(default=False, repr=False)
+
+    def sync(self, bot: Bot) -> int:
+        """Append what `bot`'s searchers logged since the last call; returns
+        the lines written."""
+        from hexset.arena import search_logs  # local: the arena imports half the engine
+
+        lines = []
+        for log in search_logs(bot):
+            done = self._written.get(id(log), 0)
+            lines += [json.dumps(decision.to_json(), separators=(",", ":"), default=str)
+                      for decision in log[done:]]
+            self._written[id(log)] = len(log)
+        if not lines or self._off:
+            return 0
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as error:
+            self._off = True
+            print(f"search log disabled ({self.path}): {error}", file=sys.stderr)
+            return 0
+        return len(lines)
+
+
 class Brain(Protocol):
     def decide(self, transport: Transport, token: str, seat: int) -> dict: ...
 
@@ -75,18 +117,24 @@ class LocalSearchBrain:
 
     `lock` is held for the whole decision: the table's other requests -- an
     undo, another seat's discard -- change the same `Game` in place, and a
-    bot must not read it halfway through one."""
+    bot must not read it halfway through one. With `decisions`, what the
+    bot's search logged is written there after each decision, the lock
+    released."""
 
     bot: Bot
     game: Game
     lock: AbstractContextManager = field(default_factory=nullcontext)
+    decisions: DecisionFile | None = None
 
     def __post_init__(self) -> None:
         seat_at(self.bot, self.game)
 
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
         with self.lock:
-            return self._decide(seat)
+            move = self._decide(seat)
+        if self.decisions is not None:
+            self.decisions.sync(self.bot)
+        return move
 
     def _decide(self, seat: int) -> dict:
         game = self.game
@@ -127,10 +175,9 @@ class Unplayable(Exception):
 
 @dataclass
 class BotRunner:
-    """One seat, driven by one brain. Nothing is paced by a clock: a turn's
-    actions go out back to back, and between turns the runner parks on
-    `/api/state?after=<version>` for at most `poll_interval`, which the server
-    caps in its own turn."""
+    """One seat, driven by one brain. A turn's actions go out back to back.
+    Between turns the runner parks on `/api/state?after=<version>` for at
+    most `poll_interval`, which the server caps in its own turn."""
 
     seat: int
     token: str

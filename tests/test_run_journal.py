@@ -181,7 +181,10 @@ def test_no_game_is_played_without_being_kept():
                      arena._play_one, arena._play_dealt):
         assert _required(function, "journal"), f"{function.__qualname__} plays games without a journal"
         assert "records" not in inspect.signature(function).parameters, function.__qualname__
-    assert _required(arena.run_seated, "tape"), "the engine's loop runs without recording"
+    from hexset.gym.driver import play_seated
+
+    assert _required(play_seated, "tape"), "the engine's loop runs without recording"
+    assert not hasattr(arena, "run_seated")
     assert "records" not in inspect.signature(LaneEnv).parameters
     assert not hasattr(arena, "play") and not hasattr(arena, "play_game")
 
@@ -258,3 +261,28 @@ def test_a_spiral_run_deals_spiral_boards_and_says_so_in_its_header(tmp_path):
 def test_an_unknown_board_mode_is_refused_before_any_game():
     with pytest.raises(ValueError, match="unknown board mode"):
         compete(lineup_from_names(LINEUP), 2, board_mode="hexagonal", **QUICK, journal=fresh())
+
+
+def _append_many(path, writer, count, width):
+    from hexset import gamelog
+
+    for i in range(count):
+        gamelog.append(path, {"writer": writer, "i": i, "pad": "x" * width})
+
+
+def test_many_processes_appending_at_once_keep_every_line_whole(tmp_path):
+    """Writers share one journal: every line arrives whole and none is lost,
+    with lines longer than a pipe's atomic write."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    from hexset import gamelog
+
+    path = tmp_path / "shared.jsonl"
+    writers, count, width = 8, 60, 70_000
+    with ProcessPoolExecutor(writers) as pool:
+        list(pool.map(_append_many, [path] * writers, range(writers), [count] * writers, [width] * writers))
+    lines = gamelog.read_lines(path)
+    assert len(lines) == writers * count
+    assert sorted((r["writer"], r["i"]) for r in lines) == [(w, i) for w in range(writers) for i in range(count)]
+    assert all(len(r["pad"]) == width for r in lines)
+    assert path.read_text(encoding="utf-8").endswith("\n")

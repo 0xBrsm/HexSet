@@ -16,7 +16,12 @@ dealt alike. The fold beneath it, `distinct_worlds(belief, rng, draws,
 world_key, hold)`, returns `(share, state)` pairs and takes a
 `hexset.view.HoldReading` as `hold` for a caller with its own reading of held
 cards, such as the `hexset.holding.HoldModel` a checkpoint declares, which
-deals each held card by its age.
+deals each held card by its age and, where it declares `asked` and `offered`
+weights, each seat's untyped resource cards by what the seat has asked for
+and offered away (`View.shown_weights`). A deal so weighed is kept with
+chance the product of its cards' weights over the most any deal could weigh,
+which draws it exactly in proportion to its weight; where no weight applies,
+the deal and its draws from the random stream are the unweighted ones.
 
 ## Model callbacks
 

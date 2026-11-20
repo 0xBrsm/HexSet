@@ -14,8 +14,10 @@ else that runs a batch -- replays, fits, sweeps -- can use `append` and
 `read_lines` the same way.
 
 Writers in several processes may share one journal: each append holds an
-exclusive lock on the file while it writes, so lines never interleave however
-long they are.
+exclusive lock on the file while it writes and flushes its lines, so lines
+never interleave however long they are. The lock is released before the
+fsync, so one writer's fsync never holds up the others' writes; each append
+still returns only after its own lines are on disk.
 """
 from __future__ import annotations
 
@@ -45,17 +47,23 @@ JOURNAL_VERSION = 1
 
 @contextmanager
 def _locked(path: str | os.PathLike) -> Iterator[Any]:
-    """`path` open for appending under an exclusive lock, released on close."""
+    """`path` open for appending under an exclusive lock. On leaving the block
+    the lines written are flushed, the lock is released, and then the file is
+    fsynced, so the lines are on disk when the block returns."""
     with open(path, "a", encoding="utf-8") as handle:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        yield handle
+        try:
+            yield handle
+            handle.flush()
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        os.fsync(handle.fileno())
 
 
 def _write(handle: Any, entry: dict[str, Any]) -> None:
     handle.write(json.dumps(entry, separators=(",", ":"), allow_nan=False) + "\n")
-    handle.flush()
-    os.fsync(handle.fileno())
 
 
 def append(path: str | os.PathLike, entry: dict[str, Any]) -> None:

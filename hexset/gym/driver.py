@@ -404,6 +404,16 @@ class Driver:
         outstanding = env.requests()
         if not outstanding:
             return []
+        if not self.seats:
+            # Every lane is played by its seats' own bots: no seat is asked.
+            finished = env.step({})
+            self.steps += len(outstanding)
+            self._asked = self._targets = None
+            out = []
+            for episode in finished:
+                kept = self.keep(episode)
+                out.append(episode if kept is None else kept)
+            return out
         asked = self.requests()
         answers = self._answers(asked)
         if self.on_decision is not None:
@@ -461,5 +471,28 @@ class Driver:
         return self.env.games_started()
 
 
-__all__ = ["Answer", "Driver", "LANE_KINDS", "NATIVE_READS", "Request", "Seat", "Targets", "draw_key", "observations",
+def play_seated(game: Game, bots: Sequence[object], action_cap: int | None = None, *, tape,
+                cleared: list | None = None) -> None:
+    """Play `game` with `bots` until it is over or `action_cap` moves are
+    made, every move filed on `tape` (`hexset.record.Tape`): one game on one
+    lane of a `Driver`, dealt as it stands (`hexset.gym.lanes.Dealt`). `game`
+    must already be seated (`hexset.arena.seat_bots`). Each seat's bot is
+    asked its own `choose`, each watching bot is shown every move from its
+    own seat before it is applied, and `cleared`, a list, collects every
+    cleared trade (`hexset.arena.ClearedTrade`); the moves are the same with
+    or without it."""
+    from ..arena import MAX_ACTIONS
+    from ..game import is_over
+    from .lanes import Dealt
+
+    if action_cap is None:
+        action_cap = MAX_ACTIONS
+    if action_cap <= 0 or is_over(game):
+        return
+    env = LaneEnv(game.num_players, 0, 1, deal=1, action_cap=action_cap,
+                  dealer=lambda index: Dealt(game, tuple(bots), tape, None, cleared))
+    Driver(env, {}, keep=lambda episode: None).play()
+
+
+__all__ = ["Answer", "Driver", "LANE_KINDS", "NATIVE_READS", "Request", "play_seated", "Seat", "Targets", "draw_key", "observations",
            "seat_points"]

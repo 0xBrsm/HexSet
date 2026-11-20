@@ -239,3 +239,4 @@ def parse(name: str) -> Entrant:
 arena._register(arena._ENTRANT_KIND_FACTORIES, "catanatron", _spawn, "entrant kind")
 arena._register(arena.PRESETS, "catanatron", PRESET, "preset")
 arena._register(arena._SPEC_PARSERS, CATANATRON, parse, "spec prefix")
+arena._PRESET_PROFILES["catanatron"] = {"label": "Catanatron"}

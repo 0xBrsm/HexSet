@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import time
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from hexset.actions import Action, ActionType, legal_actions
 from hexset.server import _journal as journal
 from hexset.server.api import (
     MAX_SEATS,
+    TABLE_TTL_SECONDS,
     ApiError,
     Config,
     Origin,
@@ -492,6 +494,33 @@ def test_reclaim_with_the_wrong_secret_403s():
     assert wrong.value.status == 403
 
 
+def test_a_reclaim_probe_answers_no_seat_without_refusing():
+    registry = tables()
+    secret = "the right secret"
+    client_id = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    dealt = registry.handle(
+        "POST", "/api/games", {"bots": [], "client": {"id": client_id, "kind": "web"}}, None
+    )
+
+    stranger = registry.handle(
+        "POST", "/api/reclaim", {"code": dealt["code"], "secret": "not it", "probe": True}, None
+    )
+    assert stranger == {"token": None}
+    registry.handle("GET", "/api/state", {}, dealt["token"])  # the seat's token still works
+
+    mine = registry.handle(
+        "POST", "/api/reclaim", {"code": dealt["code"], "secret": secret, "probe": True}, None
+    )
+    assert mine["token"] and mine["seat"] == 0
+
+    # Only `true` asks a probe: anything else is the ordinary refusal.
+    with pytest.raises(ApiError) as wrong:
+        registry.handle(
+            "POST", "/api/reclaim", {"code": dealt["code"], "secret": "not it", "probe": "yes"}, None
+        )
+    assert wrong.value.status == 403
+
+
 def test_reclaim_gets_a_finished_game_s_seat_back_but_it_still_cannot_act(finished_game):
     _session, directory = finished_game
     fresh = new_tables(games_dir=str(directory))
@@ -642,3 +671,43 @@ def test_every_seat_view_carries_your_move():
     created = tables.handle("POST", "/api/games", {}, None)
     view = tables.handle("GET", "/api/state", {}, created["token"])
     assert view["your_move"] == "wait" and view["waiting_on"]  # empty seats hold up setup
+
+
+# --- a table left idle --------------------------------------------------------
+
+
+def test_a_table_left_idle_is_dropped_and_comes_back_where_it_stopped(tmp_path):
+    registry = tables(games_dir=str(tmp_path))
+    secret = "a browser's own secret"
+    client_id = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    dealt = registry.handle("POST", "/api/games", {"bots": SOLO, "client": {"id": client_id}}, None)
+    code, table = dealt["code"], registry.get(dealt["code"])
+    steps = table.session.steps
+    # nobody has read it and nothing has moved for longer than the limit
+    table.last_seen = table.changed_at = time.monotonic() - TABLE_TTL_SECONDS - 1
+    registry.handle("POST", "/api/games", {"bots": SOLO}, None)      # a deal sweeps idle tables
+
+    assert table.closed and not table.runners
+    path = next(p for p in tmp_path.glob("*.jsonl") if json.loads(p.read_text().splitlines()[0])["code"] == code)
+    assert all(json.loads(line)["kind"] != "abandoned" for line in path.read_text().splitlines())
+    with pytest.raises(ApiError) as gone:                              # its tokens went with it
+        registry.handle("GET", "/api/state", {}, dealt["token"])
+    assert gone.value.status == 403
+
+    back = registry.get(code)                                          # rebuilt from the journal
+    assert back is not table and back.session.steps == steps and not is_over(back.session.game)
+    mine = registry.handle("POST", "/api/reclaim", {"code": code, "secret": secret}, None)
+    assert mine["seat"] == dealt["seat"]
+    assert registry.handle("GET", "/api/state", {}, mine["token"])["code"] == code
+    registry.close()
+
+
+def test_a_table_whose_bots_are_still_moving_is_not_dropped(tmp_path):
+    registry = tables(games_dir=str(tmp_path))
+    dealt = registry.handle("POST", "/api/games", {"bots": SOLO}, None)
+    table = registry.get(dealt["code"])
+    table.last_seen = time.monotonic() - TABLE_TTL_SECONDS - 1         # no person has read it,
+    table.changed_at = time.monotonic()                                # but a move was just made
+    registry.handle("POST", "/api/games", {"bots": SOLO}, None)
+    assert not table.closed and registry.get(dealt["code"]) is table
+    registry.close()

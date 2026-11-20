@@ -405,17 +405,14 @@ def test_a_stamped_contract_9_file_still_loads_and_names_itself(tmp_path):
     assert isinstance(load(str(target), _board().topology).policy, DecisionPolicy)
 
 
-@pytest.mark.parametrize("limit", [256, 1])
-def test_a_batch_of_rows_plays_the_moves_one_row_at_a_time_plays(limit):
+def test_a_batch_of_rows_plays_the_moves_one_row_at_a_time_plays():
     """`act_rows` asks the graph once for every row that needs it, and plays
-    the same moves as asking row by row, plans and their limit included."""
+    the same moves as asking row by row, plans included."""
     from hexset.game import to_move
 
     board = _board()
     loaded = load(str(STUB9), board.topology).policy
     policies = [DecisionPolicy(loaded.session, loaded.space, loaded.topology, loaded.players) for _ in range(2)]
-    for policy in policies:
-        policy._plans.LIMIT = limit
     tables = [[start(board, 4, random.Random(seed)) for seed in range(8)] for _ in policies]
     runs = []
     original = policies[0]._run

@@ -134,6 +134,22 @@ rest; two files offering one name at one game type are neither offered there.
 rescanned on each listing, so a file dropped there appears without a restart;
 it must meet the [ONNX model contract](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md).
 
+A bot or open seat's name opens the bot cards: one per bot the table's game
+type offers, with its version and the description its profile declares.
+Tapping a card seats that bot; before the first move the seat can be left open
+or closed instead.
+
+The page plays other seats' actions back as they happen: captions at the foot
+of the board name each one, cards drawn as their glyphs, newest at the bottom; the
+dice roll, pieces drop in, the robber moves, and each seat's row shows the
+cards the action gained or lost it. Each action is held long enough to read,
+and a click on the board finishes the playback. A seat's own moves are drawn
+at once. A hex whose number comes up under the robber flashes red. A table's
+bots send each move as soon as they decide it. The speaker button in the
+board's top-left corner turns sound on for every seat's moves, off until a browser asks for it:
+recorded card, chip and dice clips and two end-of-game jingles, CC0, from
+Kenney's *Casino Audio* and *Music Jingles*.
+
 The trade modal makes bank and port trades, offers to other players, and
 answers to their offers. A bot seat makes as many offers a turn as its own
 gate declares and waits for manual seats to answer. A manual seat has no card
@@ -146,8 +162,8 @@ it, players at that table included, so a served game does not keep hands
 secret between participants. Reads with a seat token filter hidden
 information.
 
-A server started with `--ranker` also shows rankings at `/rankings`, linked
-from the game page's menu. Only ranked games count: tables the server deals
+A server started with `--ranker` also shows rankings at `/rankings`, and as
+a tab of the game page's menu. Only ranked games count: tables the server deals
 from a queue that API clients and models join, never the page. The server
 only shows them: the function `--ranker` names makes them from every ranked
 game

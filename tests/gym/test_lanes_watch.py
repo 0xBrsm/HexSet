@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`hexset.gym.lanes` shows every move to a bot that reads the table
-(`hexset.bots.watch`) as `hexset.arena.run_seated` does, and gives each of
+(`hexset.bots.watch`) as the arena's games do (`hexset.gym.driver.play_seated`), and gives each of
 its seats a bot of its own for the game (as every bot seat gets,
 `test_lanes_streams`)."""
 
@@ -260,3 +260,37 @@ def test_seat_streams_are_the_games_and_seats_own():
     assert salts[1] == salts[3]
     expected = sorted(random.Random(f"{SEED}:{i}:{s}").getrandbits(16) for i in range(3) for s in range(4))
     assert salts[1] == expected
+
+
+def test_a_dealers_game_plays_as_its_bots_choose_and_keeps_its_census():
+    """`play_seated` (one dealer lane on a `Driver`) and a dealer `LaneEnv`
+    with two lanes play the same seated game, move for move, census included."""
+    from hexset.arena import deal_game, lineup_from_names, seat_bots, spawn
+    from hexset.gym.driver import Driver, play_seated
+    from hexset.gym.lanes import Dealt, LaneEnv
+    from hexset.record import Tape, recording, to_json
+    from hexset.rules import STANDARD
+
+    def dealt(index):
+        game = deal_game(7, index, 4, chance=lambda rng: recording(rng, STANDARD))
+        board = game.state(0, hidden=False).board
+        bots = [spawn(entrant, board, random.Random(f"7:{index}:{e}"))
+                for e, entrant in enumerate(lineup_from_names(["random"] * 4))]
+        seat_bots(game, bots)
+        return game, bots
+
+    alone = {}
+    for index in range(3):
+        game, bots = dealt(index)
+        tape, cleared = Tape(), []
+        play_seated(game, bots, 400, tape=tape, cleared=cleared)
+        alone[index] = (to_json(tape.sealed(game, seed="k")), tuple(cleared))
+    kept = {}
+
+    def dealer(index):
+        game, bots = dealt(index)
+        return Dealt(game, tuple(bots), Tape(), "k", [])
+
+    env = LaneEnv(4, 7, 2, deal=3, action_cap=400, dealer=dealer)
+    Driver(env, {}, keep=lambda e: kept.update({e.index: (to_json(e.record), e.cleared)})).play()
+    assert kept == alone

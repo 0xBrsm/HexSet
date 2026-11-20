@@ -12,7 +12,8 @@ import pytest
 
 from hexset import deals as D
 from hexset.actions import ActionType, apply, legal_actions
-from hexset.arena import Entrant, entrant_from_name, lineup_from_names, run_seated, seat_bots, spawn
+from hexset.arena import Entrant, entrant_from_name, lineup_from_names, seat_bots, spawn
+from hexset.gym.driver import play_seated
 from hexset.board.board import random_base_board
 from hexset.bots import RandomBot
 from hexset.cards import DevCard
@@ -134,7 +135,7 @@ def play_out(dealing: bool, seed: int = 1, actions: int = 3000):
     if dealing:      # dealing params that ask nothing and answer nothing
         bots = [D.Dealing(b, D.DealParams()) for b in bots]
     seat_bots(game, bots)
-    run_seated(game, bots, actions, tape=Tape())
+    play_seated(game, bots, actions, tape=Tape())
     s = game._state
     return game.turns, [list(h) for h in s.hands], s.robber, list(s.vertex_owner), game.deal_log
 

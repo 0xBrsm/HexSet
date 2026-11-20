@@ -19,6 +19,7 @@ from journals import fresh
 from hexset.actions import Action, ActionType, legal_actions
 
 from hexset.server import _journal as journal
+from hexset.server._webplay import seat_color_name
 from hexset.server.api import (
     ApiError,
     Config,
@@ -410,7 +411,7 @@ def test_a_journalled_round_reads_offer_answers_and_trade_in_order(tmp_path):
     # The round is one line, and the exchange that closes it ends it.
     line, again = log[first], log[first + 1]
     assert (line.index(" offers ") < line.index(" accepts.")
-            < line.index(f" Traded with Player {b + 1} ")) and "declines" not in line
+            < line.index(f" Traded with {seat_color_name(b)} ")) and "declines" not in line
     assert again.index(" offers ") < again.index(" accepts.") < again.index(" Traded with ")
     # The offers and acceptances go on the record where they were shown, the
     # offer the actor's own and an acceptance signed towards the seat taking it.

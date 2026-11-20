@@ -34,7 +34,7 @@ PROFILE_FIELDS = ("name", "version", "owner", "url", "description")
 # Each profile field's longest, in characters: a name, version or owner
 # longer is cut, a url or description longer is refused. A `description` is
 # one sentence: what the client is.
-PROFILE_LENGTHS = {"name": 40, "version": 40, "owner": 40, "url": 200, "description": 100}
+PROFILE_LENGTHS = {"name": 40, "version": 40, "owner": 40, "url": 200, "description": 100, "label": 40}
 
 _WEB_URL = re.compile(r"^https?://[^\s/]+\S*$", re.IGNORECASE)
 

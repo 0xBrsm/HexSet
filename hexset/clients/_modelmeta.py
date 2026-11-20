@@ -242,19 +242,28 @@ def hold_config(meta: dict[str, str]) -> HoldModel | None:
     """The hold model `meta` declares for the other seats' held development
     cards (`hexset.holding.HoldModel`, written by `HoldModel.meta`):
     `hold_shape`, a positive number, and `hold_scale`, one chance in (0, 1]
-    for each kind, comma separated. `None` when it declares neither, and its
-    search worlds deal every unseen card alike. One without the other, or a
+    for each kind, comma separated; and, for the other seats' untyped
+    resource cards, `hold_asked` and `hold_offered`, positive weights, given
+    together or not at all (1.0 each when absent). `None` when it declares no
+    shape and scale, and its search worlds deal every unseen card alike. One
+    of a pair without the other, weights without a shape and scale, or a
     value out of range, fails the load: a declared reading is never dropped
     quietly."""
     shape, scale = (meta.get("hold_shape") or "").strip(), (meta.get("hold_scale") or "").strip()
+    asked, offered = (meta.get("hold_asked") or "").strip(), (meta.get("hold_offered") or "").strip()
+    if bool(asked) != bool(offered):
+        raise ValueError("`hold_asked` and `hold_offered` declare one reading: give both or neither")
     if not shape and not scale:
+        if asked:
+            raise ValueError("`hold_asked` and `hold_offered` need the hold model they belong to")
         return None
     if not shape or not scale:
         raise ValueError("`hold_shape` and `hold_scale` declare one hold model: give both or neither")
     try:
-        return HoldModel(shape=float(shape), scale=tuple(float(s) for s in scale.split(",")))
+        weights = {"asked": float(asked), "offered": float(offered)} if asked else {}
+        return HoldModel(shape=float(shape), scale=tuple(float(s) for s in scale.split(",")), **weights)
     except ValueError as error:
-        raise ValueError(f"unreadable hold model ({shape!r}; {scale!r}): {error}") from None
+        raise ValueError(f"unreadable hold model ({shape!r}; {scale!r}; {asked!r}; {offered!r}): {error}") from None
 
 
 def hold_of(checkpoint: object) -> HoldModel | None:

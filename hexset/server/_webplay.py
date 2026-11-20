@@ -144,6 +144,16 @@ def _list_with_counts(items: list[str]) -> str:
 class _Snapshot:
     hands: list[list[int]]
     held: list[list[int]]
+    # Each seat's score, with its victory point cards and without them.
+    points: list[int]
+    public_points: list[int]
+    knights: list[int]
+    roads: list[int]
+    # The seat holding each award, `NO_OWNER` for nobody.
+    longest_road: int
+    largest_army: int
+    # The bank's resource cards, by resource; empty where not taken.
+    bank: list[int] = field(default_factory=list)
 
 
 # The actions a seat can take back, its own only. PLAY_ROAD_BUILDING and
@@ -185,16 +195,6 @@ class _UndoPoint:
     steps: int
     # Whose action this would take back; only its own actor may undo it.
     actor: int
-
-
-def _snapshot(game: Game) -> _Snapshot:
-    """Every seat's hand and dev-card holdings, unredacted."""
-    # true state: the server's own omniscient observer snapshot.
-    state = game.state(0, hidden=False)
-    return _Snapshot(
-        hands=[hand[:] for hand in state.hands],
-        held=[holdings(state, p)[:] for p in range(state.num_players)],
-    )
 
 
 @dataclass
@@ -272,24 +272,20 @@ def _round_clause(note: RoundNote, labels: dict[int, str], *, standalone: bool) 
     return None
 
 
-class SeatLabels(dict):
-    """Seat -> label, plus the seat's number among the seats still in the game:
-    a closed seat keeps no number, so the table reads Player 1, 2, 3."""
+# Each seat's colour as the game page draws it (its `SEAT_COLORS`), by seat:
+# the name the log and the page give a seat, which stays the same whichever
+# seats are closed.
+SEAT_COLOR_NAMES: tuple[str, ...] = ("Red", "Green", "Purple", "Blue")
 
-    def __init__(self, labels: dict[int, str], locked: Iterable[int] = ()) -> None:
-        super().__init__(labels)
-        self.locked = frozenset(locked)
 
-    def number(self, seat: int) -> int:
-        """`seat`'s 1-based number among the seats still in the game."""
-        return seat + 1 - sum(1 for s in self.locked if s < seat)
+def seat_color_name(seat: int) -> str:
+    """`seat`'s colour name, `Seat N` (1-based) past the four colours."""
+    return SEAT_COLOR_NAMES[seat] if 0 <= seat < len(SEAT_COLOR_NAMES) else f"Seat {seat + 1}"
 
 
 def _who(seat: int, labels: dict[int, str]) -> str:
-    """"Player N (label)": N is the seat's number among the seats still in the
-    game when `labels` is a `SeatLabels`, else the 1-indexed seat."""
-    number = labels.number(seat) if isinstance(labels, SeatLabels) else seat + 1
-    return f"Player {number} ({labels.get(seat, 'bot')})"
+    """"Colour (label)": the seat's colour name and what it is called."""
+    return f"{seat_color_name(seat)} ({labels.get(seat, 'bot')})"
 
 
 def _describe(
@@ -369,7 +365,7 @@ def _describe(
     if kind is ActionType.PLAY_MONOPOLY:
         resource = RESOURCE_NAMES[action.a]
         swept = after.hands[actor][action.a] - before.hands[actor][action.a]
-        return f"{who} played Monopoly on {resource} and collected {swept} card(s)."
+        return f"{who} played Monopoly on {resource} and collected {swept} card{'' if swept == 1 else 's'}."
 
     if kind is ActionType.PLAY_YEAR_OF_PLENTY:
         r0, r1 = YEAR_OF_PLENTY_PAIRS[action.a]
@@ -554,6 +550,200 @@ def render_log(
     return lines
 
 
+# How many of the newest entries a view's `feed` carries. A client that has
+# fallen further behind than this redraws from the view instead of playing
+# the gap back.
+FEED_WINDOW = 96
+
+_FEED_PIECE: dict[ActionType, str] = {
+    ActionType.SETUP_SETTLEMENT: "settlement",
+    ActionType.SETUP_ROAD: "road",
+    ActionType.BUILD_ROAD: "road",
+    ActionType.BUILD_SETTLEMENT: "settlement",
+    ActionType.BUILD_CITY: "city",
+}
+
+_FEED_CARD: dict[ActionType, str] = {
+    ActionType.PLAY_KNIGHT: "Knight",
+    ActionType.PLAY_ROAD_BUILDING: "Road Building",
+    ActionType.PLAY_MONOPOLY: "Monopoly",
+    ActionType.PLAY_YEAR_OF_PLENTY: "Year Of Plenty",
+}
+
+
+def _gains(before: list[list[int]], after: list[list[int]]) -> dict[str, list[int]]:
+    """Seat (as a string, a JSON key) -> the cards it gained, by resource;
+    seats that gained nothing are left out."""
+    out = {}
+    for p, (was, now) in enumerate(zip(before, after)):
+        gained = [max(0, n - w) for w, n in zip(was, now)]
+        if any(gained):
+            out[str(p)] = gained
+    return out
+
+
+def _feed_trades(trades: Sequence[Trade]) -> list[dict]:
+    return [
+        {"a": t.a, "b": t.b,
+         "gave": [max(0, -n) for n in t.received], "got": [max(0, n) for n in t.received]}
+        for t in trades
+    ]
+
+
+def _rows(snapshot: _Snapshot, hands: list[list[int]], viewer: int | None, omniscient: bool) -> list[dict]:
+    """What a view's `players` rows say that an action can change, for the
+    position in `snapshot` with its seats holding `hands`: the keys
+    `GameSession.state_view` gives a row, hidden for `viewer` as it hides
+    them. A seat's cards and its victory point cards are there only for that
+    seat or an `omniscient` reader."""
+    rows = []
+    for p, hand in enumerate(hands):
+        sees = omniscient or p == viewer
+        row = {
+            "victory_points": snapshot.points[p] if sees else snapshot.public_points[p],
+            "knights_played": snapshot.knights[p],
+            "road_length": snapshot.roads[p],
+            "longest_road": snapshot.longest_road == p,
+            "largest_army": snapshot.largest_army == p,
+            "hand_size": sum(hand),
+            "dev_card_count": sum(snapshot.held[p]),
+        }
+        if sees:
+            row["hand"] = dict(zip(RESOURCE_NAMES, hand))
+            row["dev_cards"] = dict(zip(DEV_CARD_NAMES, snapshot.held[p]))
+        rows.append(row)
+    return rows
+
+
+def _row_changes(before: list[dict], after: list[dict]) -> dict[str, dict]:
+    """Seat (as a string, a JSON key) -> the keys of its row that differ in
+    `after`, with their values there; a seat with none is left out."""
+    out = {}
+    for p, (was, now) in enumerate(zip(before, after)):
+        changed = {key: value for key, value in now.items() if was[key] != value}
+        if changed:
+            out[str(p)] = changed
+    return out
+
+
+def _with_after(entry: dict, event: _Event, viewer: int | None, omniscient: bool) -> dict:
+    """`entry` with `after`: what its action changed on each seat's row
+    (`_row_changes`), as `viewer` may see it. Each of its `trades` gets its
+    own, what that exchange changed after the action and the exchanges
+    before it. One that changed no row gets none. An entry whose action
+    changed the bank also carries `bank`, its counts after the action (an
+    exchange between seats leaves the bank alone)."""
+    if event.after.bank and event.after.bank != event.before.bank:
+        entry["bank"] = dict(zip(RESOURCE_NAMES, event.after.bank))
+    # The hands after the action alone, then after each exchange in turn,
+    # worked back from the hands after all of them.
+    hands = [event.after.hands]
+    for trade in reversed(event.trades):
+        was = [hand[:] for hand in hands[0]]
+        for r, n in enumerate(trade.received):
+            was[trade.a][r] -= n
+            was[trade.b][r] += n
+        hands.insert(0, was)
+    rows = [_rows(event.before, event.before.hands, viewer, omniscient)]
+    rows += [_rows(event.after, held, viewer, omniscient) for held in hands]
+    for step, was, now in zip([entry, *entry.get("trades", [])], rows, rows[1:]):
+        changed = _row_changes(was, now)
+        if changed:
+            step["after"] = changed
+    return entry
+
+
+def _feed_entry(event: _Event, n: int, viewer: int | None, omniscient: bool) -> dict:
+    """One event as `viewer` may see it: the same hiding as its log line
+    (`_describe`, `render_log`). A bought card, a stolen card and a discarded
+    card are named only to the seat that holds it (and the thief, for a steal)
+    or an `omniscient` reader. `after` (`_with_after`) is what the event
+    changed on each seat's row."""
+    entry: dict = {"n": n, "round": event.round_num, "actor": event.actor}
+    if event.action is None:
+        if event.note is not None:
+            note = event.note
+            entry.update(kind="round", step=note.kind, seat=note.seat,
+                         bundle=None if note.bundle is None else list(note.bundle))
+            if note.any:
+                entry["any"] = note.any
+        else:
+            entry["kind"] = "trade"
+        if event.trades:
+            entry["trades"] = _feed_trades(event.trades)
+        return _with_after(entry, event, viewer, omniscient)
+
+    action, actor = event.action, event.actor
+    before, after = event.before, event.after
+    kind = action.type
+    sees = omniscient or viewer == actor
+    if kind is ActionType.ROLL:
+        entry.update(kind="roll", value=event.last_roll, gains=_gains(before.hands, after.hands))
+    elif kind in _FEED_PIECE:
+        entry.update(kind="build", piece=_FEED_PIECE[kind], at=action.a,
+                     setup=kind in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD))
+        gains = _gains(before.hands, after.hands)
+        if kind is ActionType.SETUP_SETTLEMENT and gains:
+            entry["gains"] = gains
+    elif kind is ActionType.BUY_DEV_CARD:
+        gained = [c for c in range(NUM_DEV_CARDS) if before.held[actor][c] < after.held[actor][c]]
+        entry.update(kind="buy", card=DEV_CARD_NAMES[gained[0]] if sees and gained else None)
+    elif kind in _FEED_CARD:
+        entry.update(kind="play", card=_FEED_CARD[kind])
+        if kind is ActionType.PLAY_MONOPOLY:
+            entry["resource"] = RESOURCE_NAMES[action.a]
+            entry["taken"] = {
+                str(p): was[action.a] - now[action.a]
+                for p, (was, now) in enumerate(zip(before.hands, after.hands))
+                if was[action.a] > now[action.a]
+            }
+        elif kind is ActionType.PLAY_YEAR_OF_PLENTY:
+            r0, r1 = YEAR_OF_PLENTY_PAIRS[action.a]
+            entry["resources"] = [RESOURCE_NAMES[r0], RESOURCE_NAMES[r1]]
+    elif kind is ActionType.MOVE_ROBBER:
+        num_players = len(after.hands)
+        victim = action.b if action.b < num_players else None
+        entry.update(kind="robber", hex=action.a, victim=victim, card=None)
+        if victim is not None and (omniscient or viewer in (actor, victim)):
+            lost = [r for r in range(NUM_RESOURCES) if after.hands[victim][r] < before.hands[victim][r]]
+            entry["card"] = RESOURCE_NAMES[lost[0]] if lost else None
+        if victim is not None:
+            entry["stole"] = sum(before.hands[victim]) > sum(after.hands[victim])
+    elif kind is ActionType.BANK_TRADE:
+        entry.update(kind="bank",
+                     gave={RESOURCE_NAMES[action.a]: before.hands[actor][action.a] - after.hands[actor][action.a]},
+                     got={RESOURCE_NAMES[action.b]: 1})
+    elif kind is ActionType.DISCARD:
+        entry.update(kind="discard", card=RESOURCE_NAMES[action.a] if sees else None)
+    elif kind is ActionType.END_TURN:
+        entry["kind"] = "end"
+    else:
+        entry["kind"] = kind.name.lower()
+    if event.trades:
+        entry["trades"] = _feed_trades(event.trades)
+    return _with_after(entry, event, viewer, omniscient)
+
+
+def render_feed(
+    events: list[_Event],
+    viewer: int | None,
+    *,
+    omniscient: bool = False,
+    discards_open: bool = False,
+    window: int = FEED_WINDOW,
+) -> list[dict]:
+    """The newest `window` events, one entry each, as `viewer` may see them,
+    numbered by their place in the game (`n`). A discard round still open is
+    held back whole, as `render_log` holds it: its entries appear once every
+    seat has discarded."""
+    end = len(events)
+    if discards_open:
+        while end and events[end - 1].action is not None and events[end - 1].action.type is ActionType.DISCARD:
+            end -= 1
+    start = max(0, end - window)
+    return [_feed_entry(events[n], n, viewer, omniscient) for n in range(start, end)]
+
+
 def _is_split_knight_play(
     steps: list[tuple[int, Action | None, tuple[Trade, ...]]], index: int, actor: int
 ) -> bool:
@@ -589,6 +779,7 @@ class _OpenRound:
 
 
 
+
 def _concrete(state, seat: int) -> bool:
     """Whether `seat`'s cards are in the state card by card, not as the
     counts an observed state holds for a seat it cannot see."""
@@ -615,8 +806,11 @@ class GameSession:
     # seat count only fixes the table's seats at the deal (`seats_fixed`).
     game_type: GameType = STANDARD_GAME
     journal: Journal | None = None
-    # Seat -> the model-picker display name playing it. Bots only.
+    # Seat -> the model-picker name playing it. Bots only.
     bot_names: dict[int, str] = field(default_factory=dict)
+    # Seat -> the name shown for that bot where its profile gives a `label`
+    # (`api.bot_label`); a bot without one is shown by its `bot_names` name.
+    bot_labels: dict[int, str] = field(default_factory=dict)
     # Seat -> the entrant spec that built the bot on it, journalled so a
     # resumed game can put the same opponents back. Unused by play.
     bot_specs: dict[int, str] = field(default_factory=dict)
@@ -641,9 +835,14 @@ class GameSession:
     # The step number the next action is journalled under: the journal's
     # numbering, not `len(events)`.
     steps: int = field(default=0, repr=False)
+    # Bumped by every undo, which rewrites `events` rather than appending to
+    # them: a client playing the feed back starts over on a new epoch.
+    epoch: int = field(default=0)
     # The `(turns, current_player)` a bot actor last broadcast in, so a second
     # entry into MAIN in one turn does not restart the round from scratch.
     _broadcast_turn: tuple[int, int] | None = field(default=None, repr=False)
+    # The roads and buildings `road_lengths` last worked from, and its answer.
+    _roads: tuple[tuple, list[int]] | None = field(default=None, repr=False)
     # This turn's own bundles already put to the table, and how many --
     # reset alongside `_broadcast_turn`. What a gate asking for more than one
     # offer a turn (`trade_offer_budget`, e.g. the fragmented trade policy) is
@@ -803,6 +1002,34 @@ class GameSession:
         self._note_if_everyone_passed()
         self._resolve()
 
+    def road_lengths(self) -> list[int]:
+        """Every seat's longest route (`hexset.roads.road_lengths`), worked
+        out again only when a road or a building has gone down since."""
+        # true state: the board's pieces are public.
+        state = self.game.state(0, hidden=False)
+        key = (tuple(state.edge_owner), tuple(state.vertex_owner))
+        if self._roads is None or self._roads[0] != key:
+            self._roads = (key, road_lengths(state))
+        return list(self._roads[1])
+
+    def _snapshot(self) -> _Snapshot:
+        """Every seat's hand, dev-card holdings and score, unredacted, with
+        the rest of what a view's `players` row says of it."""
+        # true state: the server's own omniscient observer snapshot.
+        state = self.game.state(0, hidden=False)
+        seats = range(state.num_players)
+        return _Snapshot(
+            hands=[hand[:] for hand in state.hands],
+            held=[holdings(state, p)[:] for p in seats],
+            points=[victory_points(state, p) for p in seats],
+            public_points=[public_victory_points(state, p) for p in seats],
+            knights=list(state.knights_played),
+            roads=self.road_lengths(),
+            longest_road=state.longest_road_holder,
+            largest_army=state.largest_army_holder,
+            bank=state.bank[:],
+        )
+
     def _gates(self) -> list[object | None]:
         """Every seat's gate in seat order, `None` where nobody is seated --
         the shape `hexset.trading`'s round stages take."""
@@ -820,7 +1047,7 @@ class GameSession:
         if note.kind in ("offer", "accept", "counter") and note.bundle is not None:
             mine = note.bundle if note.kind == "offer" else tuple(-n for n in note.bundle)
             trading.show(self.game, note.seat, mine)
-        snapshot = _snapshot(self.game)
+        snapshot = self._snapshot()
         self.events.append(
             _Event(
                 round_num=round_num,
@@ -911,7 +1138,7 @@ class GameSession:
         round_ = self.open_round
         if round_ is None or round_.offer.actor != actor or round_.offer.received != received:
             raise ValueError("that offer is no longer open")
-        if seat not in round_.awaiting:
+        if seat not in round_.awaiting or not self.is_manual(seat):
             raise ValueError("that offer is not waiting on your answer")
         if kind == RESPONSE_ACCEPT and trading.is_open(round_.offer):
             raise ValueError("an offer with any cards is answered by a counter naming them")
@@ -975,7 +1202,7 @@ class GameSession:
         their cards. Recorded as its own `_Event` and journal line, and clears
         any pending take-back, since cards moved."""
         round_num = self.round
-        before = _snapshot(self.game)
+        before = self._snapshot()
         trade = execute_agreed(
             self.game, actor, counterparty, bundle,
             ask_actor=False, ask_counterparty=False,
@@ -990,7 +1217,7 @@ class GameSession:
                 actor=actor,
                 action=None,
                 before=before,
-                after=_snapshot(self.game),
+                after=self._snapshot(),
                 last_roll=self.game.last_roll,
                 trades=(trade,),
             )
@@ -1041,17 +1268,17 @@ class GameSession:
         return list(range(max(self.game_type.seats), self.game.num_players))
 
     @property
-    def seat_labels(self) -> SeatLabels:
+    def seat_labels(self) -> dict[int, str]:
         """Seat -> what to call whoever holds it, people and bots in one map.
         A claimed seat with no bot label falls back to its registered name, so
         every seat has a label and `_who` never has to invent one."""
-        labels = dict(self.bot_names)
+        labels = {seat: self.bot_labels.get(seat, name) for seat, name in self.bot_names.items()}
         for seat in self.claimed_seats:
             if seat not in labels:
                 # `api.py` names a seat at claim time; this is for a session
                 # built directly with none.
                 labels[seat] = self.player_names.get(seat) or "api"
-        return SeatLabels(labels, self.game.locked)
+        return labels
 
     def claim(self, seat: int, name: str | None, client: dict | None = None) -> None:
         """A seat somebody joined after the deal, which the header could not
@@ -1127,7 +1354,7 @@ class GameSession:
         trade's journal line being restored, or a record's exchange being
         journalled (`journal.journal_of`). Re-executed, not re-gated."""
         round_num = self.round
-        before = _snapshot(self.game)
+        before = self._snapshot()
         apply_trades(self.game, trades)
         self.events.append(
             _Event(
@@ -1135,7 +1362,7 @@ class GameSession:
                 actor=actor,
                 action=None,
                 before=before,
-                after=_snapshot(self.game),
+                after=self._snapshot(),
                 last_roll=self.game.last_roll,
                 trades=trades,
             )
@@ -1231,7 +1458,7 @@ class GameSession:
         # Captured before apply(): `end_turn` increments `game.turns`, and so
         # `self.round`, which would misnumber the END_TURN line.
         round_num = self.round
-        before = _snapshot(self.game)
+        before = self._snapshot()
         undoable = action.type in _UNDOABLE_BUILDS
         # Taken before apply(): it has to be the instant before this action.
         undo_point = (
@@ -1276,7 +1503,7 @@ class GameSession:
                 actor=actor,
                 action=action,
                 before=before,
-                after=_snapshot(self.game),
+                after=self._snapshot(),
                 last_roll=self.game.last_roll,
                 trades=tuple(self.game.trades[trades_before:]),
             )
@@ -1352,6 +1579,7 @@ class GameSession:
         self.game.last_settlement = point.last_settlement
         self.game.dev_card_played = point.dev_card_played
         del self.events[point.events :]
+        self.epoch += 1
         self.steps = point.steps
         if self.journal is not None:
             self.journal.undo(self.game, back_to=point.steps)
@@ -1442,7 +1670,7 @@ class GameSession:
         revealed = over or finished
         players = []
         # Public: a route's length is visible on the board.
-        lengths = road_lengths(state)
+        lengths = self.road_lengths()
         for p in range(state.num_players):
             # A finished game discloses every seat -- as far as the state
             # holds it: on an observed one (`game.observe`) another seat's
@@ -1558,6 +1786,15 @@ class GameSession:
             ),
             "legal_actions": self.legal_wire_actions(viewer),
             "log": self.log_for(viewer, omniscient=omniscient or revealed),
+            # Each action as its own entry, hidden as the log is, for a
+            # client that shows a turn one action at a time.
+            "feed": {
+                "epoch": self.epoch,
+                "events": render_feed(
+                    self.events, viewer, omniscient=omniscient or revealed,
+                    discards_open=bool(players_owing_discards(game)),
+                ),
+            },
         }
 
     def log_for(self, viewer: int | None, *, omniscient: bool = False) -> list[str]:

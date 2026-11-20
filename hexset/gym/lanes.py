@@ -27,10 +27,13 @@ draws nothing from its dice or deck, and lets it finish its whole discard
 before drawing again.
 
 A bot that reads the table's moves (`hexset.bots.watch`, a `seen` hook) is
-shown every move of its lane as `hexset.arena.run_seated` shows it: each
-watching seat's bot, in seat order and from its own seat, sees the move
-before it is applied, its own moves, a caller's and each part of a compound
-included.
+shown every move of its lane: each watching seat's bot, in seat order and
+from its own seat, sees the move before it is applied, its own moves, a
+caller's and each part of a compound included.
+
+A dealer (`LaneEnv(dealer=...)`, `Dealt`) deals and seats each game itself,
+every seat played by its own bot, as the arena plays a game
+(`hexset.arena.compete`, `hexset.gym.driver.play_seated`).
 
 Every bot seat gets a bot of its own for its game (`BoardBots.fresh`), built
 off a stream that is a pure function of the game and seat
@@ -54,7 +57,8 @@ from typing import TYPE_CHECKING
 
 from .. import decisions as D
 from ..actions import Action, ActionSpace, Stuck, apply, legal_actions, options_for, space_for
-from ..arena import MAX_ACTIONS, deal_game, game_key, seat_key
+from ..economy import hand_size
+from ..arena import MAX_ACTIONS, ClearedTrade, deal_game, game_key, seat_key
 from ..board.board import BOARD_MODES, Board
 from ..bots.base import chooses_many, watch, watches
 from ..game import MAX_TURNS, Game, Phase, is_over, players_owing_discards, to_move
@@ -158,6 +162,10 @@ class Episode:
     # Replay from this, not by rebuilding from `(seed, index)`. Every game is
     # recorded.
     record: Record | None = None
+    # A dealer's game (`LaneEnv(dealer=...)`): the finished `Game` itself,
+    # and its cleared trades where the dealer asked for the census.
+    game: Game | None = field(default=None, repr=False, compare=False)
+    cleared: tuple = ()
 
     def stream(self) -> list[Decision]:
         """Every decision back in the order it was taken."""
@@ -242,6 +250,27 @@ class BoardBots:
         return self.spawn(board)
 
 
+#: The policy id of every seat of a dealer's game (`LaneEnv(dealer=...)`):
+#: its bots play it, so no caller's seat answers it.
+DEALT = -1
+
+
+@dataclass
+class Dealt:
+    """A game its caller dealt and seated, for `LaneEnv(dealer=...)`: the
+    `Game` (its gates already seated, `hexset.arena.seat_bots`), the bot
+    playing each seat, the `Tape` its moves are filed on, and `key`, the
+    chance stream the record names (`hexset.record.Tape.sealed`), or None
+    to seal no record. `census`, a list, collects every cleared trade as a
+    `hexset.arena.ClearedTrade`."""
+
+    game: Game
+    bots: tuple
+    tape: Tape
+    key: str | None = None
+    census: list | None = None
+
+
 @dataclass
 class _Lane:
     """One game in flight and the bookkeeping that leaves with it."""
@@ -267,6 +296,10 @@ class _Lane:
     # bot watches the table with that bot, in seat order.
     seat_bots: tuple[Bot | None, ...] = ()
     watching: tuple[tuple[int, Bot], ...] = ()
+    # A dealer's game (`Dealt`): its record key and trade census.
+    dealt: bool = False
+    key: str | None = None
+    census: list | None = None
 
 
 class LaneEnv:
@@ -316,6 +349,7 @@ class LaneEnv:
         decisions: Collection[int] = (),
         indices: Sequence[int] | None = None,
         no_trade: Collection[int] = (),
+        dealer: Callable[[int], Dealt] | None = None,
     ) -> None:
         """`deal` bounds how many games are started; left `None` the
         environment refills forever, where an evaluation wants a fixed cohort
@@ -334,6 +368,14 @@ class LaneEnv:
         seats are out of player trading: each is under a trade embargo with
         every other seat (`Game.embargoes`), as `hexset.arena.seat_bots`
         closes an `Entrant.no_trade` seat.
+
+        `dealer(index) -> Dealt` deals each game instead: the caller's own
+        game, seated with its own bots, every seat played by its bot (policy
+        id `DEALT`). Such a lane plays as the arena plays a game: each bot is
+        asked its own `choose`, gates are seated once by the dealer, and the
+        lane keeps the record under the dealer's `key` and, where asked, the
+        trade census. Its moves are filed on the record alone: a dealer's
+        `Episode` holds no per-seat decisions.
         """
         if players < 2:
             raise ValueError("a game needs at least two seats")
@@ -351,6 +393,11 @@ class LaneEnv:
             raise ValueError(f"unknown discard order {discard_order!r}: {DISCARD_ORDERS}")
         if set(decisions) & set(bots or {}):
             raise ValueError("a bot acts a move at a time; it cannot be asked for decisions")
+        if dealer is not None and (bots or gates or decisions or caster is not None or no_trade):
+            raise ValueError("a dealer seats its own bots: no bots, gates, decisions, caster or no_trade")
+        if dealer is not None and discard_order != "seat":
+            raise ValueError("a dealer's games discard in seat order, as the arena plays them")
+        self.dealer = dealer
         self.players = players
         self.seed = seed
         self.action_cap = action_cap
@@ -364,6 +411,9 @@ class LaneEnv:
             pid: spawn if isinstance(spawn, BoardBots) else BoardBots(spawn, capacity=bot_capacity)
             for pid, spawn in (bots or {}).items()
         }
+        if dealer is not None:
+            # Every seat of a dealer's game is its bot's (`DEALT`).
+            self.bots[DEALT] = None  # type: ignore[assignment]
         self.stride = stride
         self.discard_order = discard_order
         self.decisions = frozenset(decisions)
@@ -432,6 +482,18 @@ class LaneEnv:
             return None
         index = self._next
         self._next += self.stride
+        if self.dealer is not None:
+            dealt = self.dealer(index)
+            bots = tuple(dealt.bots)
+            if len(bots) != self.players or dealt.game.num_players != self.players:
+                raise ValueError(f"game {index} is dealt for {dealt.game.num_players} seats and {len(bots)} bots, "
+                                 f"not {self.players}")
+            return _Lane(
+                index=index, game=dealt.game, cast=(DEALT,) * self.players,
+                by_seat=[[] for _ in range(self.players)], tape=dealt.tape, seat_bots=bots,
+                watching=tuple((seat, bot) for seat, bot in enumerate(bots) if bot is not None and watches(bot)),
+                dealt=True, key=dealt.key, census=dealt.census,
+            )
         cast = self._cast(index)
         drawn = self.deal_law(index) if self.deal_law is not None else Deal(board_mode=self.board_mode)
         board = self.board(index) if callable(self.board) else self.board
@@ -479,6 +541,11 @@ class LaneEnv:
                 continue
             game = lane.game
             seat = self._actor(lane)
+            if lane.dealt:
+                # A dealer's bot answers from the game, as the arena asks it,
+                # and its moves are filed on the record alone.
+                batch.append(Request(slot, lane.index, seat, DEALT, lane.actions, (), game))
+                continue
             policy = lane.cast[seat]
             run = lane.running.get(seat)
             if run is None:
@@ -557,6 +624,8 @@ class LaneEnv:
         already have advanced their own generators.
         """
         requests = self.requests()
+        if self.dealer is not None:
+            return self._step_dealt(requests, actions)
         if isinstance(actions, Mapping):
             unknown = actions.keys() - {r.lane for r in requests}
             if unknown:
@@ -594,10 +663,10 @@ class LaneEnv:
             for action in parts:
                 self.steps += 1
                 if self._play(lane, request, action):
-                    finished.append(self._harvest(lane, request.lane))
                     done = True
                     break
             if done:
+                finished.append(self._harvest(lane, request.lane))
                 continue
             if D.closes(lane.game, option, request.seat, event_before):
                 del lane.running[request.seat]
@@ -607,19 +676,53 @@ class LaneEnv:
         self.ticks += 1
         return finished
 
+    def _step_dealt(
+        self, requests: Sequence[Request], actions: Sequence[D.Option | None] | Mapping[int, D.Option]
+    ) -> list[Episode]:
+        """`step` for a dealer's lanes: each lane's bot chooses its move and
+        the move is played, lane by lane."""
+        if isinstance(actions, Mapping):
+            given = bool(actions)
+        else:
+            if len(actions) != len(requests):
+                raise ValueError(f"{len(actions)} actions answer {len(requests)} requests")
+            given = any(action is not None for action in actions)
+        if given:
+            raise ValueError("a dealer's lanes are played by their bots")
+        done = [self._dealt_move(request) for request in requests]
+        self._outstanding = None
+        finished = [self._harvest(self._lanes[request.lane], request.lane)
+                    for request, over in zip(requests, done) if over]
+        self.ticks += 1
+        return finished
+
+    def _dealt_move(self, request: Request) -> bool:
+        """One move of a dealer's lane, its seat's bot asked as the arena asks
+        it, then played; whether the game is done."""
+        lane = self._lanes[request.lane]
+        bot = self._bot(request)
+        if request.seat == to_move(request.game):
+            action = bot.choose(request.game)
+        else:
+            with self._asked(request):
+                action = bot.choose(request.game)
+        self.steps += 1
+        return self._play(lane, request, action)
+
     def _play(self, lane: _Lane, request: Request, action: Action) -> bool:
         """Apply one move of `request`'s seat in `lane` and file it; whether
         the game is done (over, or at the action cap)."""
         game = lane.game
-        lane.by_seat[request.seat].append(
-            Decision(
-                seat=request.seat,
-                step=lane.actions,
-                policy=request.policy,
-                action=action,
-                decision_id=request.decision_id,
+        if not lane.dealt:
+            lane.by_seat[request.seat].append(
+                Decision(
+                    seat=request.seat,
+                    step=lane.actions,
+                    policy=request.policy,
+                    action=action,
+                    decision_id=request.decision_id,
+                )
             )
-        )
         # Only a discard's actor is not fixed by the position.
         discarding = game.phase is Phase.DISCARD
         actor = request.seat if discarding and request.seat != to_move(game) else None
@@ -628,14 +731,32 @@ class LaneEnv:
         cleared = game.trades_made
         before = len(game.trades)
         shown_before = len(game.shown)
-        # The action can open a trade event, which asks every gate here;
-        # one shared with another lane was last seated at that lane.
-        _bind_gates(game)
+        if lane.census is not None:
+            # true state: a census of who was flush cannot be read off one
+            # seat's view of the table.
+            true_state = game.state(0, hidden=False)
+            hands = [hand_size(true_state, s) for s in range(game.num_players)]
+            turn, phase, step = game.turns, game.phase.name, lane.actions
+        if not lane.dealt:
+            # The action can open a trade event, which asks every gate here;
+            # one shared with another lane was last seated at that lane. A
+            # dealer seats its own game's gates, once.
+            _bind_gates(game)
         # A bot reading the table sees each move from its own seat before it
-        # is applied, as `hexset.arena.run_seated` shows it.
+        # is applied: each watching seat's bot, in seat order.
         for viewer, bot in lane.watching:
             watch(bot, game, request.seat, action, viewer)
-        apply(game, action, request.seat if discarding else None)
+        apply(game, action, request.seat if discarding and not lane.dealt else None)
+        if lane.census is not None:
+            for trade in game.trades[before:]:
+                lane.census.append(ClearedTrade(
+                    step=step, turn=turn, phase=phase, a=trade.a, b=trade.b, received=tuple(trade.received),
+                    hand_a=hands[trade.a], hand_b=hands[trade.b], gain_a=trade.gain_a, gain_b=trade.gain_b))
+                # Several trades can clear inside one step; each later one
+                # sees the hands the earlier ones left behind.
+                moved = sum(trade.received)
+                hands[trade.a] += moved
+                hands[trade.b] -= moved
         lane.trades += max(0, game.trades_made - cleared)
         for trade in game.trades[before:]:
             lane.trade_log.append(
@@ -708,11 +829,14 @@ class LaneEnv:
         state = game.state(0, hidden=False)
         # The record names the stream the game's draws came from, not the run
         # seed: `hexset.record.replay` checks recorded chance against it.
-        record = (
-            None
-            if lane.tape is None
-            else lane.tape.sealed(game, seed=game_key(self.seed, lane.index))
-        )
+        if lane.dealt:
+            record = None if lane.key is None else lane.tape.sealed(game, seed=lane.key)
+        else:
+            record = (
+                None
+                if lane.tape is None
+                else lane.tape.sealed(game, seed=game_key(self.seed, lane.index))
+            )
         episode = Episode(
             index=lane.index,
             seed=self.seed,
@@ -732,6 +856,8 @@ class LaneEnv:
                 trades=lane.trades,
                 exhausted=game.won_by is None and is_over(game),
             ),
+            game=game if lane.dealt else None,
+            cleared=tuple(lane.census or ()),
         )
         self.games += 1
         self._lanes[slot] = self._fresh()
@@ -742,7 +868,7 @@ class LaneEnv:
     @property
     def running(self) -> bool:
         """False once a bounded environment has played out everything it dealt."""
-        return any(lane is not None for lane in self._lanes)
+        return self._lanes.count(None) < len(self._lanes)
 
     def drain(
         self,
@@ -787,6 +913,8 @@ class LaneEnv:
 
 __all__ = [
     "BoardBots",
+    "DEALT",
+    "Dealt",
     "DISCARD_ORDERS",
     "Decision",
     "Episode",

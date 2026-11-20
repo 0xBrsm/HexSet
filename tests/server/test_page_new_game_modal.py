@@ -155,7 +155,7 @@ def test_dealing_with_the_defaults_is_a_standard_spiral_game_at_four_seats(serve
         view = table(deal_from_modal(page))
         assert (view["board_mode"], view["game_type"], view["locked"]) == ("spiral", "standard", [])
         assert len(page.query_selector_all("#players .player-row")) == 4
-        assert page.query_selector_all('#players option[value="__close__"]')
+        assert len(page.query_selector_all("#players .bot-pick")) == 3
     finally:
         page.context.close()
 
@@ -208,12 +208,14 @@ def test_duel_on_deals_a_two_seat_table_under_the_duel_rules(server, browser):
         # roster at all.
         rows = page.query_selector_all("#players .player-row")
         assert len(rows) == 2
-        assert page.query_selector_all("#players select")
-        assert page.query_selector_all('#players option[value="__close__"]')
         assert "15 to win" in page.get_attribute("#players .stat[title^='Victory points']", "title")
 
-        # The bot the picker seats plays the duel.
-        page.select_option("#players select", "test-trader")
+        # The open seat's bot cards, which can also close it; tapping a card
+        # seats that bot, and it plays the duel.
+        page.click("#players .bot-pick")
+        page.wait_for_selector("#modal.show .bot-card")
+        assert page.query_selector_all('#modal-body button[data-choice="seat"][data-value="__close__"]')
+        page.click('.bot-card[data-model="test-trader"]')
         page.wait_for_function("() => state.seats[0].kind !== 'empty' && state.seats[1].kind !== 'empty'")
         assert table(code)["waiting_for"] == []
 

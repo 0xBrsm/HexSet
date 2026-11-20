@@ -160,6 +160,19 @@ def test_a_preset_is_offered_only_at_the_game_types_preset_modes_names(models, m
         registry.handle("POST", "/api/games", {"bots": ["test-trader"], "game_type": "duel-variant"}, None)
 
 
+def test_the_chance_model_is_held_to_a_model_file(models):
+    import argparse
+
+    from hexset.server.web import chance_model
+
+    (models / "net.onnx").write_bytes(named(name="net"))
+    parser = argparse.ArgumentParser()
+    assert chance_model(parser, "net") == "net"
+    for bad in ("test-trader", "no-such-model"):
+        with pytest.raises(SystemExit):
+            chance_model(parser, bad)
+
+
 def test_preset_modes_are_held_to_listed_presets_and_dealt_game_types():
     import argparse
 

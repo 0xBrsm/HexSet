@@ -10,8 +10,9 @@ import pytest
 
 from hexset.arena import (
     MAX_ACTIONS, _play_one, deal_board, deal_game, entrant_from_name, lineup_from_names,
-    run_seated, seat_bots, spawn,
+    seat_bots, spawn,
 )
+from hexset.gym.driver import play_seated
 from hexset.record import Tape
 from hexset.bots import Handoff, RandomBot, TradesBy, handed_off, play_against, seat_at
 from hexset.rules import STANDARD_GAME
@@ -53,7 +54,7 @@ def test_moves_are_first_s_through_the_round_and_second_s_after():
     bots = [Handoff(first, second, 3)] + [RandomBot(random.Random(s)) for s in (3, 4, 5)]
     game = deal_game(5, 0, 4)
     seat_bots(game, bots)
-    run_seated(game, bots, tape=Tape())
+    play_seated(game, bots, tape=Tape())
     # Three rounds of four seats: every turn count below 12 is first's
     # (setup included), every one from 12 on second's.
     assert first.at and second.at and game.turns > 12
@@ -76,7 +77,7 @@ def test_a_setup_handoff_gives_first_the_placements_and_second_the_rest():
     bots = [Handoff(first, second, "setup")] + [RandomBot(random.Random(s)) for s in (3, 4, 5)]
     game = deal_game(5, 0, 4)
     seat_bots(game, bots)
-    run_seated(game, bots, tape=Tape())
+    play_seated(game, bots, tape=Tape())
     assert first.phases == {Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD}
     assert second.phases and not second.phases & first.phases
     entrant = entrant_from_name("handoff:setup:random|random")

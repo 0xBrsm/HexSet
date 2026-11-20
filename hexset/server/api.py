@@ -84,7 +84,7 @@ from hexset.rules import GAME_TYPES, STANDARD_GAME, GameType, rules_from
 from hexset.trading import holds
 
 from . import _journal as journal
-from ._runner import BotRunner, LocalSearchBrain, LocalTransport
+from ._runner import BotRunner, DecisionFile, LocalSearchBrain, LocalTransport
 from ._seating import SETUP_PHASES, unlock_seat
 from ._webplay import GameSession, ResumeError
 from .constants import PROFILE_FIELDS, profile_value
@@ -207,8 +207,10 @@ MAX_NAME_LENGTH = 40
 # all of its profile but the `url`.
 REQUIRED_PROFILE = ("name", "version", "owner", "description")
 
-# How long a game survives with nobody touching it.
-TABLE_TTL_SECONDS = 24 * 60 * 60
+# How long a game stays in memory with nobody reading it and no move made.
+# Past that it is dropped, its journal left open, and the next request for
+# its code rebuilds it from the journal where it stopped (`Table.release`).
+TABLE_TTL_SECONDS = 15 * 60
 
 # How long a code with no game behind it is remembered as one, so a burst of
 # reads for it scans the journal directory once.
@@ -564,6 +566,13 @@ def bot_profile(entry: str, game_type: str | None = None, spec: str | None = Non
     return {}
 
 
+def bot_label(entry: str, game_type: str | None = None, spec: str | None = None) -> str:
+    """The name the server shows for its bot `entry`: the `label` its profile
+    gives (`bot_profile`), else `entry` itself. Clients still ask for it,
+    and rankings and journals still key it, by `entry`."""
+    return bot_profile(entry, game_type, spec).get("label") or entry
+
+
 def model_options(game_type: str = STANDARD_GAME.name) -> dict[str, str]:
     """Entry -> entrant spec, for the picker at a `game_type` table
     (`model_catalogue`)."""
@@ -677,17 +686,46 @@ class Config:
     # ticket waiting at every game type `model_catalogue` offers it at, one
     # ranked game at a time, and is ranked as `bot:<entry>` (`ranked.py`).
     ranked_entrants: tuple[str, ...] = ()
+    # The model that rates every seat's win chance (`GET /api/chance`): an
+    # entry `model_catalogue` offers as a model file. At a game type where it
+    # is offered, it rates every unranked table, seated or not; elsewhere, and
+    # with None, a table's own model seat rates it (`_rater`).
+    chance_model: str | None = None
     # Worker processes a seated model that searches by paired rollouts plays
     # its worlds out in (`onnxbot.spawn`'s `workers`): every seat of one file
     # shares one pool of them, kept in `rollout_pools` and stopped by
     # `Tables.close`. 0 plays them in the server's own process.
     rollout_workers: int = 0
     rollout_pools: SharedPools = field(default_factory=SharedPools)
+    # Write every server bot's search decisions beside the game's journal
+    # (`search_file`). Off by default: a searching seat logs about a
+    # megabyte a game.
+    search_logs: bool = False
+    # Tabs the page's menu shows beside its own (`GET /api/menu`): each a
+    # (label, URL) pair, the URL opened inside the menu. Shown only to client
+    # addresses in `menu_tabs_for` (CIDRs), and to every client when it names
+    # none.
+    menu_tabs: tuple[tuple[str, str], ...] = ()
+    menu_tabs_for: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.board_mode not in BOARD_MODES:
             raise ValueError(f"unknown board mode {self.board_mode!r}: {sorted(BOARD_MODES)}")
         self.exempt_networks = tuple(ipaddress.ip_network(n, strict=False) for n in self.limit_exempt)
+        self.menu_networks = tuple(ipaddress.ip_network(n, strict=False) for n in self.menu_tabs_for)
+
+    def menu_view(self, ip: str | None) -> list[dict]:
+        """The menu tabs a client at `ip` is shown: every one when
+        `menu_tabs_for` names no network, else none to an address outside
+        them or to a request with no address."""
+        if self.menu_networks:
+            try:
+                address = ipaddress.ip_address(ip) if ip is not None else None
+            except ValueError:
+                address = None
+            if address is None or not any(address in network for network in self.menu_networks):
+                return []
+        return [{"label": label, "url": url} for label, url in self.menu_tabs]
 
     def is_exempt(self, ip: str | None) -> bool:
         """Whether `ip` is under no per-address limit. A request with no
@@ -725,13 +763,17 @@ class Seat:
     # and `POST /api/reclaim`.
     client: dict | None = None
 
-    def public(self, seat: int) -> dict:
-        """What anyone may see about this seat. Never the token."""
-        return {
+    def public(self, seat: int, label: str | None = None) -> dict:
+        """What anyone may see about this seat, with the `label` it is shown
+        by where that differs from its name (`bot_label`). Never the token."""
+        out = {
             "seat": seat,
             "kind": self.kind.value,
             "name": self.name,
         }
+        if label and label != self.name:
+            out["label"] = label
+        return out
 
 
 @dataclass
@@ -768,6 +810,11 @@ class Table:
     # `self.lock`: a waiter holding that could not be changed.
     version: int = 0
     changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
+    # Set by `release` and `close`: the table is out of play.
+    closed: bool = field(default=False, repr=False)
+    # The last `GET /api/chance` answer, keyed by `(version, seat)`: a page
+    # polling an unchanged table is answered without running the model again.
+    chance_read: tuple | None = field(default=None, repr=False)
 
     def bump(self, clock: bool = True) -> None:
         """Marks this table changed and wakes everyone parked on it. With
@@ -808,12 +855,25 @@ class Table:
         self.runners.clear()
         self.stopping.clear()
 
+    def release(self) -> None:
+        """Stop every embedded bot runner and let the table go with its
+        journal left open: the game is dropped from memory, not ended, and a
+        later request for its code rebuilds it from the journal
+        (`Tables._reopen`). What `Tables` does with a table nobody has
+        touched for `TABLE_TTL_SECONDS`."""
+        self.closed = True
+        self.stop_runners()
+        # Nothing more goes into the file from this table: the game's next
+        # line is written by the table its code reopens.
+        self.session.journal = None
+
     def close(self, timed_out: list[int] | None = None) -> None:
         """Stop every embedded bot runner, then close the journal: abandoned,
         or, with `timed_out`, aborted on a ranked clock that ran out on those
         seats (`Journal.timed_out`). Order matters: a runner still
         mid-decision could otherwise submit one more action into a game
         already filed as over."""
+        self.closed = True
         self.stop_runners()
         if self.session.journal is not None:
             if timed_out is None:
@@ -881,7 +941,8 @@ class Table:
         if waiting or state["trade_wait"]:
             state["to_move"] = None
         state["code"] = self.code
-        state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
+        labels = self.session.bot_labels
+        state["seats"] = [seat.public(i, labels.get(i)) for i, seat in enumerate(self.seats)]
         state["version"] = self.version
         state["your_move"], state["waiting_on"] = your_move(state)
         return state
@@ -934,6 +995,27 @@ def seat_spawn(
         raise ApiError(f"cannot seat {name or spec}: {type(error).__name__}: {error}") from None
 
 
+def warm_models(config: Config) -> list[str]:
+    """Spawns every bot the server offers once, on a board of each game type
+    that offers it, and throws it away: the caches behind a seat (a model
+    file's loaded session, a rollout model's worker pool in
+    `config.rollout_pools`) are filled before the first table asks, so the
+    first seat of each is as quick as the rest. A bot that will not spawn is
+    printed and skipped; seating it is refused as before. Returns the
+    entries warmed, as `<game type>/<name>`."""
+    warmed = []
+    for game_type, offered in model_catalogue().items():
+        board = base_board(config.board_mode, random.Random())
+        for name in offered:
+            try:
+                seat_spawn(name, _seated_spec(name, game_type), board, config, MAX_SEATS, game_type)
+            except Exception as error:  # noqa: BLE001 -- warming is best-effort
+                print(f"warm {game_type}/{name}: {error}", file=sys.stderr)
+                continue
+            warmed.append(f"{game_type}/{name}")
+    return warmed
+
+
 def deal(config: Config, board_mode: str | None = None) -> tuple[int, Board]:
     """The seed a new game is dealt from and the board it deals, so the bots
     can be spawned on that board before the game exists. Always a concrete
@@ -956,6 +1038,14 @@ def _seat_labels(
     player_names = {i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER and s.name}
     clients = {i: s.client for i, s in enumerate(seats) if s.client is not None}
     return bot_names, bot_specs, player_names, clients
+
+
+def _bot_labels(seats: list[Seat], game_type: GameType) -> dict[int, str]:
+    """Seat -> the name each bot seat in `seats` is shown by (`bot_label`)."""
+    return {
+        i: bot_label(s.name, game_type.name, s.spec)
+        for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.name
+    }
 
 
 def build_session(
@@ -996,6 +1086,7 @@ def build_session(
         game_type=game_type,
         journal=journal.open_journal(seed, config.games_dir),
         bot_names=bot_names,
+        bot_labels=_bot_labels(seats, game_type),
         bot_specs=bot_specs,
         player_names=player_names,
         clients=clients,
@@ -1017,6 +1108,94 @@ def _stop_runner(table: Table, seat: int) -> None:
             table.stopping = [(r, t) for r, t in table.stopping if t.is_alive()]
             table.stopping.append(table.runners.pop(i))
             return
+
+
+# The subdirectory of the journal directory that holds the search logs: a
+# file there is never read as a journal.
+SEARCH_DIR = "search"
+
+
+def search_file(session: GameSession, config: Config) -> DecisionFile | None:
+    """Where the server's bots at `session`'s table write their search
+    decisions (`DecisionFile`): `<journal directory>/search/<game id>.jsonl`,
+    the game named as its journal is. `None` without `config.search_logs`,
+    and for a game that is not journalled."""
+    if not config.search_logs or session.journal is None:
+        return None
+    return DecisionFile(Path(session.journal.directory) / SEARCH_DIR / f"{session.journal.game_id}.jsonl")
+
+
+def _rater(session: GameSession, seats: list[Seat], config: Config) -> tuple[str, str] | None:
+    """`(label, spec)` of the model that rates a table's seats
+    (`Tables.chance`): the server's `chance_model` where it is offered as a
+    model file at the table's game type, else the table's lowest-numbered bot
+    seat still in the game whose spec is a checkpoint file rather than a
+    preset; `None` where there is neither."""
+    kind = session.game_type.name
+    if config.chance_model:
+        offered = model_catalogue().get(kind, {}).get(config.chance_model)
+        if offered is not None and offered.name is not None:  # a model file, not a preset
+            return bot_label(config.chance_model, kind, offered.spec), offered.spec
+    locked = session.game.locked
+    for index, seat in enumerate(seats):
+        if seat.kind is SeatKind.BOT and seat.spec and seat.spec not in PRESETS and index not in locked:
+            return session.bot_labels.get(index) or seat.name or seat.spec, seat.spec
+    return None
+
+
+def read_chance(session: GameSession, seats: list[Seat], seat: int, config: Config) -> dict:
+    """`{"rater", "chance"}`: `seat`'s chance of winning `session`'s game as
+    its model rates it (`_rater`, `win_chance`). `rater` is `None` with no
+    model to rate it; `chance` is `None` there, for a seat retired from the game,
+    and where the read fails. Read at a finished game's position, the game
+    is over and the read is of nothing; callers pass the position before the
+    end (`before_end`)."""
+    rater = _rater(session, seats, config)
+    answer: dict = {"rater": None, "chance": None}
+    if rater is None:
+        return answer
+    name, spec = rater
+    answer["rater"] = name
+    if seat in session.game.locked or is_over(session.game):
+        return answer
+    try:
+        answer["chance"] = round(win_chance(spec, session.game, seat, config), 4)
+    except Exception as error:  # noqa: BLE001 -- a failed read shows no chance
+        print(f"chance: {name}: {type(error).__name__}: {error}", file=sys.stderr)
+    return answer
+
+
+def before_end(code: str, seats: list[Seat], events: list[dict]) -> GameSession | None:
+    """A finished game's last position still in play: the journalled game
+    replayed to just before the step that ended it, or the nearest earlier
+    step a replay can stop at (it cannot stop inside a knight's robber move,
+    say). `None` where no such position replays."""
+    steps, _ = journal.replayable_rounds(events)
+    for upto in range(len(steps) - 1, -1, -1):
+        try:
+            session = replay_session(code, seats, events, upto)
+        except (ResumeError, ValueError, KeyError):
+            continue
+        if session is None:
+            return None
+        if not is_over(session.game):
+            return session
+    return None
+
+
+def win_chance(spec: str, game: Game, seat: int, config: Config) -> float:
+    """`seat`'s chance of winning `game` as the checkpoint at `spec` rates
+    it: one read of its value head (`Policy.value_rows`), encoded from
+    `seat`'s own side, so it rests on what that seat may see and nothing
+    else. The checkpoint is the one its bot seat loaded (`onnxbot.load`'s
+    cache), and the read runs no search."""
+    from hexset.clients.onnxbot import load  # onnxruntime-free import boundary
+
+    # true state: the board is public.
+    board = game.state(0, hidden=False).board
+    loaded = load(spec, board.topology, config.device)
+    (values,) = loaded.policy.value_rows([(game, seat)])
+    return min(1.0, max(0.0, float(values[seat])))
 
 
 def _unranked(table: Table) -> None:
@@ -1101,6 +1280,7 @@ def _opening_session(code: str, seats: list[Seat], events: list[dict]) -> GameSe
         board_mode=board_mode,
         game_type=game_type,
         bot_names=bot_names,
+        bot_labels=_bot_labels(seats, game_type),
         bot_specs=bot_specs,
         player_names=player_names,
         clients=clients,
@@ -1400,7 +1580,7 @@ class Tables:
             evicted = self._evict_stale(time.monotonic())
             code = new_code(set(self._tables))
         for table in evicted:
-            table.close()
+            table.release()
 
         playing = min(max(contract.seats), MAX_SEATS)
         session = build_session(
@@ -1600,7 +1780,8 @@ class Tables:
         for index, bot in bots.items():
             token = table.seats[index].token
             assert token is not None
-            brain = LocalSearchBrain(bot=bot, game=table.session.game, lock=table.lock)
+            brain = LocalSearchBrain(bot=bot, game=table.session.game, lock=table.lock,
+                                     decisions=search_file(table.session, self.config))
             runner = BotRunner(seat=index, token=token, transport=transport, brain=brain)
             thread = threading.Thread(
                 target=runner.run, name=f"bot-{table.code}-{index}", daemon=True
@@ -1618,7 +1799,7 @@ class Tables:
             evicted = self._evict_stale(time.monotonic(), keep=code)
             table = self._tables.get(code)
         for stale in evicted:
-            stale.close()
+            stale.release()
         if table is None:
             table = self._reopen_once(code)
         if table is None:
@@ -1720,14 +1901,17 @@ class Tables:
                     return table, index
         raise ApiError("unknown or expired seat token", status=403)
 
-    def reclaim(self, code: str, secret: str) -> tuple[Table, int, str]:
+    def reclaim(
+        self, code: str, secret: str, *, probe: bool = False
+    ) -> tuple[Table, int, str] | None:
         """`POST /api/reclaim`: a fresh token for the seat whose `client.id`
         equals `sha256(secret).hexdigest()` — the one way back into a seat once
         its token is gone. A seat still `PLAYER` just gets a new token and its
         old one then fails; an `EMPTY` seat is revived as `Table.join` would
-        seat it; a bot seat and a locked one refuse, and no match is a 403.
-        Works on a finished game on purpose, `_seated` still refusing every
-        mutation."""
+        seat it; a bot seat and a locked one refuse, and no match is a 403,
+        or `None` with `probe`, for a client that asks at every arrival
+        whether any seat there is its own. Works on a finished game on
+        purpose, `_seated` still refusing every mutation."""
         table = self.get(code)
         digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
         with table.lock:
@@ -1749,18 +1933,21 @@ class Tables:
                     table.session.confirm_mode(index)
                 table.bump()
                 return table, index, token
+        if probe:
+            return None
         raise ApiError("no seat matches that secret", status=403)
 
     def _evict_stale(self, now: float, keep: str | None = None) -> list[Table]:
-        """Must be called with `_registry_lock` held. Drops any game untouched
-        for longer than `TABLE_TTL_SECONDS`, sparing `keep`, the code the
-        caller is about to look up. Returns the popped tables rather than
-        closing them: `close` joins runner threads, which would stall every
-        other game's `by_token` under this lock."""
+        """Must be called with `_registry_lock` held. Drops any game nobody
+        has read and nobody has moved in for longer than `TABLE_TTL_SECONDS`,
+        sparing `keep`, the code the caller is about to look up: a table whose
+        bots are still playing stays. Returns the popped tables rather than
+        releasing them: `release` joins runner threads, which would stall
+        every other game's `by_token` under this lock."""
         stale = [
             c
             for c, t in self._tables.items()
-            if c != keep and now - t.last_seen > TABLE_TTL_SECONDS
+            if c != keep and now - max(t.last_seen, t.changed_at) > TABLE_TTL_SECONDS
         ]
         return [self._tables.pop(code) for code in stale]
 
@@ -1875,6 +2062,7 @@ class Tables:
             table.seats[seat].name = model
             table.seats[seat].spec = spec
         table.session.bot_names[seat] = model
+        table.session.bot_labels[seat] = bot_label(model, table.session.game_type.name, spec)
         table.session.bot_specs[seat] = spec
         if table.session.journal is not None:
             table.session.journal.seated(seat=seat, name=model, spec=spec)
@@ -1894,6 +2082,7 @@ class Tables:
         table.seats[seat] = Seat()
         table.session.claimed_seats.discard(seat)
         table.session.bot_names.pop(seat, None)
+        table.session.bot_labels.pop(seat, None)
         table.session.bot_specs.pop(seat, None)
         table.session.set_trader(seat, None)
         if table.session.journal is not None:
@@ -2099,6 +2288,35 @@ class Tables:
 
     # --- the /api/* surface -----------------------------------------------
 
+    def chance(self, table: Table, seat: int) -> dict:
+        """`GET /api/chance`: `seat`'s chance of winning as the table's model
+        rates it (`read_chance`), with the table `version` it was read at. Once
+        the game is over it is the read at the game's last position still in
+        play (`before_end`), rebuilt from the journal. `rater` is the model's
+        name, `None` at a table with no model seat; `chance` is `None` there,
+        for a seat retired from the game, and where the read fails. A 409 at a
+        ranked table: the read is a model's judgement of the seat's position,
+        which a ranked seat plays without. Called with the table's lock held."""
+        if table.session.ranked:
+            raise ApiError("a ranked table has no win chance", status=409)
+        key = (table.version, seat)
+        if table.chance_read is not None and table.chance_read[0] == key:
+            return dict(table.chance_read[1])
+        session: GameSession | None = table.session
+        seats = table.seats
+        if is_over(table.session.game):
+            path = journal.most_recent(journal_dir(self.config), table.code)
+            events = journal.read(path) if path is not None else []
+            seats = reopened_seats(events) if events else seats
+            session = before_end(table.code, seats, events) if events else None
+        answer = {"version": table.version, "rater": None, "chance": None}
+        if session is not None:
+            answer.update(read_chance(session, seats, seat, self.config))
+        else:
+            answer["rater"] = (_rater(table.session, table.seats, self.config) or (None,))[0]
+        table.chance_read = (key, answer)
+        return dict(answer)
+
     def await_change(self, table: Table, query: str) -> None:
         """Park a read until `table` has changed past the `after` it named, or
         its `wait` runs out. Must be called with no lock held: a waiter
@@ -2174,6 +2392,13 @@ class Tables:
         # The round being *read*: the cut for round N falls after its last
         # END_TURN, which has already ticked `session.round` to N+1.
         view["round"] = wanted
+        # A seat reads its own chance at that round, as `GET /api/chance`
+        # gives it live: at the round the game ended, the read at its last
+        # position still in play. Never a spectator's, nor at a ranked game.
+        if viewer is not None and not session.ranked:
+            rated = session if not is_over(session.game) else before_end(code, seats, events)
+            view["chance"] = (read_chance(rated, seats, viewer, self.config) if rated is not None
+                              else {"rater": (_rater(session, seats, self.config) or (None,))[0], "chance": None})
         # `version` here is the stand-in's own and means nothing outside it:
         # replay steps by round, not by long poll. `finished` rides along so a
         # client can match the live finished view's observer footing.
@@ -2200,6 +2425,8 @@ class Tables:
             if self.rankings is None:
                 raise ApiError("this server keeps no rankings", status=404)
             return self.rankings.view()
+        if method == "GET" and path == "/api/menu":
+            return {"tabs": self.config.menu_view(origin.ip if origin is not None else None)}
 
         # The reads that need no token: `GET /api/table/<code>` is the game as
         # a spectator sees it, `.../board` the layout, `.../replay` a past
@@ -2275,9 +2502,14 @@ class Tables:
             raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/reclaim":
-            table, seat, new_token = self.reclaim(
-                str(payload.get("code", "")), str(payload.get("secret", ""))
+            reclaimed = self.reclaim(
+                str(payload.get("code", "")),
+                str(payload.get("secret", "")),
+                probe=payload.get("probe") is True,
             )
+            if reclaimed is None:
+                return {"token": None}
+            table, seat, new_token = reclaimed
             with table.lock:
                 return {"token": new_token, **table.view(seat)}
 
@@ -2311,6 +2543,8 @@ class Tables:
             return table.layout
         if method == "GET" and path == "/api/record":
             return self.record(table, seat)
+        if method == "GET" and path == "/api/chance":
+            return self.chance(table, seat)
         if method == "POST" and path == "/api/action":
             return self.act(table, seat, payload.get("action") or {}, payload.get("version"))
         if method == "POST" and path == "/api/undo":

@@ -126,8 +126,42 @@
      is where they collide and where the padding lives — see the max-width
      rule below. */
   #board-pane {
-    flex: 1 1 auto; position: relative; min-width: 0; min-height: 0;
-    background: var(--water);
+    flex: 1 1 auto; position: relative; min-width: 0; min-height: 0; isolation: isolate;
+    background: #1b4a6e;
+  }
+  /* The water: lighter under the island, darker toward its edges, with the
+     waves over it as two more pictures (paintWater). */
+  #water {
+    position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(ellipse 72% 68% at 50% 48%, #2c6fa2 0%, var(--water) 58%, #1b4a6e 100%);
+  }
+  /* Side by side, the whole page (the header, the board and the sidebar,
+     and a dialog's backdrop over them) is at most --page-cap wide: the
+     sidebar and a board pane 1.4 times as wide as it is tall, centred; a
+     wider window shows the header's and sidebar's own dark panel on either
+     side. The backdrop is fixed to the window, so the same auto margins
+     centre it between its inset edges. --header-height is the header's
+     height, kept by fitPage.
+
+     The menu (#log-sheet) is a panel at the page's left edge, over the
+     board, 450px wide; a tab the server adds (`.page`, a page of its
+     own such as a dashboard) takes the page's whole width. --page-gutter is
+     the window's dark panel either side of the page. */
+  @media (min-width: 821px) {
+    :root {
+      --page-cap: calc((100dvh - var(--header-height, 58px)) * 1.4 + 360px);
+      --page-gutter: max(0px, calc((100vw - var(--page-cap)) / 2));
+    }
+    body { background: var(--panel); }
+    body > header, #layout, #modal {
+      width: 100%; box-sizing: border-box; margin-inline: auto;
+      max-width: var(--page-cap);
+    }
+    body > #log-sheet {
+      inset: 0 auto 0 var(--page-gutter); width: min(450px, calc(100vw - 2 * var(--page-gutter)));
+      border-right: 1px solid var(--border); box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+    }
+    body > #log-sheet.page { right: var(--page-gutter); width: auto; border-right: 0; box-shadow: none; }
   }
   #board-svg { width: 100%; height: 100%; display: block; }
   #sidebar {
@@ -248,7 +282,56 @@
      node. Declared after both rules above on purpose: `font: inherit` there
      is a shorthand, and it resets line-height, so it would undo this if it
      came later. */
-  .player-name select, .player-name input, .player-name-plain { line-height: 1.1; }
+  /* A bot or open seat's name: a button opening the bot cards, on the same
+     box as the <select> it replaced, so a row is the same height. */
+  .player-name .bot-pick {
+    font: inherit; font-weight: 600; width: 100%; padding: 0.1rem 0.25rem; border-radius: 5px;
+    border: 1px solid var(--border); background: #232733; color: var(--ink);
+    display: block; text-align: left; cursor: pointer;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .player-name .bot-pick:hover { border-color: var(--muted); }
+  .player-name .bot-pick.unset { color: var(--muted); }
+  .player-name .bot-pick.pending { opacity: 0.6; }
+  .player-name select, .player-name input, .player-name-plain, .player-name .bot-pick { line-height: 1.1; }
+  /* The bot picker (renderPickBotMode): wider than the other modes, its
+     cards the full width of the body, scrolling past a screenful, with the
+     open/close choice as a quiet foot. */
+  #modal-inner.pick { width: 440px; }
+  #modal-inner.pick #modal-body {
+    align-items: stretch; justify-content: flex-start; gap: 0.8rem; padding: 0.9rem 0.9rem 1rem;
+  }
+  #modal-inner.pick #modal-actions { display: none; }
+  .bot-cards { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; min-height: 0; }
+  .bot-card {
+    font: inherit; text-align: left; cursor: pointer; width: 100%;
+    display: flex; flex-direction: column; gap: 0.3rem; padding: 0.7rem 0.85rem;
+    border-radius: 10px; border: 1px solid var(--border); background: #232733; color: var(--ink);
+  }
+  .bot-card:hover, .bot-card:focus-visible { border-color: var(--muted); outline: none; }
+  .bot-card:active { transform: scale(0.99); }
+  .bot-card.seated {
+    border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, #232733);
+  }
+  .bot-card-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bot-card-name { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bot-card-version {
+    flex: none; font-size: 0.72rem; color: var(--muted); padding: 0.05rem 0.45rem;
+    border-radius: 999px; border: 1px solid var(--border);
+  }
+  .bot-card-seated {
+    margin-left: auto; flex: none; font-size: 0.72rem; font-weight: 700; color: var(--ink);
+    padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--accent);
+  }
+  .bot-card-about { font-size: 0.85rem; color: #b8bfcc; line-height: 1.35; }
+  .bot-card-about.none { color: var(--muted); font-style: italic; }
+  .bot-pick-foot { display: flex; gap: 0.5rem; padding-top: 0.2rem; border-top: 1px solid var(--border); }
+  .bot-pick-foot button {
+    flex: 1 1 0; font: inherit; font-size: 0.9rem; cursor: pointer; margin-top: 0.6rem;
+    padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted);
+  }
+  .bot-pick-foot button.chosen { color: var(--ink); border-color: var(--muted); }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
   /* Double digits (see statChip) take up the icon-to-number gap instead of
@@ -270,6 +353,58 @@
      swatch/name/VP); road is column 6 (after cards/dev-cards). */
   .player-row > .stat:nth-child(4) { margin-left: 0.35rem; }
   .player-row > .stat:nth-child(6) { margin-left: 0.35rem; }
+  /* A row's stats open the glossary (openGlossary): what each icon counts,
+     the one tapped lit. A click on desktop as a tap on a phone; the chips'
+     own titles still name them on hover. */
+  .player-row .stat { cursor: pointer; }
+  #glossary {
+    position: fixed; z-index: 45; width: min(19rem, calc(100vw - 16px));
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45); padding: 0.55rem 0.75rem;
+    font-size: 0.82rem; line-height: 1.35; color: var(--muted);
+  }
+  #glossary[hidden] { display: none; }
+  .glossary-line { display: grid; grid-template-columns: 16px 1fr; gap: 0.55rem; align-items: start; padding: 0.22rem 0; }
+  .glossary-line .stat-icon { width: 14px; height: 14px; margin-top: 2px; }
+  .glossary-line.lit { color: var(--ink); }
+  .glossary-line.road .stat-icon { color: #8fc4e8; }
+  .glossary-line.army .stat-icon { color: #e08f8f; }
+  .glossary-foot { border-top: 1px solid var(--border); margin-top: 0.3rem; padding-top: 0.4rem; }
+  /* The seat's chance of winning as the table's model rates it (renderChance):
+     one line under the cards. Its row is held for as long as the page holds
+     a seat, a past round and a finished game included, so turning it on or
+     off, stepping through rounds or the game ending moves nothing; only what
+     is in it shows or hides. The bar fills to the chance, in the seat's own
+     colour, which renderChance sets: the page's accent is the seat's only
+     while the game is live and no past round is up. */
+  #chance {
+    display: none; align-items: center; gap: 0.5rem; flex: none; position: relative;
+    height: 1.7rem; padding: 0 0.8rem; border-bottom: 1px solid var(--border);
+    font-size: 0.78rem; color: var(--muted);
+  }
+  #chance.held { display: flex; }
+  #chance:not(.show) > * { visibility: hidden; }
+  #chance.show { cursor: pointer; }
+  /* The label in the hand hint's lettering (.hand-hint), a size smaller. */
+  .chance-who {
+    flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%;
+    font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  /* What the number is, on a click or a tap: above the line, which sits at
+     the foot of the pane. */
+  .chance-note {
+    display: none; position: absolute; left: 0.8rem; right: 0.8rem; bottom: calc(100% + 4px); z-index: 20;
+    padding: 0.45rem 0.6rem; border-radius: 6px; background: var(--panel); border: 1px solid var(--border);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); color: var(--ink); font-size: 0.8rem; line-height: 1.35;
+    white-space: normal;
+  }
+  #chance.show.open .chance-note { display: block; }
+  .chance-bar { flex: 1 1 auto; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .chance-fill { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+  .chance-pct {
+    flex: none; min-width: 2.6em; text-align: right; font-weight: 700; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
   #notice {
     margin: 0 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.85rem;
     background: #3a1616; border: 1px solid #7a3a3a; color: #ffb3b3; display: none;
@@ -278,18 +413,37 @@
   #log {
     flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0.6rem 0.8rem; font-size: 0.82rem; color: #a8b0bd;
   }
-  .log-line {
-    display: flex; gap: 0.5rem; align-items: baseline;
-    padding: 0.12rem 0; border-bottom: 1px dashed #2c3140;
+  /* The log as drawLog dresses it: a heading for each round, then a line an
+     action, each with a chip of what kind of action it was in the colour of
+     the seat that took it, seat names in their colours, cards as their
+     glyphs, and a roll as a number token. */
+  .log-round {
+    display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0 0.3rem;
+    font-size: 0.66rem; font-weight: 700; letter-spacing: 0.09em; color: var(--muted);
   }
-  /* 3ch, not a guessed rem width: sized to exactly three digits regardless
-     of font, so every line's text starts at the same x. Left-justified.
-     tabular-nums belt-and-suspenders in case the font's digits aren't
-     fixed-width by default. */
-  .log-turn {
-    flex: none; width: 3ch; text-align: left; color: var(--muted);
-    font-variant-numeric: tabular-nums;
+  .log-round:first-child { margin-top: 0; }
+  .log-round::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+  .log-line { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.16rem 0; }
+  .log-chip {
+    flex: none; width: 1.45em; height: 1.45em; border-radius: 50%; margin-top: 0.05em;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--seat, #8b93a5) 18%, transparent);
+    border: 1px solid var(--seat, #3a3f4b);
   }
+  .log-chip svg { width: 62%; height: 62%; fill: var(--seat, #8b93a5); display: block; }
+  .log-text { min-width: 0; }
+  .log-sub { display: block; margin-top: 0.08rem; font-size: 0.94em; }
+  .log-seat { font-weight: 600; }
+  .log-glyph { display: inline-block; width: 1.2em; height: 1.2em; vertical-align: -0.25em; margin: 0 0.04em; }
+  .log-glyph svg { width: 100%; height: 100%; display: block; }
+  .log-roll {
+    display: inline-block; min-width: 1.55em; padding: 0 0.3em; border-radius: 999px;
+    background: #f3ecd9; color: #1a1a1a; font-weight: 700; text-align: center;
+    line-height: 1.35; font-size: 0.92em; font-variant-numeric: tabular-nums;
+  }
+  .log-roll.hot { color: #d00000; }
+  .log-roll.seven { background: #3a1616; color: #ffb3b3; box-shadow: inset 0 0 0 1px #7a3a3a; }
+  .log-line.win .log-text { color: var(--ink); font-weight: 600; }
   .hex-token {
     font-size: 17px; font-weight: 700; text-anchor: middle; dominant-baseline: central;
     /* Plain black — the chroma-208 blue this used while the colour-inverting
@@ -303,7 +457,39 @@
      game's own convention of picking out 6 and 8 in red. */
   .hex-token.red { fill: #d00000; }
   .hex-pip { pointer-events: none; }
-  .hex-icon { opacity: 0.42; pointer-events: none; }
+  .hex-icon { opacity: 0.34; pointer-events: none; }
+  /* The board's depth, drawn once (drawBoard): the island's shadow on the
+     water, its sand base, which shows as a beach around the coast and as the
+     lines between the tiles, and one shade over every tile, lighter at its
+     upper left and darker at its lower right. */
+  .land-shadow {
+    fill: none; stroke: #061a29; opacity: 0.045; stroke-linecap: round; stroke-linejoin: round;
+    pointer-events: none;
+  }
+  .land-base { fill: #d6c292; stroke: #d6c292; stroke-linejoin: round; pointer-events: none; }
+  .tile { pointer-events: none; }
+  .tile-shade { pointer-events: none; }
+  /* A tile's own: the shadow it casts on the sand, a grain of dark and pale
+     specks, and a line just inside its outline, pale where it faces the
+     light and dark where it faces away. */
+  .tile-cast { fill: #3a2f22; opacity: 0.3; pointer-events: none; }
+  .tile-grain { pointer-events: none; }
+  .tile-grain.dark { fill: #000000; opacity: 0.08; }
+  .tile-grain.pale { fill: #ffffff; opacity: 0.11; }
+  .tile-bevel { fill: none; stroke: url(#tile-bevel); stroke-width: 2; pointer-events: none; }
+  /* What a piece or a marker standing on the board casts: its own shape, a
+     little south of it. */
+  .cast { fill: #000000; opacity: 0.26; pointer-events: none; }
+  /* The number under the robber, which produces nothing while it stands there. */
+  .hex-token-g.blocked { opacity: 0.45; }
+  /* A light line just inside a settlement's or city's outline. */
+  .piece-edge { fill: none; stroke: rgba(255, 255, 255, 0.5); stroke-width: 1.2; pointer-events: none; }
+  /* A road's depth (roadLines): every road's shadow in one group, so two that
+     cross darken the board once, and a pale line along the side of each road
+     that faces the light with a dark one along the other. */
+  .road-casts { opacity: 0.3; }
+  .road-light { stroke: #ffffff; stroke-width: 1.3; opacity: 0.5; }
+  .road-shade { stroke: #000000; stroke-width: 1.3; opacity: 0.22; }
   /* min-height holds the row's space at zero cards — a card is 46px tall —
      so the column doesn't collapse to nothing and jump when it gains one. */
   .hand { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.3rem 0 0.1rem; min-height: 46px; }
@@ -326,19 +512,15 @@
      clickable-looking when clicking it wouldn't do anything. */
   .hand-card-clickable { cursor: pointer; border-color: rgba(255,255,255,0.5); }
   .hand-card-clickable:hover { border-color: var(--accent); }
-  /* White, not black: the board (#board-pane/var(--water)) is dark now too,
-     so a light faint dot/line is what shows against it. */
-  .vertex-dot { fill: #ffffff33; pointer-events: none; }
-  .edge-line { stroke: #ffffff33; stroke-width: 2; pointer-events: none; }
-  /* A dashed line from the marker to each vertex it actually serves — the
-     resource colour alone wasn't enough to tell which two vertices a port
-     sits between. Light teal, not the original dark #114b5f: that read fine
-     against the old pale var(--water), not against the dark one. */
-  .port-link { stroke: #8fd0e6; stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.8; pointer-events: none; }
+  /* A faint mark on the sand at every corner a piece can stand on. */
+  .vertex-dot { fill: #3a2f22; opacity: 0.28; pointer-events: none; }
+  /* A pier from the marker to each vertex it serves: the resource colour
+     alone does not say which two vertices a port sits between. */
+  .port-link { stroke: #a8855a; stroke-width: 3.5; stroke-linecap: round; pointer-events: none; }
   /* Same colour as the marker, so the served vertices read as part of one
-     shape with it rather than needing the dashed line traced by eye. */
-  .port-vertex-mark { stroke: #8fd0e6; stroke-width: 1.25; pointer-events: none; }
-  .port-marker { stroke: #8fd0e6; stroke-width: 1.5; pointer-events: none; }
+     shape with it rather than needing the pier traced by eye. */
+  .port-vertex-mark { stroke: #3a2f22; stroke-width: 1; pointer-events: none; }
+  .port-marker { stroke: #f6ecd2; stroke-width: 2; pointer-events: none; }
   .port-ship { pointer-events: none; }
   .port-label {
     font-size: 10px; text-anchor: middle; dominant-baseline: central;
@@ -354,8 +536,17 @@
     stroke: var(--accent); stroke-width: 2; opacity: 0.85;
   }
   .clickable-vertex:hover { fill: color-mix(in srgb, var(--accent) 35%, white); }
-  .clickable-edge { cursor: pointer; stroke: var(--accent); stroke-width: 12; stroke-linecap: round; opacity: 0.55; }
-  .clickable-edge:hover { opacity: 0.85; }
+  /* Where a road may go: a short pale bar rimmed in the seat's colour, clear
+     of the corners at its ends, like the circle a settlement's place is
+     shown as. The line that takes the click (.edge-hit) is wider than the
+     bar and is not drawn. */
+  .clickable-edge { cursor: pointer; }
+  .clickable-edge line { stroke-linecap: round; }
+  .edge-mark-rim { stroke: var(--accent); stroke-width: 7; opacity: 0.8; }
+  .edge-mark { stroke: color-mix(in srgb, var(--accent) 20%, white); stroke-width: 3.6; opacity: 0.9; }
+  .edge-hit { stroke: #000000; stroke-opacity: 0; stroke-width: 16; pointer-events: stroke; }
+  .clickable-edge:hover .edge-mark-rim { opacity: 1; }
+  .clickable-edge:hover .edge-mark { stroke: color-mix(in srgb, var(--accent) 45%, white); opacity: 1; }
   .clickable-hex {
     cursor: pointer; fill: color-mix(in srgb, var(--accent) 18%, transparent);
     stroke: var(--accent); stroke-width: 3; stroke-dasharray: 6 4;
@@ -419,22 +610,62 @@
      face the hand's dev cards wear (see .card and --dev-card-bg), scaled up
      to a board-sized target, with no panel chrome around it. It reads as a
      card sitting on the water waiting to be taken, which is what the deck
-     is. */
+     is. It stays on the water for every reader once a table is dealt
+     (.dealt), with the cards left in the deck in its corner; it is faded,
+     disabled, and without its BUY when buying is not on offer (.show is
+     only that, as on the other corner buttons). The label keeps its room
+     hidden, so the card does not move as the offer comes and goes. */
   #buy-dev-card {
     position: absolute; top: 16px; right: 16px;
     display: none; flex-direction: column; align-items: center; gap: 4px;
     background: none; border: none; padding: 0; cursor: pointer;
   }
-  #buy-dev-card.show { display: flex; }
-  #buy-dev-card:active { transform: scale(0.94); }
+  #buy-dev-card.dealt { display: flex; }
+  #buy-dev-card:disabled { opacity: 0.42; }
+  #buy-dev-card:disabled .board-btn-label { visibility: hidden; }
+  #buy-dev-card:active:not(:disabled) { transform: scale(0.94); }
   .board-card-face {
+    position: relative;
     width: 48px; height: 64px; border-radius: 6px;
     border: 1px solid rgba(255,255,255,0.28); background: var(--dev-card-bg);
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 2px 10px rgba(0,0,0,0.45);
   }
   .board-card-face svg { width: 30px; height: 30px; fill: var(--ink); display: block; }
-  #buy-dev-card:hover .board-card-face { border-color: var(--accent); }
+  .deck-count {
+    position: absolute; right: 5px; bottom: 3px;
+    font-size: 0.62rem; font-weight: 600; line-height: 1; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  #buy-dev-card:hover:not(:disabled) .board-card-face { border-color: var(--accent); }
+  /* The bank's resource cards (renderBank): one small pile a resource, a
+     little faded, with the cards left in each pile's corner. A pile
+     the bank has run out of is an empty outline. Nothing here takes a click.
+     Side by side the board reaches the pane's top edge and leaves water down
+     its sides, so the piles stand in a column under the deck; stacked (the
+     max-width: 820px rule below) the water is above the board, so they run
+     in a row centred along the top. */
+  #bank {
+    position: absolute; top: 104px; right: 26px; flex-direction: column;
+    display: none; gap: 5px; opacity: 0.78;
+  }
+  @media (max-width: 820px) {
+    #bank { top: 12px; right: auto; left: 50%; transform: translateX(-50%); flex-direction: row; }
+  }
+  #bank.dealt { display: flex; }
+  /* A phone on its side: side by side, but too short for a column of five
+     above the bottom corner's button, so two piles a row. */
+  @media (min-width: 821px) and (max-height: 500px) {
+    #bank.dealt { display: grid; grid-template-columns: repeat(2, 28px); right: 16px; }
+  }
+  .card.bank-pile { width: 28px; height: 38px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+  .card.bank-pile svg { width: 16px; height: 16px; margin-bottom: 6px; }
+  .bank-count {
+    position: absolute; right: 3px; bottom: 2px;
+    font-size: 0.6rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .card.bank-pile.empty { background: none !important; border-style: dashed; box-shadow: none; }
+  .card.bank-pile.empty svg { opacity: 0.35; }
   /* Bottom left, the last free board corner (dice/end-turn share bottom
      right, buy-dev-card has top right to itself) — how many of each
      piece a seat has left to place (the human's own, or reading the table
@@ -473,11 +704,12 @@
     font-size: 0.95rem; line-height: 1.5; color: #a8b0bd;
     -webkit-overflow-scrolling: touch;
   }
-  #log-full .log-line { padding: 0.3rem 0; }
+  #log-full .log-line { padding: 0.28rem 0; }
   #log-sheet [hidden] { display: none; }
-  /* The menu's two tabs, the one showing lit the way the rankings page
-     lights its board tabs. */
-  #menu-tabs { display: flex; gap: 0.4rem; }
+  /* The menu's tabs, the one showing lit the way the rankings page lights
+     its board tabs; on a phone they scroll sideways rather than wrap. */
+  #menu-tabs { display: flex; gap: 0.4rem; min-width: 0; overflow-x: auto; }
+  #menu-tabs button { flex: none; }
   #menu-tabs button[aria-pressed="true"] { background: var(--water); border-color: var(--water); }
   #this-game {
     flex: none; display: flex; align-items: center; gap: 0.8rem;
@@ -503,10 +735,12 @@
   .history-result { flex: none; font-size: 0.9rem; color: var(--muted); text-align: right; }
   .history-result.won { color: var(--ink); font-weight: 700; }
   .history-note { padding: 1rem; color: var(--muted); }
-  #rankings-link {
-    flex: none; padding: 0.8rem 1rem; border-top: 1px solid var(--border);
-    color: var(--muted); font-size: 0.95rem;
-  }
+  /* A tab that is a page of its own (the rankings, a server's own tab):
+     each in its frame, made the first time it is shown and kept, so coming
+     back to it finds it where it was left. */
+  #menu-frames { flex: 1 1 auto; display: flex; min-height: 0; }
+  #menu-frames:empty { display: none; }
+  #menu-frames iframe { flex: 1 1 auto; width: 100%; border: 0; background: var(--bg); }
 
   /* One modal for every decision that needs more than a click on the board:
      trading either direction, discarding to a seven, the robber's victim, and
@@ -708,7 +942,7 @@
        roads it caps, so r is capped well short of tangency to leave the middle
        of every edge clickable. */
     .clickable-vertex { r: 18; }
-    .clickable-edge { stroke-width: 24; opacity: 0.7; }
+    .edge-hit { stroke-width: 26; }
     .clickable-hex { stroke-width: 4; }
     button { padding: 0.55rem 0.9rem; }
   }
@@ -726,8 +960,10 @@
        padding box instead. The board ends up drawn above them rather than
        behind them, and not one of their offsets had to move. One number to
        tune if it needs more room still. Side by side there is height to
-       spare, so the base rule leaves it off and the board fills the water. */
-    #board-pane { flex: 1 1 55%; min-height: 44vh; padding-bottom: 48px; }
+       spare, so the base rule leaves it off and the board fills the water.
+       The top padding does the same for the bank's row along the top edge
+       (#bank), which would otherwise sit on the top ports. */
+    #board-pane { flex: 1 1 55%; min-height: 44vh; padding-top: 56px; padding-bottom: 48px; }
     /* The inline log is unreadable in a stacked sidebar and it competes with
        the action buttons for the little height there is; the Log button opens
        the same lines full screen instead. With it gone, play-area (already
@@ -791,6 +1027,139 @@
     }
     #hand { flex: 1 0 auto; justify-content: center; }
   }
+  /* The board's top-left corner, in the board buttons' dark glass: sound in
+     the corner, always, and the win chance's percent sign under it where
+     there is a chance to show or hide. */
+  #table-controls {
+    position: absolute; top: 16px; left: 16px; z-index: 35;
+    display: grid; gap: 8px; grid-template-areas: "sound";
+  }
+  #table-controls.with-chance { grid-template-areas: "sound" "chance"; }
+  #chance-toggle { grid-area: chance; }
+  #sound-toggle { grid-area: sound; }
+  #chance-toggle[hidden], #sound-toggle[hidden] { display: none; }
+  /* Round toggles, lit while on: the speaker sound, the percent sign the win
+     chance under the cards. */
+  #sound-toggle, #chance-toggle {
+    width: 34px; height: 34px; padding: 6px; border-radius: 50%; cursor: pointer;
+    background: rgba(22, 24, 31, 0.88); border: 1px solid var(--border); color: var(--muted);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  #sound-toggle[aria-pressed="true"], #chance-toggle[aria-pressed="true"] {
+    background: var(--water); border-color: color-mix(in srgb, var(--water) 60%, #ffffff); color: var(--ink);
+  }
+  #chance-toggle svg { width: 100%; height: 100%; display: block; }
+  #sound-toggle svg { width: 100%; height: 100%; fill: currentColor; display: block; }
+  #sound-toggle .sound-on { display: none; }
+  #sound-toggle[aria-pressed="true"] .sound-on { display: inline; }
+  #sound-toggle[aria-pressed="true"] .sound-off { display: none; }
+  /* Playback (see pump): the cards, dice and highlights that show each
+     action as it happens. Flying cards sit over everything and take no
+     clicks; the dice sit over the board's middle. */
+  /* The playback's captions: pills at the foot of the board, between the
+     piece supply and the corner buttons, newest at the bottom. Each is
+     tinted with its acting seat's colour (--seat) and led by the action's
+     glyph; older ones dim above it, and each goes on its own. */
+  #captions {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    width: max-content; max-width: max(170px, calc(100% - 270px)); pointer-events: none;
+  }
+  .caption {
+    --seat: #8b93a5;
+    display: flex; align-items: center; gap: 0.6rem; max-width: 100%;
+    padding: 0.34rem 1.05rem 0.34rem 0.34rem; border-radius: 999px;
+    background: linear-gradient(180deg, rgba(40, 44, 56, 0.94), rgba(22, 24, 31, 0.94));
+    border: 1px solid color-mix(in srgb, var(--seat) 60%, transparent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    color: var(--ink); font-size: 1.05rem; font-weight: 600; line-height: 1.25;
+    transition: opacity 0.35s, transform 0.35s;
+  }
+  .caption.older { opacity: 0.85; transform: scale(0.96); }
+  .caption.gone { opacity: 0; }
+  .caption .cap-chip {
+    flex: none; width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--seat) 22%, #1c1f27);
+    border: 1.5px solid var(--seat);
+  }
+  .caption .cap-chip svg { width: 19px; height: 19px; fill: var(--seat); }
+  .caption .cap-text { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+  /* A card named in a caption is drawn as its glyph alone. */
+  .cap-glyph { display: inline-flex; flex: none; }
+  .cap-glyph svg { width: 24px; height: 24px; display: block; }
+  @media (prefers-reduced-motion: no-preference) {
+    .caption.arrive { animation: caption-in 0.22s ease-out; }
+    @keyframes caption-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
+  /* Side by side, with the height for it, they stack up from above the
+     bottom-right corner button instead, starting at the board's right edge
+     and running into the water beside it (--cap-left, --cap-width,
+     fitCorners); a long one wraps. */
+  @media (min-width: 821px) and (min-height: 501px) {
+    #captions {
+      left: var(--cap-left, auto); right: auto; bottom: 80px; transform: none;
+      width: var(--cap-width, 260px); max-width: none; align-items: flex-start;
+    }
+    .caption { font-size: 0.95rem; }
+  }
+  /* Stacked, they sit in the strip at the foot of the board, between the
+     piece supply and the corner button, a size smaller; on a phone turned
+     on its side (too short for the column above) they stay at the foot, the
+     same size smaller. */
+  @media (max-width: 820px), (max-height: 500px) {
+    #captions { bottom: 16px; max-width: calc(100% - 150px); }
+    .caption { font-size: 0.92rem; padding: 0.28rem 0.85rem 0.28rem 0.28rem; }
+    .caption .cap-chip { width: 28px; height: 28px; }
+    .caption .cap-chip svg { width: 17px; height: 17px; }
+    .cap-glyph svg { width: 21px; height: 21px; }
+  }
+  .player-row { position: relative; }
+  /* What an action did to a seat's cards, over the row's name for a moment. */
+  /* In the name's own grid cell, at its right end: the numbers stay in view,
+     and only a long name's tail is covered, faded in from the left. */
+  .player-row .player-name { position: relative; }
+  .row-badge {
+    --row-bg: var(--panel);
+    position: absolute; top: 0; bottom: 0; right: 0; z-index: 2;
+    display: flex; align-items: center; gap: 0.5rem; padding: 0 0.3rem 0 1.2rem;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--row-bg) 1rem);
+  }
+  .player-row.active .row-badge { --row-bg: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+  .badge-item { display: inline-flex; align-items: center; gap: 0.2rem; }
+  .badge-item b { font-size: 0.9rem; }
+  .badge-item.gain b { color: #7ee08a; }
+  .badge-item.loss b { color: #f08080; }
+  .badge-card.card { width: 18px; height: 24px; border-radius: 3px; }
+  .badge-card.card svg { width: 13px; height: 13px; }
+  .badge-card.dev { background: var(--dev-card-bg); }
+  .badge-card.dev svg { fill: var(--ink); }
+  .badge-card.unknown { background: var(--dev-card-bg); color: var(--ink); font-size: 0.75rem; font-weight: 700; }
+  #dice-tray {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: flex; gap: 12px; z-index: 30; pointer-events: none;
+  }
+  #dice-tray[hidden] { display: none; }
+  .die {
+    width: 46px; height: 46px; border-radius: 9px; background: #fdf6e3; border: 2px solid #3a2f22;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+  }
+  .die svg { width: 100%; height: 100%; display: block; }
+  .roll-light { pointer-events: none; }
+  .roll-ring { fill: none; pointer-events: none; }
+  .anim-piece { pointer-events: none; }
+  /* What crosses from the board to a seat's row (flyCard, diceLeave): over
+     the board and the rows, under the menu and the modal. */
+  #fly-layer { position: fixed; inset: 0; z-index: 45; overflow: hidden; pointer-events: none; }
+  #fly-layer > * { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
+  .fly-card.card { width: 22px; height: 30px; border-radius: 3px; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4); }
+  .fly-card.card svg { width: 15px; height: 15px; }
+  .dice-ghost { display: flex; gap: 12px; }
 </style>
 </head>
 <body>
@@ -864,6 +1233,9 @@
   <symbol id="icon-replay-prev" viewBox="0 0 512 512"><path d="M368,96 L368,416 L144,256 Z"/></symbol>
   <symbol id="icon-replay-next" viewBox="0 0 512 512"><path d="M144,96 L144,416 L368,256 Z"/></symbol>
   <symbol id="icon-replay-live" viewBox="0 0 512 512"><path d="M112,96 L112,416 L336,256 Z M352,96 L400,96 L400,416 L352,416 Z"/></symbol>
+  <!-- A hammer, for building and buying in the playback captions: a head
+       and a handle, filled flat in currentColor like every icon here. -->
+  <symbol id="icon-hammer" viewBox="0 0 24 24"><path d="M13.6 2.8l7.6 7.6-2.4 2.4-1.5-1.5-8.6 8.6a2.1 2.1 0 0 1-3-3l8.6-8.6-1.5-1.5z M11.2 3.6l2.4-.8 1.4 1.4-2.4 2.4z"/></symbol>
 </defs></svg>
 <header>
   <button id="open-log" class="icon-btn" title="Menu" aria-label="Open menu">
@@ -874,9 +1246,11 @@
     <svg viewBox="0 0 512 512"><use href="#icon-restart"></use></svg>
   </button>
 </header>
-<!-- The menu, full screen from the header's hamburger: this game's code and
-     link above two tabs, the game log and the games this browser has played,
-     and the rankings below them on a server that keeps any. -->
+<!-- The menu, full screen from the header's hamburger: tabs for the game
+     log and the games this browser has played, with this game's code and
+     link above them; the rankings on a server that keeps any; and any tab
+     the server adds for this client (GET /api/menu). A rankings or server
+     tab is a page of its own, shown in a frame of the menu. -->
 <div id="log-sheet">
   <header>
     <button id="close-log" class="icon-btn" title="Close" aria-label="Close menu">
@@ -885,6 +1259,7 @@
     <div id="menu-tabs" role="group" aria-label="Menu">
       <button data-tab="log" aria-pressed="true">Log</button>
       <button data-tab="history" aria-pressed="false">History</button>
+      <button data-tab="rankings" aria-pressed="false" data-src="/rankings?embed" hidden>Rankings</button>
     </div>
     <div class="status"></div>
   </header>
@@ -894,7 +1269,7 @@
   </div>
   <div id="log-full"></div>
   <div id="history" hidden></div>
-  <a id="rankings-link" href="/rankings" hidden>Rankings</a>
+  <div id="menu-frames"></div>
 </div>
 <!-- The one modal every choice that isn't a place on the board goes
      through — six modes, listed with what opens each above openModal().
@@ -902,6 +1277,7 @@
      the mode's one way out as a plain glyph at its right; under it the
      mode's own body, and beside that a column of icon buttons for whatever
      the mode can do next (renderModal). -->
+<div id="glossary" role="dialog" aria-label="What a player's row shows" hidden></div>
 <div id="modal">
   <div id="modal-inner">
     <div id="modal-head">
@@ -918,7 +1294,23 @@
 </div>
 <div id="layout">
   <div id="board-pane">
+    <div id="water"></div>
     <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <!-- The table's own controls, top left of the board: this browser's
+         sound, and whether it shows the win chance. Both are kept in the
+         browser, so they carry from game to game. See renderTableControls
+         and renderChance. -->
+    <div id="table-controls">
+      <button type="button" id="sound-toggle" aria-pressed="false" title="Sound" aria-label="Sound">
+        <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="sound-on" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="sound-off" d="M16.5 9.5l5 5m0-5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" id="chance-toggle" aria-pressed="true" aria-label="Win chance" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/><path d="M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="dice-tray" hidden><div class="die"></div><div class="die"></div></div>
+    <div id="fly-layer" aria-hidden="true"></div>
+    <div id="captions" aria-live="polite"></div>
     <div id="overlay-blocker"></div>
     <!-- Visibility is set in renderBoardButtons(); the click handler is
          wired at the bottom of the script. Shares its corner with #end-turn —
@@ -941,9 +1333,11 @@
             aria-label="Buy development card">
       <span class="board-card-face">
         <svg viewBox="0 0 512 512"><use href="#icon-dev-card"></use></svg>
+        <span class="deck-count"></span>
       </span>
       <span class="board-btn-label">BUY</span>
     </button>
+    <div id="bank" role="group" aria-label="Bank"></div>
     <div id="piece-supply"></div>
   </div>
   <div id="sidebar">
@@ -973,6 +1367,12 @@
     <div id="play-area">
       <div id="players"></div>
       <div id="hand"></div>
+      <div id="chance" role="status">
+        <span class="chance-who"><span class="chance-label">Win Chance</span></span>
+        <span class="chance-bar"><span class="chance-fill"></span></span>
+        <span class="chance-pct"></span>
+        <span class="chance-note" role="tooltip"></span>
+      </div>
       <div id="notice"></div>
     </div>
     <div id="log"></div>
@@ -1002,6 +1402,36 @@ const SEAT_COLORS = [
   {fill: "#a855f7", stroke: "#581c87"}, // purple — no terrain tile is purple
   {fill: "#06b6d4", stroke: "#083344"}, // cyan — saturated enough to read against Sea/Mountains' muted blues
 ];
+// What the page and the log call each seat, by its colour above: the same
+// name whichever seats are closed (the server's `SEAT_COLOR_NAMES`).
+const SEAT_COLOR_NAMES = ["Red", "Green", "Purple", "Blue"];
+
+// A seat's colour as text and the log's chips wear it: its fill taken
+// SEAT_INK_GREY of the way to the log's grey, so a page of names reads
+// softer than the pieces on the board. Null for a seat with no colour.
+const SEAT_INK_GREY = 0.4;
+function seatInk(seat) {
+  const color = SEAT_COLORS[seat];
+  if (!color) return null;
+  const channel = (hex, at) => parseInt(hex.slice(at, at + 2), 16);
+  const grey = "#a8b0bd";
+  const mixed = [1, 3, 5].map((at) =>
+    Math.round(channel(color.fill, at) * (1 - SEAT_INK_GREY) + channel(grey, at) * SEAT_INK_GREY));
+  return "#" + mixed.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function colorName(seat) {
+  return SEAT_COLOR_NAMES[seat] || `Seat ${seat + 1}`;
+}
+
+// `el`'s text as a seat's colour name and `owns` in that colour, then
+// `rest`: the header's "PURPLE'S TURN" and "PURPLE WINS".
+function setSeatText(el, seat, owns, rest) {
+  const name = html("span", {class: "seat-name"});
+  name.textContent = colorName(seat).toUpperCase() + owns;
+  name.style.color = seatInk(seat) || "";
+  el.replaceChildren(name, document.createTextNode(rest));
+}
 
 // Hues are kept a full step apart because the two pairs that share one read as
 // the same tile at a phone's size: forest/pasture were both green, and
@@ -1053,7 +1483,7 @@ let inFlight = false;
 let watchSeq = 0;          // bumping it retires the long poll already out — see settle
 let openSeat = null;       // reading only: whose cards and pieces the page shows — see renderPlayers
 let logSheetOpen = false;  // the menu is only drawn while it's up — see renderLog
-let menuTab = "log";      // the menu's tab showing: "log" or "history"
+let menuTab = "log";      // the menu's tab showing: its button's data-tab — see showMenuTab
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let replayRound = null;    // the past round being shown, or null while live — see showRound
 let replayLast = 0;        // the newest round the journal had when we last asked
@@ -1072,6 +1502,8 @@ let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let newGameBoard = "spiral";  // "new-game" mode: the BOARD_MODES name to deal
 let newGameDuel = false;      // "new-game" mode: duel-variant rules rather than standard
+let pickBot = null;           // "pick-bot" mode: {seat, model, was}, see renderPickBotMode
+let pendingSeat = null;       // {seat, label} a pick shows on its row until the server answers (chooseBot)
 let modelsByType = {};     // GET /api/models game_types: game type -> entry -> {name, version, commit}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1337,11 +1769,25 @@ async function getJSON(path) {
 }
 
 async function postJSON(path, body) {
-  const res = await fetch(path, {
+  const send = () => fetch(path, {
     method: "POST",
     headers: authHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify(body || {}),
   });
+  let res = await send();
+  // A seat's token stops working when the server restarts or drops an idle
+  // game from memory, and a page waiting on its own turn does not poll, so
+  // a refused request is the first it hears of it. The seat is still ours:
+  // get a fresh token by secret and send the request once more with it.
+  if (res.status === 403 && tableCode && tokenFor(tableCode)) {
+    const back = await reclaimSeat(tableCode);
+    if (back === "none") {
+      forgetSeat(tableCode);
+      location.reload();
+    } else if (back) {
+      res = await send();
+    }
+  }
   return {ok: res.ok, data: await res.json()};
 }
 
@@ -1442,22 +1888,23 @@ function seatLabel(seat) {
   if (info && info.kind === "empty") {
     return state?.locked?.includes(seat) ? "(closed)" : "(empty)";
   }
-  return (info && info.name) || `Player ${playerNumber(seat)}`;
+  return (info && (info.label || info.name)) || colorName(seat);
 }
 
-// Seats are numbered among the seats still in the game: close seat 2 and the
-// table reads Player 1, 2, 3, not 1, 3, 4. A closed seat keeps no number.
-function playerNumber(seat) {
-  const locked = state?.locked || [];
-  return seat + 1 - locked.filter((s) => s < seat).length;
+// The name a bot entry is shown by at this table's game type: its profile's
+// `label` (`GET /api/models`), else the entry itself, which is what the
+// server is asked for.
+function botLabel(entry) {
+  const info = (modelsByType[state.game_type] || {})[entry];
+  return (info && info.label) || entry;
 }
 
-// Same label, but seat-number-first — "Player 2 (mybot)" — for the spots
-// where the model name alone would misleadingly read as an opponent's own
-// identity (trade offers, robber-victim picks) rather than as one seat's
-// current bot. 1-indexed to match the backend log's `_who` (webplay.py).
+// Same label, but colour-first — "Purple (mybot)" — for the spots where the
+// model name alone would misleadingly read as an opponent's own identity
+// (trade offers, robber-victim picks) rather than as one seat's current bot.
+// The same form as the log's `_who` (webplay.py).
 function seatFullLabel(seat) {
-  return `Player ${playerNumber(seat)} (${seatLabel(seat)})`;
+  return `${colorName(seat)} (${seatLabel(seat)})`;
 }
 
 // Your own name at this game, as everyone else's log and player list will
@@ -1505,8 +1952,8 @@ async function swapBot(seat, model) {
   }
 }
 
-// The picker's own third option, alongside "empty" and every model name —
-// never a real model, so it can share the same <select> and change handler.
+// The bot cards' choice that closes the seat, beside every model name and ""
+// (left open): never a real model.
 const CLOSE_SEAT = "__close__";
 
 // Closes an open seat outright: no bot, no person, ever, for the rest of
@@ -1577,19 +2024,36 @@ function showCodeInUrl(code) {
 // works.
 let seatError = null;
 
-// Trades this browser's own secret for a fresh token on the seat it already
-// holds at `code` (POST /api/reclaim), or null if the server knows no such
-// seat. The seat itself survives a restart — the server rebuilds it from the
-// journal, claimed, with our client id on it — but its token does not, since
-// a token never touches disk. This is the handshake that gets one back.
+// Trades this browser's own secret for a fresh token on the seat it holds at
+// `code` (POST /api/reclaim). The seat itself survives a restart, or the
+// server dropping an idle game from memory: it comes back from the journal,
+// claimed, with our client id on it. Its token does not, since a token never
+// touches disk, so this handshake is how the page gets back in.
+//
+// Asked as a probe, so a seat that is not ours is a plain "no" rather than a
+// refused request: the page asks at every arrival without a working token,
+// whoever is arriving. Returns the seated view, "none" when no seat there is
+// ours, or null when the server could not be asked (mid-restart, say) and the
+// answer is still unknown.
 //
 // Works on a finished game too, and is worth doing there: it is the
 // difference between watching a game you played and watching a stranger's.
 async function reclaimSeat(code) {
   const secret = clientSecret();
-  if (!secret) return null; // private mode: nothing to prove the seat with
-  const {ok, data} = await postJSON("/api/reclaim", {code, secret});
-  if (!ok) return null;
+  if (!secret) return "none"; // private mode: nothing to prove a seat with
+  let res, data;
+  try {
+    res = await fetch("/api/reclaim", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({code, secret, probe: true}),
+    });
+    data = await res.json();
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  if (!data.token) return "none";
   rememberSeat(code, data.token);
   showCodeInUrl(code);
   return data;
@@ -1600,26 +2064,27 @@ async function reclaimSeat(code) {
 // otherwise — or null if there is no such game to be at: abandoned,
 // evicted, or a code with nothing behind it.
 //
-// A token this server has never heard of counts as no seat *yet* rather than
-// no game: a restart re-tokens every seat, so the answer is to prove the old
-// one is ours (reclaim) and only then, failing that, to look for an open one.
+// Whether a seat there is ours is the server's to say, not this browser's
+// token store's: a token goes stale at every restart, and a saved one can be
+// lost. So without a token that works, the page asks by secret (reclaim)
+// before anything else, and forgets a stale token only once the server has
+// said no seat there is ours.
 async function resumeGame(code) {
   if (!code) return null;
   tableCode = code;
   if (tokenFor(code)) {
     const view = await getJSON("/api/state");
-    if (!view.error) {
+    if (!view.error && view.code === code) {
       rememberSeat(code, tokenFor(code));
       showCodeInUrl(code);
       return view;
     }
-    forgetSeat(code);
-    // We held a seat here, so the seat is still ours to ask for by secret —
-    // a 403 in the console on the way is possible (a seat claimed before
-    // this browser had a secret can't be proved) but this is not the path
-    // an ordinary arrival takes, which is the one the read below protects.
-    const mine = await reclaimSeat(code);
-    if (mine) return mine;
+  }
+  const mine = await reclaimSeat(code);
+  if (mine === "none") {
+    if (tokenFor(code)) forgetSeat(code);
+  } else if (mine) {
+    return mine;
   }
   // No seat here, or not one we can get back. Ask the table itself what it
   // has before knocking: every game is public, so this one read answers both
@@ -1725,23 +2190,367 @@ function portLabelPos(port) {
   return d1 > d2 ? a1 : a2;
 }
 
+// The island's sand base reaches this far past the coast, in board units.
+const LAND_RIM = 7;
+// The island's shadow: `steps` lines, each `step` wider than the last, drawn
+// `south` of the island.
+const LAND_SHADOW = {steps: 9, step: 4.5, south: 7};
+// A land tile's corners sit this share of the way from its hex's centre to
+// the hex's own corners, which leaves about 3 units of sand between two
+// tiles, and each corner is rounded from this far along its two sides.
+const TILE_INSET = 0.97;
+const TILE_ROUND = 7;
+// How far south of a tile its shadow falls on the sand.
+const TILE_CAST = 1.3;
+// The line just inside a tile's outline follows the tile drawn this much
+// further in.
+const TILE_BEVEL_INSET = 0.022;
+// The specks of a tile's grain: how many of each tone, and their radii.
+const TILE_GRAIN = {specks: 46, radius: [0.45, 1.25]};
+// The side of the square the robber's figure is drawn in.
+const ROBBER_SIZE = 48;
+// How far south of a number, a port marker or a building its shadow falls,
+// and how far south of a road, which lies lower, its own does.
+const CAST = 2.2;
+const ROAD_CAST = 1.7;
+// How far short of an empty vertex a road ends when it has none of its own
+// seat's roads there but another seat's (roadEndGaps): its round end then
+// clears the other road's casing instead of lying across it.
+const ROAD_END_GAP = 10;
+// The way to the light, which falls on the board from its upper left.
+const LIGHT = {x: -0.35, y: -0.94};
+// The part of an edge its road target's bar covers, as shares of the edge.
+const EDGE_MARK = [0.27, 0.73];
+
+// A repeatable stream of numbers in [0, 1) from `seed`. The board's texture
+// is scattered with it, so a board is drawn the same way every time.
+function scatter(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Whether the point (x, y) is inside the polygon `corners`.
+function insidePolygon(x, y, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+    const a = corners[i], b = corners[j];
+    if ((a.y > y) !== (b.y > y) && x < a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)) inside = !inside;
+  }
+  return inside;
+}
+
+// A land tile's grain: two paths of small round specks scattered over it,
+// one for each tone, the same for a hex every time it is drawn.
+function tileGrain(h) {
+  const next = scatter(7919 * (h.id + 1));
+  const corners = h.vertex_ids.map((v) => {
+    const p = vertexById[v];
+    return {x: h.x + (p.x - h.x) * 0.9, y: h.y + (p.y - h.y) * 0.9};
+  });
+  const reach = Math.max(...corners.map((c) => Math.hypot(c.x - h.x, c.y - h.y)));
+  const [least, most] = TILE_GRAIN.radius;
+  const tones = {dark: "", pale: ""};
+  for (const tone of Object.keys(tones)) {
+    for (let placed = 0, tries = 0; placed < TILE_GRAIN.specks && tries < 400; tries++) {
+      const x = h.x + (2 * next() - 1) * reach, y = h.y + (2 * next() - 1) * reach;
+      const r = (least + (most - least) * next() * next()).toFixed(2);
+      if (!insidePolygon(x, y, corners)) continue;
+      tones[tone] += `M${(x - r).toFixed(1)},${y.toFixed(1)}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0`;
+      placed++;
+    }
+  }
+  return tones;
+}
+
+// --- The water
+//
+// Open water as it looks from high above: a fine chop of small waves, and
+// over it broad patches a little paler or darker. Both are pictures made
+// once when the page loads and laid over the board pane's own gradient. The
+// chop is one square tile, repeated: the sum of `waves` sine waves whose
+// crests run mostly across the page, each fitting the tile a whole number of
+// times so the tile joins itself, with the crests drawn pale and the troughs
+// dark. The patches are a small picture of a few long waves stretched over
+// the whole pane. Every wave comes from `scatter`, so the water is the same
+// every time.
+const WATER = {
+  tile: 512,              // the chop tile's side, in screen dots
+  waves: 46,              // how many waves the chop sums
+  crest: [214, 238, 250, 0.22],   // a crest's colour, and how strongly it shows at most
+  trough: [3, 20, 38, 0.17],
+  patches: [112, 84],     // the patches picture's size
+  pale: [96, 190, 214, 0.2],
+  deep: [4, 24, 44, 0.24],
+};
+
+// `count` waves over a `width` by `height` picture, summed: one value a dot,
+// row by row, scaled so that most lie in [-1, 1]. `wave(i)` gives the i-th
+// wave's {m, n, phase, amp}: it runs `m` times across the picture and `n`
+// times down it.
+function waveField(width, height, count, wave) {
+  const field = new Float32Array(width * height);
+  const across = [new Float32Array(width), new Float32Array(width)];
+  const down = [new Float32Array(height), new Float32Array(height)];
+  for (let i = 0; i < count; i++) {
+    const {m, n, phase, amp} = wave(i);
+    // sin(a + b) from the two axes' own sines and cosines, worked out once each.
+    for (let x = 0; x < width; x++) {
+      const a = 2 * Math.PI * m * x / width + phase;
+      across[0][x] = Math.sin(a) * amp;
+      across[1][x] = Math.cos(a) * amp;
+    }
+    for (let y = 0; y < height; y++) {
+      const b = 2 * Math.PI * n * y / height;
+      down[0][y] = Math.sin(b);
+      down[1][y] = Math.cos(b);
+    }
+    for (let y = 0, at = 0; y < height; y++) {
+      const sin = down[0][y], cos = down[1][y];
+      for (let x = 0; x < width; x++, at++) field[at] += across[0][x] * cos + across[1][x] * sin;
+    }
+  }
+  let squares = 0;
+  for (let at = 0; at < field.length; at++) squares += field[at] * field[at];
+  const scale = 1 / (2.2 * Math.sqrt(squares / field.length) || 1);
+  for (let at = 0; at < field.length; at++) field[at] *= scale;
+  return field;
+}
+
+// A picture of `field`: `high` where it is over `from`, `low` where it is
+// under -`from`, each [red, green, blue, strength] and showing more the
+// further the field is past that; clear between.
+function fieldPicture(field, width, height, from, high, low) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  const image = context.createImageData(width, height);
+  for (let at = 0; at < field.length; at++) {
+    const value = field[at];
+    const tone = value > 0 ? high : low;
+    const past = Math.min(1, Math.max(0, (Math.abs(value) - from) / (1 - from)));
+    image.data[4 * at] = tone[0];
+    image.data[4 * at + 1] = tone[1];
+    image.data[4 * at + 2] = tone[2];
+    image.data[4 * at + 3] = Math.round(255 * tone[3] * past * past * (3 - 2 * past));
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+// Makes the water's two pictures and lays them over the water's gradient
+// (#water). A browser that cannot make them keeps the gradient alone.
+function paintWater() {
+  const pane = document.getElementById("board-pane");
+  const water = document.getElementById("water");
+  const next = scatter(48611);
+  const side = WATER.tile;
+  // Two thirds of the chop is waves 4 to 12 dots long, their crests within
+  // about 55 degrees of level; the rest is a finer ripple, 2 to 5 dots,
+  // running any way.
+  const chop = waveField(side, side, WATER.waves, (i) => {
+    const fine = i >= WATER.waves * 2 / 3;
+    const length = fine ? 2.2 + 2.4 * next() : 4 + 8 * next() * next();
+    const heading = Math.PI / 2 + (next() - 0.5) * (fine ? Math.PI : 1.9);
+    return {
+      m: Math.round(side / length * Math.cos(heading)), n: Math.round(side / length * Math.sin(heading)),
+      phase: 2 * Math.PI * next(), amp: (fine ? 0.45 : 1) * Math.sqrt(length),
+    };
+  });
+  const [wide, tall] = WATER.patches;
+  const patches = waveField(wide, tall, 7, () => ({
+    m: (next() - 0.5) * 5, n: (next() - 0.5) * 4, phase: 2 * Math.PI * next(), amp: 0.5 + next(),
+  }));
+  const pictures = [
+    fieldPicture(chop, side, side, 0.16, WATER.crest, WATER.trough),
+    fieldPicture(patches, wide, tall, 0.1, WATER.pale, WATER.deep),
+  ];
+  // The chop is drawn dot for dot up to two dots a pixel, so it stays fine on a dense screen.
+  const shown = side / Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  const gradient = getComputedStyle(water).backgroundImage;
+  Promise.all(pictures.map((canvas) => new Promise((done) => canvas.toBlob(done)))).then((blobs) => {
+    if (blobs.some((blob) => !blob)) return;
+    const [chopUrl, patchesUrl] = blobs.map((blob) => URL.createObjectURL(blob));
+    water.style.backgroundImage = `url(${chopUrl}), url(${patchesUrl}), ${gradient}`;
+    water.style.backgroundSize = `${shown}px ${shown}px, 100% 100%, auto`;
+    water.style.backgroundRepeat = "repeat, no-repeat, no-repeat";
+    pane.dataset.water = "painted";
+  });
+}
+
+// A land tile's outline, as a path: its hex drawn in toward its centre (to
+// `inset` of the way to its corners), with rounded corners.
+function tilePath(h, inset = TILE_INSET) {
+  const corners = h.vertex_ids.map((v) => {
+    const p = vertexById[v];
+    return {x: h.x + (p.x - h.x) * inset, y: h.y + (p.y - h.y) * inset};
+  });
+  const toward = (a, b) => {
+    const share = TILE_ROUND / (Math.hypot(b.x - a.x, b.y - a.y) || 1);
+    return `${(a.x + (b.x - a.x) * share).toFixed(2)},${(a.y + (b.y - a.y) * share).toFixed(2)}`;
+  };
+  return corners.map((p, i) => {
+    const before = corners[(i + corners.length - 1) % corners.length];
+    const after = corners[(i + 1) % corners.length];
+    return `${i ? "L" : "M"}${toward(p, before)}Q${p.x.toFixed(2)},${p.y.toFixed(2)} ${toward(p, after)}`;
+  }).join("") + "Z";
+}
+
+// The land's outline: every edge with one of `hexes` on one side only, as
+// pairs of vertex ids.
+function coastEdges(hexes) {
+  const sides = new Map();
+  for (const h of hexes) {
+    h.vertex_ids.forEach((a, i) => {
+      const b = h.vertex_ids[(i + 1) % h.vertex_ids.length];
+      const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+      sides.set(key, (sides.get(key) || 0) + 1);
+    });
+  }
+  return [...sides].filter(([, n]) => n === 1).map(([key]) => key.split("-").map(Number));
+}
+
+// Where the robber stands on a hex, as the middle of its figure's square: at
+// the left shoulder of the hex's number chip, over the chip's edge and clear
+// of its digits, and of whatever stands on the hex's corners and sides; in
+// the middle of a hex with no number.
+function robberSpot(hex) {
+  return hex.token ? {x: hex.x - 23, y: hex.y - 7} : {x: hex.x, y: hex.y - 3};
+}
+
+// Dims the number on the hex the robber stands on, and no other.
+function markBlocked(hexId) {
+  for (const token of document.querySelectorAll("#static-layer .hex-token-g")) {
+    token.classList.toggle("blocked", token.id === `hex-token-${hexId}`);
+  }
+}
+
+// A settlement (a circle) or a city (a diamond) at vertex `v`, with a light
+// line just inside its outline. The board's pieces and the one playBuild
+// drops are both this.
+function buildingPiece(v, city, color) {
+  const piece = el("g", {});
+  if (city) {
+    piece.appendChild(el("rect", {
+      x: v.x - 13, y: v.y - 13, width: 26, height: 26, class: "cast",
+      transform: `translate(0 ${CAST}) rotate(45 ${v.x} ${v.y})`,
+    }));
+    piece.appendChild(el("rect", {
+      x: v.x - 12, y: v.y - 12, width: 24, height: 24,
+      fill: color.fill, stroke: color.stroke, "stroke-width": 2, transform: `rotate(45 ${v.x} ${v.y})`,
+    }));
+    piece.appendChild(el("rect", {
+      x: v.x - 9.6, y: v.y - 9.6, width: 19.2, height: 19.2, class: "piece-edge",
+      transform: `rotate(45 ${v.x} ${v.y})`,
+    }));
+  } else {
+    piece.appendChild(el("circle", {cx: v.x, cy: v.y + CAST, r: 13, class: "cast"}));
+    piece.appendChild(el("circle", {cx: v.x, cy: v.y, r: 12, fill: color.fill, stroke: color.stroke, "stroke-width": 2}));
+    piece.appendChild(el("circle", {cx: v.x, cy: v.y, r: 9.6, class: "piece-edge"}));
+  }
+  return piece;
+}
+
+// Side by side, the captions start at the board's right edge, above the
+// bottom-right corner button, and take the water from there to the pane's
+// right edge (--cap-left, --cap-width), at least CAPTION_MIN wide. Stacked,
+// nothing moves.
+const CAPTION_MIN = 220;
+function fitCorners() {
+  const pane = document.getElementById("board-pane");
+  const island = document.getElementById("static-layer");
+  const sideBySide = window.matchMedia("(min-width: 821px)").matches;
+  const ctm = island && island.getScreenCTM();
+  if (!sideBySide || !ctm) {
+    for (const name of ["--cap-left", "--cap-width"]) pane.style.removeProperty(name);
+    return;
+  }
+  const box = island.getBBox();
+  const right = new DOMPoint(box.x + box.width, box.y).matrixTransform(ctm).x;
+  const at = pane.getBoundingClientRect();
+  const edge = at.width - 16;
+  const start = Math.min(right - at.left + 16, edge - CAPTION_MIN);
+  pane.style.setProperty("--cap-left", `${start}px`);
+  pane.style.setProperty("--cap-width", `${edge - start}px`);
+}
+
+// The header's height, which the page's width cap (the stylesheet's
+// `body > header, #layout`) takes off the window's before its 1.4.
+function fitPage() {
+  const header = document.querySelector("body > header");
+  document.documentElement.style.setProperty("--header-height", `${header.offsetHeight}px`);
+}
+
 function drawBoard() {
   const svg = document.getElementById("board-svg");
   svg.innerHTML = "";
   const b = boardBounds();
   svg.setAttribute("viewBox", `${b.minX} ${b.minY} ${b.w} ${b.h}`);
+  queueMicrotask(fitCorners);
 
   const defs = el("defs", {});
   svg.appendChild(defs);
+  // One shade for every tile, in the tile's own box: lighter toward its upper
+  // left, darker toward its lower right.
+  defs.appendChild(el("linearGradient", {id: "tile-shade", x1: 0.2, y1: 0, x2: 0.8, y2: 1},
+    el("stop", {offset: 0, "stop-color": "#ffffff", "stop-opacity": 0.18}),
+    el("stop", {offset: 0.5, "stop-color": "#ffffff", "stop-opacity": 0}),
+    el("stop", {offset: 1, "stop-color": "#000000", "stop-opacity": 0.18})));
+  // The line just inside a tile's outline, in the tile's own box: pale at its
+  // upper left, nothing across its middle, dark at its lower right.
+  defs.appendChild(el("linearGradient", {id: "tile-bevel", x1: 0.2, y1: 0, x2: 0.8, y2: 1},
+    el("stop", {offset: 0, "stop-color": "#ffffff", "stop-opacity": 0.5}),
+    el("stop", {offset: 0.42, "stop-color": "#ffffff", "stop-opacity": 0}),
+    el("stop", {offset: 0.58, "stop-color": "#000000", "stop-opacity": 0}),
+    el("stop", {offset: 1, "stop-color": "#000000", "stop-opacity": 0.34})));
+  // The light a roll puts on the board (playProduction): gold where a number
+  // produces, red where the robber stops it.
+  for (const [id, color] of [["light-gold", "#ffd75a"], ["light-red", "#ff4d4d"]]) {
+    defs.appendChild(el("radialGradient", {id},
+      el("stop", {offset: 0, "stop-color": color, "stop-opacity": 0.75}),
+      el("stop", {offset: 0.45, "stop-color": color, "stop-opacity": 0.3}),
+      el("stop", {offset: 1, "stop-color": color, "stop-opacity": 0})));
+  }
   const staticLayer = el("g", {id: "static-layer"});
   svg.appendChild(staticLayer);
 
+  // Under the tiles: the island's shadow, then its sand base. The shadow is
+  // the coast drawn again and again a little south of the island, each line
+  // wider and all of them faint, so it is darkest at the coast and fades
+  // away from it. The base is the land drawn LAND_RIM past its coast.
+  const land = board.hexes.filter((h) => h.terrain !== "SEA");
+  const outline = land.map((h) =>
+    `M${h.vertex_ids.map((v) => `${vertexById[v].x},${vertexById[v].y}`).join("L")}Z`).join("");
+  const coast = coastEdges(land).map(([a, b]) =>
+    `M${vertexById[a].x},${vertexById[a].y}L${vertexById[b].x},${vertexById[b].y}`).join("");
+  for (let i = LAND_SHADOW.steps; i >= 1; i--) {
+    staticLayer.appendChild(el("path", {
+      d: coast, class: "land-shadow", "stroke-width": 2 * LAND_RIM + i * LAND_SHADOW.step,
+      transform: `translate(0 ${LAND_SHADOW.south})`,
+    }));
+  }
+  staticLayer.appendChild(el("path", {d: outline, class: "land-base", "stroke-width": 2 * LAND_RIM}));
+  // Every tile's shadow on the sand, under all of the tiles.
+  staticLayer.appendChild(el("path", {
+    d: land.map((h) => tilePath(h)).join(""), class: "tile-cast", transform: `translate(0 ${TILE_CAST})`,
+  }));
+
   // Hexes
   for (const h of board.hexes) {
-    const points = h.vertex_ids.map((v) => `${vertexById[v].x},${vertexById[v].y}`).join(" ");
-    staticLayer.appendChild(el("polygon", {
-      points, fill: TERRAIN_COLORS[h.terrain] || "#ccc", stroke: "#3a2f22", "stroke-width": 1.5,
-    }));
+    const sea = h.terrain === "SEA";
+    const color = TERRAIN_COLORS[h.terrain] || "#ccc";
+    // A land tile is drawn in from its hex with its corners rounded, so the
+    // sand under it shows between it and its neighbours.
+    const shape = sea
+      ? {tag: "polygon", attrs: {points: h.vertex_ids.map((v) => `${vertexById[v].x},${vertexById[v].y}`).join(" ")}}
+      : {tag: "path", attrs: {d: tilePath(h)}};
+    staticLayer.appendChild(el(shape.tag, {...shape.attrs, fill: color, class: "tile"}));
     const icon = TERRAIN_ICONS[h.terrain];
     if (icon) {
       // A glyph box of side S puts its corners S/2*sqrt(2) from the centre, so
@@ -1749,7 +2558,7 @@ function drawBoard() {
       // bound. Clipped regardless, as cheap insurance against any icon's
       // glyph reaching into its corners and spilling onto a neighbouring hex.
       const clip = el("clipPath", {id: `hexclip-${h.id}`});
-      clip.appendChild(el("polygon", {points}));
+      clip.appendChild(el(shape.tag, shape.attrs));
       defs.appendChild(clip);
       const size = 76;
       // The clip goes on a wrapping group, not on the <use> itself: a <use> of
@@ -1762,11 +2571,24 @@ function drawBoard() {
       }));
       staticLayer.appendChild(clipped);
     }
+    if (!sea) {
+      const grain = tileGrain(h);
+      for (const tone of Object.keys(grain)) {
+        staticLayer.appendChild(el("path", {d: grain[tone], class: `tile-grain ${tone}`}));
+      }
+      staticLayer.appendChild(el("path", {...shape.attrs, class: "tile-shade", fill: "url(#tile-shade)"}));
+      staticLayer.appendChild(el("path", {d: tilePath(h, TILE_INSET - TILE_BEVEL_INSET), class: "tile-bevel"}));
+    }
     if (h.token) {
       const pipCount = 6 - Math.abs(7 - h.token);
-      staticLayer.appendChild(el("circle", {cx: h.x, cy: h.y, r: 15, fill: "#fdf6e3", stroke: "#3a2f22", "stroke-width": 1}));
+      // The number's disc, digits and pips as one group: the robber dims it
+      // (markBlocked) and a roll of its number makes it jump (playProduction).
+      const token = el("g", {id: `hex-token-${h.id}`, class: "hex-token-g"});
+      staticLayer.appendChild(token);
+      token.appendChild(el("circle", {cx: h.x, cy: h.y + CAST, r: 15.5, class: "cast"}));
+      token.appendChild(el("circle", {cx: h.x, cy: h.y, r: 15, fill: "#fdf6e3", stroke: "#3a2f22", "stroke-width": 1}));
       const hot = h.token === 6 || h.token === 8;
-      staticLayer.appendChild(el("text", {
+      token.appendChild(el("text", {
         x: h.x, y: h.y - 2, class: `hex-token ${hot ? "red" : ""}`,
         // Also a presentation attribute, not the stylesheet alone: belt and
         // suspenders alongside the CSS fill above.
@@ -1777,7 +2599,7 @@ function drawBoard() {
       // Number sits at h.y-2, pips were at h.y+10 (12 units below it) —
       // nudged up 20% of that gap (2.4 units) to sit a bit closer.
       for (let i = 0; i < pipCount; i++) {
-        staticLayer.appendChild(el("circle", {
+        token.appendChild(el("circle", {
           cx: h.x - dotsWidth / 2 + i * 4, cy: h.y + 7.6, r: 1.5,
           class: "hex-pip", fill: h.token === 6 || h.token === 8 ? "#d00000" : "#000000",
         }));
@@ -1785,24 +2607,17 @@ function drawBoard() {
     }
   }
 
-  // Edges (faint, always visible)
-  for (const e of board.edges) {
-    const p0 = vertexById[e.v0], p1 = vertexById[e.v1];
-    staticLayer.appendChild(el("line", {
-      x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, class: "edge-line", id: `edge-line-${e.id}`,
-    }));
-  }
-
-  // Vertices (faint dots, always visible)
+  // Vertices (faint dots, always visible). The edges between them show as
+  // the sand between the tiles.
   for (const v of board.vertices) {
-    staticLayer.appendChild(el("circle", {cx: v.x, cy: v.y, r: 3, class: "vertex-dot"}));
+    staticLayer.appendChild(el("circle", {cx: v.x, cy: v.y, r: 2.4, class: "vertex-dot"}));
   }
 
   // Ports: a marker in the same colour as its resource's actual hex tile
   // (white for 3:1), a ship icon, the ratio alone (the colour already says
-  // which resource), and a dashed link plus a matching-coloured ring on each
-  // of the two vertices it serves — position near the coast was not enough
-  // to tell which corners could actually use it.
+  // which resource), and a pier plus a matching-coloured mark on each of the
+  // two vertices it serves — position near the coast was not enough to tell
+  // which corners could actually use it.
   for (const p of board.ports) {
     const pos = portLabelPos(p);
     const terrain = p.resource ? RESOURCE_TERRAIN[p.resource] : null;
@@ -1816,6 +2631,7 @@ function drawBoard() {
       staticLayer.appendChild(el("circle", {cx: v.x, cy: v.y, r: 5, fill, class: "port-vertex-mark"}));
     }
 
+    staticLayer.appendChild(el("circle", {cx: pos.x, cy: pos.y + CAST, r: 19, class: "cast"}));
     staticLayer.appendChild(el("circle", {cx: pos.x, cy: pos.y, r: 18, fill, class: "port-marker"}));
     staticLayer.appendChild(el("use", {
       href: "#icon-ship", x: pos.x - 11, y: pos.y - 16, width: 22, height: 22, fill: ink, class: "port-ship",
@@ -1844,6 +2660,9 @@ function drawBoard() {
   // the settlement's own circle would hide it completely.
   svg.appendChild(el("g", {id: "hex-target-layer"}));
   svg.appendChild(el("g", {id: "roads-layer", class: "pieces-layer"}));
+  // A road being built drops into this one (playBuild), over the roads
+  // already down and under the buildings.
+  svg.appendChild(el("g", {id: "road-anim-layer", class: "pieces-layer"}));
   svg.appendChild(el("g", {id: "clickable-edge-layer"}));
   svg.appendChild(el("g", {id: "buildings-layer", class: "pieces-layer"}));
   svg.appendChild(el("g", {id: "robber-layer"}));
@@ -1934,7 +2753,9 @@ function robberMove(g) {
 // keeps the title honest (renderStatus/applyLive). Reading `state` here would
 // have stopped the loop on whatever the replayed position happened to say.
 function nothingToWatch() {
-  const live = liveView();
+  // The newest view taken in, not the one on screen: while a turn plays back
+  // the screen still shows the seat's own move, and the table has gone on.
+  const live = newestView();
   if (live.game_over) return true;
   if (watching() || live.to_move !== live.seat) return false;
   return !((live.trade_round || {}).awaiting || []).length;
@@ -1980,18 +2801,35 @@ function settle() {
       // sets it) — polling from it would be asking for changes since a
       // version that never existed here.
       let next = null;
+      let stale = false;
       try {
-        next = await getJSON(`${route}?after=${liveView().version}&wait=20`);
+        const res = await fetch(`${route}?after=${newestVersion()}&wait=20`, {headers: authHeaders()});
+        // Seated, a 403 is a token gone stale. Watching while a token is
+        // still kept means a reclaim that could not be asked at arrival.
+        stale = watching() ? Boolean(tokenFor(tableCode)) : res.status === 403;
+        next = await res.json();
       } catch (e) {
         next = null;
       }
       if (mine !== watchSeq) return;
+      if (stale) {
+        // Our token went stale under an open page: the server restarted, or
+        // dropped the game from memory while this page slept. The seat is
+        // still ours, so ask for it back and start over from the fresh view.
+        const back = await reclaimSeat(tableCode);
+        if (mine !== watchSeq) return;
+        if (back && back !== "none") {
+          location.reload();
+          return;
+        }
+        if (back === "none") forgetSeat(tableCode);
+      }
       if (!next || next.error || next.version === undefined) {
         // Never a tight loop, whatever the server said.
         await new Promise((done) => setTimeout(done, 1500));
         continue;
       }
-      if (next.version >= liveView().version) applyLive(next);
+      if (next.version > newestVersion()) applyLive(next);
       if (nothingToWatch()) return;
     }
   })();
@@ -2005,10 +2843,11 @@ function settle() {
 // left running while a round is pinned.
 function applyLive(next) {
   if (!replaying()) {
-    state = next;
-    render();
+    takeView(next);
     return;
   }
+  // What happens while a past round is up is not played back on leaving it.
+  markSeen(next);
   liveState = next;
   noteActivity(liveState);
   noteGame(liveState);
@@ -2018,6 +2857,969 @@ function applyLive(next) {
 // Leaving the page retires the loop with it: a long poll outliving its own
 // document is a request nobody will ever read.
 window.addEventListener("pagehide", () => { watchSeq++; });
+
+// --- Playback -------------------------------------------------------------
+//
+// Each action shown as it happens. A view carries `feed`, every action as its
+// own entry (hidden for this reader as the log is), numbered by its place in
+// the game. A view whose feed holds entries another seat made is not drawn at
+// once: it waits in `anim.queue`, the board as it stood before, and `pump`
+// plays its entries one after another, then draws the view itself, which
+// settles anything the entries could not say. An entry names itself in the
+// caption over the board, leaves what it did to each seat's cards on that
+// seat's row (`showBadge`), and moves what moved on the board: the dice, a
+// piece placed, the robber. Once it has played, the position on screen moves
+// on by it (`advance`): the rows, the hand and the board show the table as
+// it stood after that entry, and not as it stood before the first of them.
+// Each takes long enough to read, so how fast a turn goes by is that, or
+// the bots' own time deciding where that is longer. A click on the board
+// finishes everything queued.
+//
+// The seat's own moves are drawn at once (`takeView(view, {own: true})`): a
+// roll still shows its dice and what each seat collected, over a board that
+// has already moved on.
+//
+// Nothing is played back across a gap: an undo (a new `epoch`), a reader that
+// has fallen out of the feed's window, a hidden tab, or a past round being
+// read jumps straight to the view.
+
+const anim = {
+  queue: [],        // [{view, entries}], oldest first
+  running: false,
+  skip: false,      // finish whatever is playing, and the rest of the queue, at once
+  epoch: null,      // the feed epoch of the newest view taken in
+  last: -1,         // the newest feed entry taken in (played, queued or skipped)
+  version: -1,      // the newest table version taken in, which the poll asks past
+  view: null,       // the newest live view taken in, queued or shown
+  playing: new Set(),  // running Web Animations, finished by a skip
+};
+
+const REDUCED_MOTION = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+// How long each part of an entry takes, in milliseconds. `read` is the least
+// any entry with a caption is held for.
+const PLAY_MS = {
+  dice: 650, settle: 300, flash: 520, fly: 560, stagger: 70, drop: 360, robber: 480,
+  read: 1500, badge: 3600, caption: 5000, gap: 60,
+};
+
+function feedOf(view) {
+  return (view && view.feed) || {epoch: 0, events: []};
+}
+
+function lastEntry(view) {
+  const events = feedOf(view).events;
+  return events.length ? events[events.length - 1].n : -1;
+}
+
+// Marks everything in `view` as taken in, played or not.
+function markSeen(view) {
+  if (!view) return;
+  const feed = feedOf(view);
+  if (anim.epoch !== feed.epoch) { anim.epoch = feed.epoch; anim.last = -1; }
+  anim.last = Math.max(anim.last, lastEntry(view));
+  if (view.version !== undefined && view.version >= anim.version) {
+    anim.version = view.version;
+    anim.view = view;
+  }
+}
+
+// The newest live view taken in: queued behind a playback, or on screen.
+function newestView() {
+  const live = liveView();
+  return anim.view && (!live || anim.view.version > live.version) ? anim.view : live;
+}
+
+// The version the poll asks past: the newest taken in, queued views included,
+// so a view waiting its turn is not fetched again.
+function newestVersion() {
+  return Math.max(liveView() ? liveView().version : -1, anim.version);
+}
+
+// The entries of `view` not yet taken in, or null where the page must jump
+// to it instead of playing them.
+function freshEntries(view) {
+  const feed = feedOf(view);
+  if (anim.epoch === null || feed.epoch !== anim.epoch || document.hidden) return null;
+  const events = feed.events;
+  if (events.length && events[0].n > anim.last + 1 && lastEntry(view) > anim.last) return null;
+  return events.filter((e) => e.n > anim.last);
+}
+
+function jumpTo(view) {
+  // Anything still queued is older than this, and goes.
+  anim.queue = [];
+  if (anim.running) anim.skip = true;
+  finishAll();
+  markSeen(view);
+  state = view;
+  clearAnimLayer();
+  render();
+}
+
+// A view to show, by way of whatever it holds that has not been played.
+// `own` is the answer to this seat's own move, drawn at once.
+function takeView(view, {own = false} = {}) {
+  const entries = freshEntries(view);
+  if (entries === null) { jumpTo(view); return; }
+  markSeen(view);
+  if (own && !anim.running) {
+    const before = state;
+    state = view;
+    render();
+    endSound(before, view);
+    for (const e of entries) {
+      // Not awaited: the board is already drawn.
+      if (e.kind === "roll") playRoll(e, before).then(() => badgesFor(e));
+      else { soundFor(e); badgesFor(e); }
+    }
+    return;
+  }
+  if (!entries.length && !anim.running) {
+    state = view;
+    render();
+    return;
+  }
+  anim.queue.push({view, entries});
+  pump();
+}
+
+async function pump() {
+  if (anim.running) return;
+  anim.running = true;
+  document.body.classList.add("playing");
+  try {
+    while (anim.queue.length) {
+      const {view, entries} = anim.queue.shift();
+      for (const group of groupEntries(entries)) {
+        if (anim.skip) break;
+        try {
+          await playEntry(group);
+        } catch (e) {
+          // A missing row or a board the entry does not fit: show the view.
+          break;
+        }
+      }
+      if (!state || view.version >= state.version) {
+        endSound(state, view);
+        state = view;
+      }
+      clearAnimLayer();
+      render();
+    }
+  } finally {
+    anim.running = false;
+    anim.skip = false;
+    document.body.classList.remove("playing");
+  }
+}
+
+// One seat's discards go to the engine a card at a time; they play as one.
+function groupEntries(entries) {
+  const out = [];
+  for (const e of entries) {
+    const prev = out[out.length - 1];
+    if (e.kind === "discard" && prev && prev.kind === "discard" && prev.actor === e.actor) {
+      prev.cards.push(e.card);
+      // What the cards changed together: each card's own, the later over the earlier.
+      for (const [seat, row] of Object.entries(e.after || {})) prev.after[seat] = {...prev.after[seat], ...row};
+      continue;
+    }
+    out.push(e.kind === "discard" ? {...e, cards: [e.card], after: {...e.after}} : e);
+  }
+  return out;
+}
+
+function finishAll() {
+  for (const a of [...anim.playing]) {
+    try { a.finish(); } catch (e) { /* already gone */ }
+  }
+}
+
+function track(animation) {
+  anim.playing.add(animation);
+  const done = animation.finished.catch(() => {}).then(() => anim.playing.delete(animation));
+  if (anim.skip) animation.finish();
+  return done;
+}
+
+function pause(ms) {
+  if (anim.skip || ms <= 0) return Promise.resolve();
+  // A pause is an animation of nothing, so a skip finishes it too.
+  const stub = document.body.animate([{}, {}], {duration: ms});
+  return track(stub);
+}
+
+// Whose turn an entry is part of: its actor, except a discard or a trade
+// round's answer, which another seat makes during someone else's turn.
+function turnOf(e) {
+  if (e.kind === "discard") return null;
+  if (e.kind === "round" && e.step !== "offer") return null;
+  return e.actor;
+}
+
+async function playEntry(e) {
+  const turn = turnOf(e);
+  if (turn !== null && turn !== state.seat) {
+    setSeatText(document.getElementById("phase"), turn, "'S", " TURN");
+  }
+  const caption = captionOf(e);
+  // The badges always tell the newest caption's action; a roll, which the
+  // dice tell, clears them.
+  if (caption) { clearBadges(); showCaption(caption); }
+  else if (e.kind === "roll") clearBadges();
+  const held = caption ? pause(PLAY_MS.read) : Promise.resolve();
+  switch (e.kind) {
+    case "roll": await playRoll(e, state); break;
+    case "build": await playBuild(e); break;
+    case "robber": await playRobber(e); break;
+    default: soundFor(e); break;
+  }
+  advance(e);
+  badgesFor(e, {trades: false});
+  await held;
+  // The exchanges cleared with it, one at a time, each named.
+  for (const trade of e.trades || []) {
+    clearBadges();
+    showCaption(tradeCaption(trade));
+    sound("trade");
+    advance(trade);
+    tradeBadges(trade);
+    await pause(PLAY_MS.read);
+  }
+  await pause(PLAY_MS.gap);
+}
+
+// Moves the position on screen on by one entry that has played, or by one
+// exchange cleared with it: the piece it built, the hex it left the robber
+// on, its roll on the roller's row, and its `after`, what it changed on each
+// seat's row and in each hand this reader is shown. The rows, the hand, the
+// pieces left to place and the board are drawn again from that; the phase
+// and what the seat may do wait for the view the entry came in.
+function advance(step) {
+  const after = step.after || {};
+  const next = {...state, players: state.players.map((p) => ({...p, ...(after[p.seat] || {})}))};
+  if (step.kind === "build" && step.piece === "road") {
+    next.edge_owner = state.edge_owner.slice();
+    next.edge_owner[step.at] = step.actor;
+  } else if (step.kind === "build") {
+    next.vertex_owner = state.vertex_owner.slice();
+    next.vertex_building = state.vertex_building.slice();
+    next.vertex_owner[step.at] = step.actor;
+    next.vertex_building[step.at] = step.piece === "city" ? 2 : 1;
+  } else if (step.kind === "robber") {
+    next.robber = step.hex;
+  } else if (step.kind === "buy") {
+    next.dev_cards_remaining = Math.max(0, (state.dev_cards_remaining ?? 0) - 1);
+  } else if (step.kind === "roll") {
+    next.last_roll = step.value;
+    const roller = next.players.find((p) => p.seat === step.actor);
+    if (roller) roller.last_roll = step.value;
+  }
+  // An action that moved cards to or from the bank says what it holds now.
+  if (step.bank) next.bank = step.bank;
+  state = next;
+  renderPlayers();
+  renderHand();
+  renderBoardDynamic();
+  renderPieceSupply();
+  renderDeck();
+  renderBank();
+}
+
+// --- What an entry says
+
+// Another seat as a caption names it, by its colour name drawn in its colour
+// ({seat}, capSeat); the seat whose turn it is goes unnamed, since the header
+// says whose turn it is.
+function who(seat) {
+  return seat === state.seat ? "you" : {seat};
+}
+
+// What an entry says, as {parts, icon, seat}: `parts` are words, or a card
+// drawn as its glyph ({card: resource}, {dev: kind}, or {card: null} for one
+// this reader is not told); `icon`, the chip's sprite glyph, names the kind
+// of action: the hammer building or buying, the star playing a development
+// card, the bank or a port's ship trading with them, the robber, a card
+// trading or discarding.
+function cardParts(counts) {
+  const out = [];
+  const tally = {};
+  for (const name of cardsOf(counts)) tally[name] = (tally[name] || 0) + 1;
+  for (const [name, n] of Object.entries(tally)) {
+    if (n > 1) out.push(String(n));
+    out.push({card: name});
+  }
+  return out.length ? out : ["nothing"];
+}
+
+function captionOf(e) {
+  const say = (parts, icon, seat = e.actor) => ({parts, icon, seat});
+  switch (e.kind) {
+    case "roll": return null;  // the dice say it
+    case "build": return say([`${e.setup ? "Placed" : "Built"} a ${e.piece}`], "hammer");
+    case "buy": return say(["Bought", {dev: null}], "hammer");
+    case "play":
+      if (e.card === "Monopoly") {
+        const total = Object.values(e.taken || {}).reduce((a, b) => a + b, 0);
+        return say(["Played", {dev: e.card}, "for", String(total), {card: e.resource}], "dev-card");
+      }
+      if (e.card === "Year Of Plenty") {
+        return say(["Played", {dev: e.card}, "for", ...(e.resources || []).map((r) => ({card: r}))], "dev-card");
+      }
+      return say(["Played", {dev: e.card}], "dev-card");
+    case "robber":
+      if (e.victim === null || e.victim === undefined) return say(["Moved the robber"], "robber");
+      if (!e.stole) return say(["Moved the robber:", who(e.victim), "had no cards"], "robber");
+      return say(["Stole", {card: e.card || null}, "from", who(e.victim)], "robber");
+    case "bank": {
+      // Four for one is the bank's rate; fewer is a port's.
+      const given = Object.values(e.gave || {}).reduce((a, b) => a + b, 0);
+      return say(["Traded", ...cardParts(e.gave), "for", ...cardParts(e.got)], given >= 4 ? "bank" : "ship");
+    }
+    case "discard": {
+      const known = e.cards.filter(Boolean);
+      const cards = known.length === e.cards.length
+        ? cardParts(Object.fromEntries(known.map((c) => [c, known.filter((k) => k === c).length])))
+        : [String(e.cards.length), {card: null}];
+      return say([e.actor === state.seat ? "You" : who(e.actor), "discarded", ...cards], "card");
+    }
+    case "round":
+      if (e.step !== "offer" || !e.bundle) return null;
+      return say(["Offered", ...cardParts(e.bundle.map((n) => Math.max(0, -n))), "for",
+        ...cardParts(e.bundle.map((n) => Math.max(0, n)))], "card");
+    default: return null;  // a `trade` entry's `trades` say it
+  }
+}
+
+function tradeCaption(t) {
+  // `t.a` is the seat whose turn it is.
+  return {parts: ["Traded", ...cardParts(t.gave), "to", who(t.b), "for", ...cardParts(t.got)], icon: "card", seat: t.a};
+}
+
+// A card in a caption: its glyph alone, a resource's in its terrain's colour
+// (lightened where the tile is too dark to read on the pill).
+const CAPTION_INK = {Wood: "#46ad55", Brick: "#e08a62", Sheep: "#b4e48a", Wheat: "#e8b13a", Ore: "#a9b5c6"};
+
+function capCard(part) {
+  const glyph = html("span", {class: "cap-glyph"});
+  if (part.dev !== undefined) {
+    glyph.title = part.dev || "Development card";
+    glyph.appendChild(iconSvg(part.dev ? DEV_CARD_ICONS[part.dev] : "dev-card", {fill: "#e8eaf0"}));
+  } else if (part.card) {
+    glyph.title = part.card;
+    glyph.appendChild(iconSvg(RESOURCE_ICONS[part.card], {fill: CAPTION_INK[part.card]}));
+  } else {
+    glyph.title = "A card";
+    glyph.appendChild(iconSvg("card", {fill: "#8b93a5"}));
+  }
+  return glyph;
+}
+
+// --- Where things are
+
+function animLayer() {
+  let layer = document.getElementById("anim-layer");
+  if (!layer) {
+    layer = el("g", {id: "anim-layer"});
+    // Under the robber and the click targets, over everything already built.
+    const robber = document.getElementById("robber-layer");
+    robber.parentNode.insertBefore(layer, robber);
+  }
+  return layer;
+}
+
+function clearAnimLayer() {
+  for (const id of ["anim-layer", "road-anim-layer"]) {
+    const layer = document.getElementById(id);
+    if (layer) layer.innerHTML = "";
+  }
+  document.getElementById("fly-layer").innerHTML = "";
+}
+
+function seatRow(seat) {
+  return document.querySelector(`#players .player-row[data-seat="${seat}"]`);
+}
+
+// A board point, in the page's own pixels.
+function onScreen(point) {
+  const ctm = document.getElementById("board-svg").getScreenCTM();
+  return ctm ? new DOMPoint(point.x, point.y).matrixTransform(ctm) : null;
+}
+
+function cardsOf(counts) {
+  const out = [];
+  if (Array.isArray(counts)) {
+    counts.forEach((n, r) => { for (let i = 0; i < n; i++) out.push(board.resources[r]); });
+  } else {
+    for (const [name, n] of Object.entries(counts || {})) for (let i = 0; i < n; i++) out.push(name);
+  }
+  return out;
+}
+
+// --- The captions over the board
+//
+// Additive: each action adds a pill at the bottom of the stack, the ones
+// before it dim and rise, and a fourth pushes the oldest out. Each pill goes
+// on its own a little after it came, so a quiet table clears itself.
+
+const CAPTIONS_SHOWN = 3;
+
+function showCaption({parts, icon, seat}) {
+  const stack = document.getElementById("captions");
+  const color = SEAT_COLORS[seat] || {fill: "#8b93a5", stroke: "#3a3f4c"};
+  const pill = html("div", {class: "caption arrive"});
+  pill.style.setProperty("--seat", color.fill);
+  const chip = html("span", {class: "cap-chip"});
+  chip.appendChild(["road", "settlement", "city"].includes(icon) ? pieceGlyph(icon, color) : iconSvg(icon));
+  pill.appendChild(chip);
+  const text = html("span", {class: "cap-text"});
+  for (const part of parts) {
+    if (typeof part === "string") {
+      const word = html("span", {});
+      word.textContent = part;
+      text.appendChild(word);
+    } else if (part.seat !== undefined) {
+      const name = html("span", {class: "cap-seat"});
+      name.textContent = colorName(part.seat);
+      name.style.color = SEAT_COLORS[part.seat].fill;
+      text.appendChild(name);
+    } else {
+      text.appendChild(capCard(part));
+    }
+  }
+  pill.appendChild(text);
+  for (const older of stack.children) older.classList.add("older");
+  stack.appendChild(pill);
+  while (stack.children.length > CAPTIONS_SHOWN) stack.firstElementChild.remove();
+  setTimeout(() => {
+    pill.classList.add("gone");
+    setTimeout(() => pill.remove(), 400);
+  }, PLAY_MS.caption);
+}
+
+function clearCaptions() {
+  document.getElementById("captions").innerHTML = "";
+}
+
+// --- What each seat's cards did, on its row
+//
+// `rowBadges` outlives the row itself: renderPlayers rebuilds every row on
+// each render and puts back any badge still showing.
+
+const rowBadges = new Map();  // seat -> {items: [{card, n}], until}
+
+// `items` is [{card, n}]: `card` a resource name, "dev" for a development
+// card, or null for a card this reader is not told; `n` signed.
+function showBadge(seat, items) {
+  items = items.filter((it) => it.n);
+  if (!items.length) return;
+  rowBadges.set(seat, {items, until: performance.now() + PLAY_MS.badge});
+  const row = document.querySelector(`#players .player-row[data-seat="${seat}"]`);
+  if (row) attachBadge(row, seat);
+  setTimeout(() => {
+    const entry = rowBadges.get(seat);
+    if (entry && entry.until <= performance.now()) {
+      rowBadges.delete(seat);
+      const shown = document.querySelector(`#players .player-row[data-seat="${seat}"] .row-badge`);
+      if (shown) shown.remove();
+    }
+  }, PLAY_MS.badge + 20);
+}
+
+function clearBadges() {
+  rowBadges.clear();
+  for (const node of document.querySelectorAll("#players .row-badge")) node.remove();
+}
+
+function attachBadge(row, seat) {
+  const entry = rowBadges.get(seat);
+  const old = row.querySelector(".row-badge");
+  if (old) old.remove();
+  if (!entry || entry.until <= performance.now()) return;
+  // Inside the name's cell, so it ends where the numbers begin.
+  const cell = row.querySelector(".player-name") || row;
+  const badge = html("div", {class: "row-badge"});
+  for (const {card, n} of entry.items) {
+    const item = html("span", {class: `badge-item ${n > 0 ? "gain" : "loss"}`});
+    item.appendChild(html("b", {}, `${n > 0 ? "+" : "−"}${Math.abs(n)}`));
+    if (card === "dev") {
+      const tile = html("div", {class: "card badge-card dev"});
+      tile.appendChild(iconSvg("dev-card"));
+      item.appendChild(tile);
+    } else if (card) {
+      item.appendChild(resourceCardTile(card, {extraClasses: ["badge-card"], title: card}));
+    } else {
+      item.appendChild(html("div", {class: "card badge-card unknown", title: "A card"}, "?"));
+    }
+    badge.appendChild(item);
+  }
+  cell.appendChild(badge);
+}
+
+// Signed counts by resource name (or null), per seat, to badges.
+function badgeTally() {
+  const out = new Map();
+  return {
+    add(seat, card, n) {
+      if (!out.has(seat)) out.set(seat, new Map());
+      const m = out.get(seat);
+      m.set(card, (m.get(card) || 0) + n);
+    },
+    show() {
+      for (const [seat, m] of out) showBadge(seat, [...m].map(([card, n]) => ({card, n})));
+    },
+  };
+}
+
+function tradeBadges(trade) {
+  const t = badgeTally();
+  for (const name of cardsOf(trade.gave)) { t.add(trade.a, name, -1); t.add(trade.b, name, 1); }
+  for (const name of cardsOf(trade.got)) { t.add(trade.b, name, -1); t.add(trade.a, name, 1); }
+  t.show();
+}
+
+// `trades` false leaves the exchanges cleared with the entry to the caller.
+function badgesFor(e, {trades = true} = {}) {
+  const t = badgeTally();
+  const gains = (g) => {
+    for (const [seat, counts] of Object.entries(g || {})) {
+      for (const name of cardsOf(counts)) t.add(Number(seat), name, 1);
+    }
+  };
+  switch (e.kind) {
+    case "roll": gains(e.gains); break;
+    case "build": gains(e.gains); break;
+    case "buy": t.add(e.actor, "dev", 1); break;
+    case "play":
+      if (e.card === "Monopoly") {
+        let total = 0;
+        for (const [seat, n] of Object.entries(e.taken || {})) { t.add(Number(seat), e.resource, -n); total += n; }
+        t.add(e.actor, e.resource, total);
+      } else if (e.card === "Year Of Plenty") {
+        for (const name of e.resources || []) t.add(e.actor, name, 1);
+      }
+      break;
+    case "robber":
+      if (e.stole) { t.add(e.victim, e.card || null, -1); t.add(e.actor, e.card || null, 1); }
+      break;
+    case "bank":
+      for (const name of cardsOf(e.gave)) t.add(e.actor, name, -1);
+      for (const name of cardsOf(e.got)) t.add(e.actor, name, 1);
+      break;
+    case "discard":
+      for (const card of e.cards) t.add(e.actor, card || null, -1);
+      break;
+    default: break;
+  }
+  t.show();
+  if (trades) for (const trade of e.trades || []) tradeBadges(trade);
+}
+
+// --- What moves on the board
+
+const DIE_PIPS = {
+  1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[26, 26], [50, 50], [74, 74]],
+  4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+  5: [[26, 26], [74, 26], [50, 50], [26, 74], [74, 74]],
+  6: [[28, 24], [72, 24], [28, 50], [72, 50], [28, 76], [72, 76]],
+};
+
+function drawDie(node, face) {
+  node.innerHTML = "";
+  const svg = el("svg", {viewBox: "0 0 100 100"});
+  for (const [cx, cy] of DIE_PIPS[face]) svg.appendChild(el("circle", {cx, cy, r: 9, fill: "#2b2118"}));
+  node.appendChild(svg);
+}
+
+// The two faces of a total: the feed says only the sum.
+function splitRoll(total) {
+  const low = Math.max(1, total - 6), high = Math.min(6, total - 1);
+  const first = low + Math.floor(Math.random() * (high - low + 1));
+  return [first, total - first];
+}
+
+// The dice, then what they produced and what each seat collected. `before`
+// is the position the roll was made in, for where the robber stood.
+async function playRoll(e, before) {
+  const tray = document.getElementById("dice-tray");
+  const dice = [...tray.querySelectorAll(".die")];
+  const faces = splitRoll(e.value);
+  tray.hidden = false;
+  sound("roll");
+  if (!REDUCED_MOTION && !anim.skip) {
+    const spins = dice.map((d, i) => d.animate([
+      {transform: "translateY(-30px) rotate(0deg)"},
+      {transform: "translateY(4px) rotate(400deg)", offset: 0.7},
+      {transform: "translateY(0) rotate(360deg)"},
+    ], {duration: PLAY_MS.dice, easing: "ease-out", delay: i * 40}));
+    const shuffle = setInterval(() => dice.forEach((d) => drawDie(d, 1 + Math.floor(Math.random() * 6))), 70);
+    // The faces shuffle only while the dice are in the air: they land at
+    // 70% of the spin (its keyframes), and settle on their own faces there.
+    const landed = Promise.all(spins.map(track));
+    await pause(PLAY_MS.dice * 0.7);
+    clearInterval(shuffle);
+    dice.forEach((d, i) => drawDie(d, faces[i]));
+    await landed;
+  }
+  dice.forEach((d, i) => drawDie(d, faces[i]));
+  await pause(PLAY_MS.settle);
+  // The dice leave the board for the roller's row while it shows what they
+  // produced, so they cover no number that lights.
+  const left = diceLeave(tray, e.actor);
+  if (e.value !== 7) await playProduction(e.value, before || state, e.gains);
+  await left;
+}
+
+// The dice cross from the middle of the board to `seat`'s row, shrinking
+// into its last-roll number. With reduced motion, or no row to go to, they
+// only go.
+function diceLeave(tray, seat) {
+  const from = tray.getBoundingClientRect();
+  const row = seatRow(seat);
+  const to = row ? (row.querySelector(".stat.roll") || row).getBoundingClientRect() : null;
+  tray.hidden = true;
+  if (REDUCED_MOTION || anim.skip || !to || !to.width || !from.width) return Promise.resolve();
+  const ghost = html("div", {class: "dice-ghost"});
+  for (const die of tray.children) ghost.appendChild(die.cloneNode(true));
+  document.getElementById("fly-layer").appendChild(ghost);
+  // A row with no roll yet takes them at its right end, where the number will be.
+  const x = row.querySelector(".stat.roll") ? to.left + to.width / 2 : to.right - 14;
+  const y = to.top + to.height / 2;
+  const at = (px, py, scale) => `translate(${px}px, ${py}px) scale(${scale})`;
+  return track(ghost.animate([
+    {transform: at(from.left, from.top, 1), opacity: 1},
+    {transform: at(x - from.width / 2, y - from.height / 2, 0.3), opacity: 0.2},
+  ], {duration: PLAY_MS.fly, easing: "ease-out", fill: "both"})).then(() => ghost.remove());
+}
+
+// The resource a terrain's hexes yield.
+const TERRAIN_RESOURCE = Object.fromEntries(Object.entries(RESOURCE_TERRAIN).map(([name, terrain]) => [terrain, name]));
+
+// What a roll produced, shown where it came from. Every hex with the rolled
+// number lights gold and its number jumps; each building on it that collects
+// rings in its seat's colour and sends its cards to that seat's row, one for
+// a settlement and two for a city. The hex under the robber, which produces
+// nothing, rings red at the robber instead. `position` is the view the roll
+// was made in. `gains` is the roll's own account of what each seat
+// collected, and no seat is shown more of a resource than it says: a
+// resource the bank ran short of sends nothing.
+function playProduction(value, position, gains) {
+  const layer = animLayer();
+  const owed = new Map();  // "seat/resource" -> cards not yet shown
+  for (const [seat, counts] of Object.entries(gains || {})) {
+    for (const name of cardsOf(counts)) owed.set(`${seat}/${name}`, (owed.get(`${seat}/${name}`) || 0) + 1);
+  }
+  const playing = [];
+  let produced = false, flights = 0;
+  for (const h of board.hexes) {
+    if (h.token !== value) continue;
+    if (h.id === position.robber) {
+      const spot = robberSpot(h);
+      playing.push(flare(layer, el("circle", {cx: spot.x, cy: spot.y, r: 40, fill: "url(#light-red)", class: "roll-light"}),
+        spot, [[0.5, 0], [1, 1], [1.1, 0]]));
+      playing.push(flare(layer, ringAt(spot, 19, "#ff4d4d", "#5a0b0b"), spot, [[1, 1], [2, 0]]));
+      continue;
+    }
+    produced = true;
+    playing.push(flare(layer, el("circle", {cx: h.x, cy: h.y, r: 50, fill: "url(#light-gold)", class: "roll-light"}),
+      h, [[0.5, 0], [1, 1], [1.08, 0]]));
+    playing.push(flare(layer, ringAt(h, 15, "#ffd75a", "#6b4a00"), h, [[1, 1], [2.6, 0]]));
+    const token = document.getElementById(`hex-token-${h.id}`);
+    if (token && !REDUCED_MOTION) {
+      playing.push(track(token.animate(scaledAbout(h, [[1, 1], [1.3, 1], [1, 1]]),
+        {duration: PLAY_MS.flash * 0.7, easing: "ease-out"})));
+    }
+    const resource = TERRAIN_RESOURCE[h.terrain];
+    for (const vid of h.vertex_ids) {
+      const seat = position.vertex_owner[vid];
+      const key = `${seat}/${resource}`;
+      const cards = Math.min(position.vertex_building[vid], owed.get(key) || 0);
+      if (seat < 0 || cards <= 0) continue;
+      owed.set(key, owed.get(key) - cards);
+      const v = vertexById[vid];
+      playing.push(flare(layer, ringAt(v, 13, SEAT_COLORS[seat].fill, SEAT_COLORS[seat].stroke), v, [[1, 1], [2.2, 0]]));
+      for (let i = 0; i < cards; i++) playing.push(flyCard(resource, h, seat, flights++));
+    }
+  }
+  if (produced) sound("produce");
+  return Promise.all(playing);
+}
+
+// A ring of radius `r` about a board point: `color` over a wider, darker
+// casing, so it shows on a tile of its own colour.
+function ringAt(at, r, color, casing) {
+  return el("g", {class: "roll-ring"},
+    el("circle", {cx: at.x, cy: at.y, r, stroke: casing, "stroke-width": 5, opacity: 0.55}),
+    el("circle", {cx: at.x, cy: at.y, r, stroke: color, "stroke-width": 3}));
+}
+
+// Keyframes that take a board node through `steps`, [scale, opacity] pairs
+// evenly spaced, scaled about the board point `at`.
+function scaledAbout(at, steps) {
+  return steps.map(([scale, opacity]) => ({
+    opacity,
+    transform: `translate(${at.x}px, ${at.y}px) scale(${scale}) translate(${-at.x}px, ${-at.y}px)`,
+  }));
+}
+
+// Adds `node` to `layer`, plays it through `steps` (scaledAbout) and removes
+// it. With reduced motion it keeps its size and only fades.
+function flare(layer, node, at, steps) {
+  layer.appendChild(node);
+  const frames = scaledAbout(at, REDUCED_MOTION ? steps.map(([, opacity]) => [1, opacity]) : steps);
+  return track(node.animate(frames, {duration: PLAY_MS.flash, easing: "ease-out", fill: "both"}))
+    .then(() => node.remove());
+}
+
+// One card from a hex to `seat`'s row, along an arc, the `order`-th of its
+// roll. Nothing crosses with reduced motion, or where the row is not on
+// screen: the row's badge says what the seat collected either way.
+function flyCard(name, hex, seat, order) {
+  const row = seatRow(seat);
+  const start = onScreen(hex);
+  if (REDUCED_MOTION || anim.skip || !row || !start) return Promise.resolve();
+  const to = (row.querySelector(".stat.cards") || row).getBoundingClientRect();
+  if (!to.width) return Promise.resolve();
+  const end = {x: to.left + to.width / 2, y: to.top + to.height / 2};
+  const rise = Math.min(70, Math.hypot(end.x - start.x, end.y - start.y) * 0.22);
+  const bend = {x: (start.x + end.x) / 2, y: Math.min(start.y, end.y) - rise};
+  const card = resourceCardTile(name, {extraClasses: ["fly-card"], title: ""});
+  document.getElementById("fly-layer").appendChild(card);
+  // The card's middle rides the curve: 11 and 15 are half its width and height.
+  const frames = [];
+  for (let i = 0; i <= 10; i++) {
+    const t = i / 10, u = 1 - t;
+    const x = u * u * start.x + 2 * u * t * bend.x + t * t * end.x;
+    const y = u * u * start.y + 2 * u * t * bend.y + t * t * end.y;
+    const scale = t < 0.2 ? 0.5 + 2.5 * t : 1 - 0.5 * Math.max(0, t - 0.6) / 0.4;
+    frames.push({transform: `translate(${x - 11}px, ${y - 15}px) scale(${scale})`, opacity: t === 0 ? 0 : t === 1 ? 0.3 : 1});
+  }
+  return track(card.animate(frames, {
+    duration: PLAY_MS.fly, delay: order * PLAY_MS.stagger, easing: "ease-in-out", fill: "both",
+  })).then(() => card.remove());
+}
+
+async function playBuild(e) {
+  const color = SEAT_COLORS[e.actor];
+  // A road drops in under the buildings, as it lies once it is built.
+  const layer = e.piece === "road" ? document.getElementById("road-anim-layer") : animLayer();
+  let node, cx, cy;
+  if (e.piece === "road") {
+    const edge = board.edges[e.at];
+    if (!edge) return;
+    const p0 = vertexById[edge.v0], p1 = vertexById[edge.v1];
+    const gapAt = roadEndGaps({id: edge.id, owner: e.actor});
+    const lines = roadLines({v0: p0, v1: p1, gap0: gapAt(edge, edge.v0), gap1: gapAt(edge, edge.v1)}, color);
+    node = el("g", {class: "anim-piece"},
+      el("g", {class: "road-casts"}, lines.cast), lines.casing, lines.fill, lines.shade, lines.light);
+    cx = (p0.x + p1.x) / 2; cy = (p0.y + p1.y) / 2;
+  } else {
+    const v = vertexById[e.at];
+    if (!v) return;
+    cx = v.x; cy = v.y;
+    node = buildingPiece(v, e.piece === "city", color);
+    node.setAttribute("class", "anim-piece");
+  }
+  const wrap = el("g", {});
+  wrap.appendChild(node);
+  layer.appendChild(wrap);
+  sound(e.piece);
+  const frames = REDUCED_MOTION
+    ? [{opacity: 0}, {opacity: 1}]
+    : [
+        {opacity: 0, transform: `translate(${cx}px, ${cy - 26}px) scale(1.5) translate(${-cx}px, ${-cy}px)`},
+        {opacity: 1, transform: `translate(${cx}px, ${cy}px) scale(0.95) translate(${-cx}px, ${-cy}px)`, offset: 0.75},
+        {opacity: 1, transform: "none"},
+      ];
+  await track(wrap.animate(frames, {duration: PLAY_MS.drop, easing: "ease-in", fill: "both"}));
+  // The board draws the piece itself from here (advance).
+  wrap.remove();
+}
+
+async function playRobber(e) {
+  const robber = document.querySelector("#robber-layer .robber");
+  const target = hexById[e.hex];
+  robberSound(e);
+  // The number it stood beside counts again from the moment it leaves.
+  markBlocked(null);
+  if (robber && target && !REDUCED_MOTION) {
+    const fromX = Number(robber.getAttribute("x")) + ROBBER_SIZE / 2;
+    const fromY = Number(robber.getAttribute("y")) + ROBBER_SIZE / 2;
+    const spot = robberSpot(target);
+    const dx = spot.x - fromX, dy = spot.y - fromY;
+    await track(robber.animate([
+      {transform: "translate(0, 0)"},
+      {transform: `translate(${dx / 2}px, ${dy / 2 - 30}px)`, offset: 0.5},
+      {transform: `translate(${dx}px, ${dy}px)`},
+    ], {duration: PLAY_MS.robber, easing: "ease-in-out", fill: "forwards"}));
+  } else {
+    await pause(PLAY_MS.robber);
+  }
+  if (target) markBlocked(target.id);
+}
+
+// A click on the board while a turn is playing finishes it at once, and does
+// nothing else: the controls under it belong to the board as it was. The
+// corner toggles (#table-controls) are this browser's settings, not the
+// board's, and work while it plays.
+document.getElementById("board-pane").addEventListener("click", (event) => {
+  if (!anim.running || event.target.closest("#table-controls")) return;
+  event.stopPropagation();
+  event.preventDefault();
+  anim.skip = true;
+  finishAll();
+}, true);
+
+// --- Sound
+//
+// Recorded clips (`static/sounds`, CC0), loaded once a browser turns sound
+// on and measured as they load (`clipLoudness`), so each kind of action plays
+// at its own level whatever the recording. A kind with several takes never
+// plays the same one twice running.
+
+// `level` is how loud a kind of action sounds, against the dice at 1: what
+// comes up most is quietest. A piece, the robber and a card's handling each
+// have one take, a single hit, so each always sounds the same and like
+// nothing else: the road a bright tick, the settlement a dull clack, the city
+// a clack between them in tone, pitched down to sound heavier.
+const SOUNDS = {
+  roll: {files: ["dice-throw-1", "dice-throw-2", "dice-throw-3"], level: 1},
+  produce: {files: ["card-slide-1", "card-slide-3", "card-slide-8"], level: 0.45},
+  road: {files: ["chip-lay-1"], level: 0.7},
+  settlement: {files: ["chip-lay-3"], level: 0.8},
+  city: {files: ["chips-stack-3"], level: 0.8, rate: 0.75},
+  robber: {files: ["die-throw-4"], level: 0.8, rate: 0.72},
+  steal: {files: ["card-shove-1"], level: 0.6},
+  buy: {files: ["cards-pack-take-out-2"], level: 0.5},
+  play: {files: ["cards-pack-open-2"], level: 0.5},
+  bank: {files: ["chips-collide-2", "chips-collide-4"], level: 0.5},
+  trade: {files: ["card-place-1", "card-place-2", "card-place-3", "card-place-4"], level: 0.5},
+  discard: {files: ["card-fan-1"], level: 0.5},
+  end: {files: ["dice-grab-1", "dice-grab-2"], level: 0.4},
+  win: {files: ["jingles_PIZZI10"], level: 0.9},
+  lose: {files: ["jingles_PIZZI07"], level: 0.9},
+};
+
+// The gain that plays a clip of loudness 1 (`clipLoudness`) as loud as the
+// dice should be.
+const SOUND_REFERENCE = 0.026;
+
+let audio = null;
+let soundsLoading = null;
+const soundBuffers = new Map();  // file -> AudioBuffer
+const soundLoudness = new Map(); // file -> clipLoudness
+const lastTake = new Map();      // kind -> the file played last
+
+function soundOn() {
+  try { return localStorage.getItem("hexset.sound") === "on"; } catch (e) { return false; }
+}
+
+// The context and every clip, fetched once. A context made before any click
+// starts suspended; the first click on the page resumes it.
+function readyAudio() {
+  if (!audio) {
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return false; }
+  }
+  if (!soundsLoading) {
+    const files = [...new Set(Object.values(SOUNDS).flatMap((k) => k.files))];
+    soundsLoading = Promise.all(files.map((name) => fetch(`/sounds/${name}.ogg`)
+      .then((r) => r.arrayBuffer())
+      .then((data) => audio.decodeAudioData(data))
+      .then((buffer) => {
+        soundBuffers.set(name, buffer);
+        soundLoudness.set(name, clipLoudness(buffer));
+      })
+      .catch(() => {})));
+  }
+  return true;
+}
+
+// How loud a clip sounds, so every one can be played at its kind's level
+// whatever its recording: the RMS of the part that sounds (10 ms windows
+// within 40 dB of its peak), weighted by how long that part lasts up to
+// 300 ms, since a short click sounds quieter than a held sound as strong.
+function clipLoudness(buffer) {
+  const x = buffer.getChannelData(0), w = Math.max(1, Math.floor(buffer.sampleRate / 100));
+  let peak = 0;
+  for (let i = 0; i < x.length; i++) peak = Math.max(peak, Math.abs(x[i]));
+  let sum = 0, n = 0, windows = 0;
+  for (let i = 0; i + w <= x.length; i += w) {
+    let e = 0;
+    for (let j = 0; j < w; j++) e += x[i + j] * x[i + j];
+    if (Math.sqrt(e / w) > peak * 0.01) { sum += e; n += w; windows++; }
+  }
+  const rms = Math.sqrt(sum / Math.max(n, 1));
+  return Math.max(rms * Math.sqrt(Math.min(windows * 10, 300) / 300), 1e-4);
+}
+
+function setSound(on) {
+  try { localStorage.setItem("hexset.sound", on ? "on" : "off"); } catch (e) { /* private mode */ }
+  if (on && readyAudio() && audio.state === "suspended") audio.resume();
+  renderTableControls();
+}
+
+function sound(kind) {
+  if (!soundOn() || anim.skip || !readyAudio()) return;
+  if (audio.state === "suspended") audio.resume();
+  const spec = SOUNDS[kind];
+  if (!spec) return;
+  const choices = spec.files.filter((f) => f !== lastTake.get(kind));
+  const name = choices[Math.floor(Math.random() * choices.length)] || spec.files[0];
+  const buffer = soundBuffers.get(name);
+  if (!buffer) return;  // still loading: this one goes unheard
+  lastTake.set(kind, name);
+  const src = audio.createBufferSource(), amp = audio.createGain();
+  src.buffer = buffer;
+  // Its kind's own pitch (`rate`) and level, varied only a touch.
+  src.playbackRate.value = (spec.rate || 1) * (0.98 + Math.random() * 0.04);
+  const gain = spec.level * SOUND_REFERENCE / (soundLoudness.get(name) || SOUND_REFERENCE);
+  amp.gain.value = Math.min(gain, 3) * (0.94 + Math.random() * 0.12);
+  src.connect(amp).connect(audio.destination);
+  src.start();
+}
+
+// The sound of an entry whose playback makes none of its own.
+function soundFor(e) {
+  if (e.kind === "build") sound(e.piece);
+  else if (e.kind === "robber") robberSound(e);
+  else if (e.kind === "buy") sound("buy");
+  else if (e.kind === "play") sound("play");
+  else if (e.kind === "bank") sound("bank");
+  else if (e.kind === "discard") sound("discard");
+  else if (e.kind === "end") sound("end");
+  else if ((e.trades || []).length) sound("trade");
+}
+
+// A game ending, as `next` comes in after `prev`: the winner's jingle to the
+// seat that won and to anyone watching, the other to every seat that lost.
+function endSound(prev, next) {
+  if (!prev || prev.game_over || !next || !next.game_over) return;
+  const watching = next.seat === null || next.seat === undefined;
+  sound(watching || next.winner === next.seat ? "win" : "lose");
+}
+
+// The robber lands, then a card is taken, if one was.
+function robberSound(e) {
+  sound("robber");
+  if (e.stole) setTimeout(() => sound("steal"), 260);
+}
+
+// A browser lets a page play sound only after a click on it.
+document.addEventListener("pointerdown", () => {
+  if (soundOn() && readyAudio() && audio.state === "suspended") audio.resume();
+}, {once: true});
+
+// --- The table's controls (top left of the board)
+
+function renderTableControls() {
+  // Sound is up at every table, a finished one too, so it can be set
+  // between games; the setting is this browser's (soundOn).
+  document.getElementById("sound-toggle").setAttribute("aria-pressed", String(soundOn()));
+}
+
+document.getElementById("sound-toggle").addEventListener("click", () => setSound(!soundOn()));
+document.getElementById("chance-toggle").addEventListener("click", () => setChance(!chanceOn()));
 
 // --- Replay -------------------------------------------------------------
 //
@@ -2175,10 +3977,10 @@ function sendAction(action) {
     const {ok, data} = await postJSON("/api/action", {action});
     // Only take the response when it succeeded: an error body carries no
     // game-state fields at all, and the render below would throw reading
-    // them off it.
-    if (ok) state = data;
+    // them off it. A move of our own plays back like anyone's.
     showNotice(ok ? "" : (data.error || "That was not legal."));
-    render();
+    if (ok) takeView(data, {own: true});
+    else render();
     if (ok) settle();
   });
 }
@@ -2228,6 +4030,10 @@ function showNotice(text) {
 
 function render() {
   if (!state || !board) return;
+  // Drawn without playing back (a rename, a seat change, the first read):
+  // what it holds has been shown.
+  if (!anim.running) markSeen(liveView());
+  renderTableControls();
   noteActivity(liveView());
   noteGame(liveView());
   // The highlight colour throughout the page (build targets, selection
@@ -2248,10 +4054,13 @@ function render() {
   renderStatus();
   renderReplay();
   renderPlayers();
+  renderChance();
+  refreshChance();
   renderHand();
   renderBoardDynamic();
   renderPieceSupply();
   renderBoardButtons();
+  renderBank();
   renderLog();
   syncModal();
 }
@@ -2268,14 +4077,13 @@ function renderStatus() {
   //
   // Nothing is given up by not describing the round. Round N is the moment
   // after the last seat ended their turn, so `to_move` is the first seat at
-  // every one of them: a title asking the round would read "PLAYER 1'S TURN"
+  // every one of them: a title asking the round would read "RED'S TURN"
   // the whole way through, whichever round you landed on. The replay bar is
   // what says where you are, and it is the one thing that should.
   const live = liveView();
   if (live.game_over) {
-    phaseEl.textContent = live.winner === null
-      ? "GAME OVER — NO WINNER"
-      : `PLAYER ${playerNumber(live.winner)} WINS`;
+    if (live.winner === null) phaseEl.textContent = "GAME OVER — NO WINNER";
+    else setSeatText(phaseEl, live.winner, "", " WINS");
     return;
   }
   // Nobody's decision while a seat is still empty (see api.Table.waiting_for)
@@ -2285,11 +4093,12 @@ function renderStatus() {
     phaseEl.textContent = "WAITING FOR SEATS";
     return;
   }
-  // A bot's trade offer is waiting on an answer (api.Table.view's
-  // trade_wait); its turn holds until every person asked has answered.
+  // A bot's trade round is under way (api.Table.view's trade_wait): its
+  // offer waits on a person's answer. Its turn holds until every seat it
+  // waits on has had its say.
   if (live.trade_wait && live.trade_wait.length) {
     phaseEl.textContent = live.trade_wait.includes(live.seat)
-      ? "ANSWER THE TRADE OFFER" : "WAITING FOR A TRADE ANSWER";
+      ? "ANSWER THE TRADE OFFER" : "WAITING ON A TRADE";
     return;
   }
   // Somebody else's decision to make, so the phase underneath it is beside
@@ -2300,12 +4109,12 @@ function renderStatus() {
   // anybody takes in turn: every seat over the limit discards at the same
   // moment, live.to_move names only the lowest-numbered of them (see
   // hexset.game.to_move/may_act), and this seat's own discard modal is up
-  // over the board right now. "PLAYER 1'S TURN" behind it would be telling
+  // over the board right now. "RED'S TURN" behind it would be telling
   // this player to wait for something they are not waiting for. A spectator
   // has no seat, so discard_quota[null] is undefined and this stays false.
   const owing = live.phase === "DISCARD" && live.discard_quota[live.seat] > 0;
   if (live.to_move !== live.seat && !owing) {
-    phaseEl.textContent = `PLAYER ${live.to_move + 1}'S TURN`;
+    setSeatText(phaseEl, live.to_move, "'S", " TURN");
     return;
   }
   if (live.awaiting_confirm === live.seat) {
@@ -2326,9 +4135,55 @@ function statChip(iconId, value, extraClass, title) {
   const wide = value !== undefined && String(value).length > 1 ? " wide" : "";
   const classes = `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
   const chip = html("span", {class: classes, title});
+  chip.dataset.icon = iconId;
   chip.appendChild(iconSvg(iconId, {cls: "stat-icon"}));
   if (value !== undefined) chip.appendChild(document.createTextNode(String(value)));
   return chip;
+}
+
+// What each icon in a player's row counts, in the row's own order: the
+// glossary a tap on any of them opens (openGlossary). `cls` tints the two
+// awards' icons the way a held one is tinted in the row.
+const GLOSSARY = [
+  {icon: "victory-point", says: () => `Victory points. ${state.winning_points} wins.`},
+  {icon: "card", says: () => "Resource cards held."},
+  {icon: "dev-card", says: () => "Development cards held."},
+  {icon: "road", cls: "road", says: () => "Roads connected. Colored when holding Longest Road (2 points)."},
+  {icon: "knight", cls: "army", says: () => "Knights played. Colored when holding Largest Army (2 points)."},
+  {icon: "dice", says: () => "Last roll."},
+];
+
+// The glossary for the stat `chip` tapped, that icon's line lit; the same
+// chip again closes it. Under the roster, or over it where there is no room
+// below, so every row stays in sight and another of its stats can be tapped
+// straight away. Outside the roster's own node, so its rebuilds on each poll
+// leave it alone; any click elsewhere, Escape, or a resize closes it.
+function openGlossary(chip) {
+  const box = document.getElementById("glossary");
+  if (!box.hidden && box.dataset.icon === chip.dataset.icon) { closeGlossary(); return; }
+  box.innerHTML = "";
+  box.dataset.icon = chip.dataset.icon;
+  for (const line of GLOSSARY) {
+    const lit = line.icon === chip.dataset.icon ? " lit" : "";
+    const row = html("div", {class: `glossary-line${line.cls ? ` ${line.cls}` : ""}${lit}`});
+    row.dataset.icon = line.icon;
+    row.appendChild(iconSvg(line.icon, {cls: "stat-icon"}));
+    row.appendChild(html("span", {}, line.says()));
+    box.appendChild(row);
+  }
+  box.appendChild(html("div", {class: "glossary-foot"}, "The highlighted row is whose turn it is."));
+  box.hidden = false;
+  const at = document.getElementById("players").getBoundingClientRect();
+  const size = box.getBoundingClientRect();
+  const left = Math.min(Math.max(8, at.right - size.width), window.innerWidth - size.width - 8);
+  const below = at.bottom + 6;
+  const top = below + size.height <= window.innerHeight - 8 ? below : Math.max(8, at.top - size.height - 6);
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+}
+
+function closeGlossary() {
+  document.getElementById("glossary").hidden = true;
 }
 
 // A hand column's own header: the same card/star glyph its cards use, next
@@ -2340,6 +4195,90 @@ function handColHeader(iconId, text) {
   header.appendChild(document.createTextNode(text));
   return header;
 }
+
+// The seat's chance of winning as the table's model rates it (`GET
+// /api/chance`): read from this seat's own side, so it rests on nothing the
+// seat cannot see. Shown wherever the page holds a seat: live, asked once
+// per table version; at a finished game, the read at its last position still
+// in play; at a pinned round, the read the replay view carries (`chance`) for
+// that round. A spectator sees none. A table that answered with no model
+// (`rater` null) is not asked again until its bots change. The corner toggle
+// (#chance-toggle) hides it for this browser; hidden, a table is asked once,
+// to know there is a model to show, and not again until its bots change.
+let chanceRead = null;      // the last answer: {key, code, version, rater, chance, bots}
+let chanceAsking = null;    // the `code/version` asked and not yet answered
+
+function chanceWanted() {
+  const view = liveView();
+  return Boolean(view) && view.seat !== null && view.seat !== undefined;
+}
+
+// The read to show: the pinned round's own, or the live table's last answer.
+function currentChance() {
+  if (replaying()) return state.chance ? {rater: state.chance.rater, chance: state.chance.chance} : null;
+  return chanceRead && chanceRead.code === tableCode ? chanceRead : null;
+}
+
+function chanceOn() {
+  try { return localStorage.getItem("hexset.chance") !== "off"; } catch (e) { return true; }
+}
+
+function setChance(on) {
+  try { localStorage.setItem("hexset.chance", on ? "on" : "off"); } catch (e) { /* private mode */ }
+  renderChance();
+  refreshChance();
+}
+
+function refreshChance() {
+  if (!chanceWanted() || replaying()) return;
+  const key = `${tableCode}/${state.version}`;
+  if (chanceAsking === key || (chanceRead && chanceRead.key === key)) return;
+  const bots = state.players.map((p) => p.bot || "").join("|");
+  const known = chanceRead && chanceRead.code === tableCode && chanceRead.bots === bots;
+  if (known && (chanceRead.rater === null || !chanceOn())) return;
+  chanceAsking = key;
+  getJSON("/api/chance").then((got) => {
+    if (chanceAsking === key) chanceAsking = null;
+    if (!got || got.error || got.version === undefined) return;
+    // An answer overtaken by a later one is dropped.
+    if (chanceRead && chanceRead.code === tableCode && chanceRead.version > got.version) return;
+    chanceRead = {key, code: tableCode, version: got.version, rater: got.rater, chance: got.chance, bots};
+    renderChance();
+  }).catch(() => { if (chanceAsking === key) chanceAsking = null; });
+}
+
+function renderChance() {
+  const el = document.getElementById("chance");
+  const toggle = document.getElementById("chance-toggle");
+  const read = currentChance();
+  const on = chanceOn();
+  // The toggle is up wherever there is a chance to show or hide.
+  toggle.hidden = !(chanceWanted() && read && read.rater !== null);
+  document.getElementById("table-controls").classList.toggle("with-chance", !toggle.hidden);
+  toggle.setAttribute("aria-pressed", String(on));
+  toggle.title = on ? "Win chance shown. Click to hide." : "Win chance hidden. Click to show.";
+  const shown = on && chanceWanted() && read && typeof read.chance === "number";
+  el.classList.toggle("held", chanceWanted());
+  el.classList.toggle("show", Boolean(shown));
+  if (!shown) { el.classList.remove("open"); return; }
+  el.querySelector(".chance-pct").textContent = `${Math.round(read.chance * 100)}%`;
+  const fill = el.querySelector(".chance-fill");
+  fill.style.width = `${(read.chance * 100).toFixed(1)}%`;
+  fill.style.background = SEAT_COLORS[liveView().seat].fill;
+  el.querySelector(".chance-note").textContent =
+    `${read.rater}'s estimate of your chance of winning, read from your view.`;
+}
+
+// A click or a tap opens the note; one anywhere else, or on the line again,
+// closes it.
+document.getElementById("chance").addEventListener("click", (e) => {
+  const el = e.currentTarget;
+  if (el.classList.contains("show")) el.classList.toggle("open");
+});
+document.addEventListener("click", (e) => {
+  const el = document.getElementById("chance");
+  if (!el.contains(e.target)) el.classList.remove("open");
+});
 
 function renderPlayers() {
   const container = document.getElementById("players");
@@ -2355,8 +4294,8 @@ function renderPlayers() {
     // the table can still change its mind (reopen it, seat a bot). Once play
     // starts the seats are fixed -- closing and reopening are refused
     // server-side -- and the row goes, since there is nobody in it and never
-    // will be; the seats left renumber (playerNumber) so the table reads
-    // Player 1, 2, 3 and the log's numbering never shifts mid-game. The seats
+    // will be; the seats left keep their colour names (colorName), which no
+    // closed seat changes. The seats
     // a fixed-seat deal (duel rules) retired have nothing to change their
     // mind about, so they never show at all.
     if (state.started && (state.locked || []).includes(p.seat)) continue;
@@ -2365,7 +4304,7 @@ function renderPlayers() {
     // Whose decision it is — and pinned to a past round, nobody's. Every
     // round's snapshot is the moment after the last seat ended their turn,
     // so `to_move` is the first seat at all of them and this would sit on
-    // Player 1 the whole way through, saying nothing except where the cut
+    // Red the whole way through, saying nothing except where the cut
     // falls.
     //
     // Left off rather than pointed at the live turn (`liveView`, the way the
@@ -2375,6 +4314,8 @@ function renderPlayers() {
     // read as though those were their cards.
     const onMove = !replaying() && state.to_move === p.seat;
     const row = html("div", {class: `player-row${onMove ? " active" : ""}`});
+    row.dataset.seat = String(p.seat);
+    if (rowBadges.has(p.seat)) queueMicrotask(() => attachBadge(row, p.seat));
     const swatch = html("div", {class: "swatch"});
     swatch.style.background = color.fill;
     swatch.style.borderColor = color.stroke;
@@ -2436,7 +4377,7 @@ function renderPlayers() {
       // Somebody else who opened this link. Their seat is theirs; there is
       // nothing here to change about it.
       nameEl.classList.add("player-name-plain");
-      nameEl.textContent = state.seats[p.seat].name || `Player ${playerNumber(p.seat)}`;
+      nameEl.textContent = state.seats[p.seat].name || colorName(p.seat);
     } else {
       // The picker *is* the player line, and it is the only place a table
       // says who else is playing: an empty seat starts blank and choosing a
@@ -2445,33 +4386,25 @@ function renderPlayers() {
       // step. An empty seat holds the whole table (see renderStatus) until
       // somebody picks a bot for it, opens the link and takes it, or picks
       // "closed" to close it outright -- nothing here ever resolves itself.
+      // Its name opens the bot cards (renderPickBotMode), where a bot is
+      // seated or swapped, and an open seat left open or closed. A button, blurred on click: a focused control inside the
+      // roster would hold off every re-render (the guard at the top).
       const closed = (state.locked || []).includes(p.seat);
-      const select = html("select", {});
-      // Until the first move a bot can be taken back off its seat, leaving it
-      // empty or closed (api.Tables.open_seat/close_seat); after, only swapped.
-      if (!p.bot || !state.started) {
-        select.appendChild(html("option", {value: ""}, "(empty)"));
-        select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
-      }
-      // The entries this table's game type offers (a model file's is its
-      // name and version), by name, not in the order /api/models happens to
-      // return them: the list is long enough that finding one by eye is the
-      // whole job. "(empty)" and "(closed)" stay pinned above it — they are
-      // what the seat *is*, not something that could be seated in it. A bot
-      // no longer offered (a resumed table) still shows as itself.
-      const names = Object.keys(modelsByType[state.game_type] || {});
-      if (p.bot && !names.includes(p.bot)) names.push(p.bot);
-      names.sort((a, b) => a.localeCompare(b));
-      for (const name of names) select.appendChild(html("option", {value: name}, name));
-      select.value = p.bot || (closed ? CLOSE_SEAT : "");
-      select.classList.toggle("unset", !p.bot);
-      select.addEventListener("change", () => {
-        select.blur();
-        if (select.value === CLOSE_SEAT) closeSeat(p.seat);
-        else if (select.value === "") reopenSeat(p.seat);
-        else swapBot(p.seat, select.value);
+      const button = html("button", {
+        type: "button", class: `bot-pick${p.bot ? "" : " unset"}`, "data-seat": String(p.seat),
+        title: p.bot ? "Change this bot" : "Seat a bot",
       });
-      nameEl.appendChild(select);
+      const label = html("span", {class: "bot-pick-name"});
+      label.textContent = p.bot ? seatLabel(p.seat) : (closed ? "(closed)" : "(empty)");
+      // A pick not yet answered shows already, dimmed (chooseBot).
+      if (pendingSeat && pendingSeat.seat === p.seat) {
+        label.textContent = pendingSeat.label;
+        button.classList.add("pending");
+        button.classList.remove("unset");
+      }
+      button.appendChild(label);
+      button.addEventListener("click", () => { button.blur(); openModal("pick-bot", {seat: p.seat}); });
+      nameEl.appendChild(button);
     }
     row.appendChild(nameEl);
 
@@ -2484,7 +4417,7 @@ function renderPlayers() {
     // column tracks instead of each row sizing its own flex children.
     row.appendChild(statChip("victory-point", p.victory_points, "",
       `Victory points (${state.winning_points} to win)`));
-    row.appendChild(statChip("card", cards, "", "Resource cards"));
+    row.appendChild(statChip("card", cards, "cards", "Resource cards"));
     row.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
     // Route length and Knights played sit in every row, always — comparable
     // seat to seat, tinted only for whoever actually holds the title right
@@ -2675,9 +4608,10 @@ function renderPieceSupply() {
     city: board.piece_supply.city - citiesBuilt,
     road: board.piece_supply.road - roadsBuilt,
   };
+  const plural = {settlement: "Settlements", city: "Cities", road: "Roads"};
   for (const kind of ["settlement", "city", "road"]) {
     const tile = html("div", {
-      class: `supply-tile supply-${kind}`, title: `${kind}s left: ${remaining[kind]}`,
+      class: `supply-tile supply-${kind}`, title: `${plural[kind]}: ${remaining[kind]} left`,
     });
     tile.appendChild(pieceGlyph(kind, color));
     tile.appendChild(html("div", {class: "count"}, String(remaining[kind])));
@@ -2685,14 +4619,59 @@ function renderPieceSupply() {
   }
 }
 
-// One of the two lines a road is made of — the casing or the colour, which
-// differ only in stroke and width. Round caps on both, so the casing follows
-// the colour's own rounded ends instead of squaring them off.
-function roadLine(r, stroke, width) {
-  return el("line", {
-    x1: r.v0.x, y1: r.v0.y, x2: r.v1.x, y2: r.v1.y,
-    stroke, "stroke-width": width, "stroke-linecap": "round",
+// A road from vertex `r.v0` to `r.v1` in a seat's `color`, as its lines from
+// the bottom up: `cast`, its shadow; `casing`, the seat's near-black stroke,
+// 1 unit proud of the colour on each side as a building's outline is;
+// `fill`, the colour; and along the colour's two sides `light`, on the side
+// facing the light, and `shade`, on the other. Round caps throughout, so
+// the casing follows the colour's rounded ends. `r.gap0` and `r.gap1` end
+// the road that much short of `r.v0` and `r.v1` (roadEndGaps).
+function roadLines(r, color) {
+  const length = Math.hypot(r.v1.x - r.v0.x, r.v1.y - r.v0.y) || 1;
+  const ux = (r.v1.x - r.v0.x) / length, uy = (r.v1.y - r.v0.y) / length;
+  // Across the road, toward the light.
+  const lit = -uy * LIGHT.x + ux * LIGHT.y > 0 ? 1 : -1;
+  const nx = -uy * lit, ny = ux * lit;
+  const gap0 = r.gap0 || 0, gap1 = r.gap1 || 0;
+  // The road moved by (ox, oy) and cut `trim` short at each end.
+  const line = (ox, oy, trim, attrs) => el("line", {
+    x1: r.v0.x + ox + ux * (trim + gap0), y1: r.v0.y + oy + uy * (trim + gap0),
+    x2: r.v1.x + ox - ux * (trim + gap1), y2: r.v1.y + oy - uy * (trim + gap1),
+    "stroke-linecap": "round", ...attrs,
   });
+  return {
+    cast: line(0, ROAD_CAST, 0, {stroke: "#000000", "stroke-width": 8}),
+    casing: line(0, 0, 0, {stroke: color.stroke, "stroke-width": 8}),
+    fill: line(0, 0, 0, {stroke: color.fill, "stroke-width": 6}),
+    light: line(nx * 1.7, ny * 1.7, 1.5, {class: "road-light"}),
+    shade: line(-nx * 1.7, -ny * 1.7, 1.5, {class: "road-shade"}),
+  };
+}
+
+// Where two seats' roads meet at a vertex nobody has built on, a road that
+// carries on through it (another of its own seat's roads ends there too) is
+// drawn to the vertex, and a road that ends there alone stops ROAD_END_GAP
+// short, so it does not lie across the road it meets. Returns (edge, vertex)
+// -> that end's gap. `building`, {id, owner}, counts a road being built that
+// the state does not hold yet (playBuild).
+function roadEndGaps(building = null) {
+  const ownerOf = (e) => (building && e.id === building.id ? building.owner : state.edge_owner[e.id]);
+  const owners = new Map();
+  for (const e of board.edges) {
+    const owner = ownerOf(e);
+    if (owner < 0) continue;
+    for (const v of [e.v0, e.v1]) {
+      if (!owners.has(v)) owners.set(v, []);
+      owners.get(v).push(owner);
+    }
+  }
+  return (e, v) => {
+    if (state.vertex_owner[v] >= 0) return 0;
+    const owner = ownerOf(e);
+    const here = owners.get(v) || [];
+    const mine = here.filter((o) => o === owner).length;
+    return mine === 1 && here.length > 1 ? ROAD_END_GAP : 0;
+  };
 }
 
 function renderBoardDynamic() {
@@ -2709,53 +4688,43 @@ function renderBoardDynamic() {
   clickEdgeLayer.innerHTML = "";
   hexTargetLayer.innerHTML = "";
 
-  // Roads, each one drawn twice: the seat's near-black stroke a little wider
-  // underneath, then the colour on top of it. A line has no outline of its
-  // own the way the buildings below have theirs, so a road was the one piece
-  // whose fill had to survive the tile unaided — which a light fill on a
-  // light tile doesn't. The casing is 1 unit proud on each side, the same
-  // margin a building's stroke-width 2 leaves around its own shape.
-  //
-  // Every casing goes down before any of the colour so that where two seats'
-  // roads meet at a vertex nobody has built on yet, the second road's casing
-  // lands under the first one's colour rather than across it.
+  // Roads (roadLines), a kind of line at a time: every shadow, then every
+  // casing, then every colour, so that where two seats' roads meet at a
+  // vertex nobody has built on yet, the second road's casing lands under the
+  // first one's colour and not across it.
   const roads = [];
+  const gapAt = roadEndGaps();
   for (const e of board.edges) {
     const owner = state.edge_owner[e.id];
     if (owner < 0) continue;
-    roads.push({v0: vertexById[e.v0], v1: vertexById[e.v1], color: SEAT_COLORS[owner]});
+    roads.push(roadLines({v0: vertexById[e.v0], v1: vertexById[e.v1],
+                          gap0: gapAt(e, e.v0), gap1: gapAt(e, e.v1)}, SEAT_COLORS[owner]));
   }
-  for (const r of roads) roadsLayer.appendChild(roadLine(r, r.color.stroke, 8));
-  for (const r of roads) roadsLayer.appendChild(roadLine(r, r.color.fill, 6));
+  const casts = el("g", {class: "road-casts"});
+  roadsLayer.appendChild(casts);
+  for (const r of roads) casts.appendChild(r.cast);
+  for (const part of ["casing", "fill", "shade", "light"]) {
+    for (const r of roads) roadsLayer.appendChild(r[part]);
+  }
 
   // Settlements & cities
   for (const v of board.vertices) {
     const owner = state.vertex_owner[v.id];
     if (owner < 0) continue;
     const building = state.vertex_building[v.id]; // 1 settlement, 2 city
-    const color = SEAT_COLORS[owner];
-    if (building === 2) {
-      // 50% larger than the original 16x16 (8 -> 12 half-width).
-      buildingsLayer.appendChild(el("rect", {
-        x: v.x - 12, y: v.y - 12, width: 24, height: 24,
-        fill: color.fill, stroke: color.stroke, "stroke-width": 2, transform: `rotate(45 ${v.x} ${v.y})`,
-      }));
-    } else {
-      // 50% larger than the original r=8.
-      buildingsLayer.appendChild(el("circle", {
-        cx: v.x, cy: v.y, r: 12, fill: color.fill, stroke: color.stroke, "stroke-width": 2,
-      }));
-    }
+    buildingsLayer.appendChild(buildingPiece(v, building === 2, SEAT_COLORS[owner]));
   }
 
   // Robber
   const robberHex = hexById[state.robber];
   if (robberHex) {
+    const spot = robberSpot(robberHex);
     robberLayer.appendChild(el("use", {
       href: "#icon-robber", class: "robber",
-      x: robberHex.x - 21, y: robberHex.y - 25.5, width: 42, height: 51,
+      x: spot.x - ROBBER_SIZE / 2, y: spot.y - ROBBER_SIZE / 2, width: ROBBER_SIZE, height: ROBBER_SIZE,
     }));
   }
+  markBlocked(state.robber);
 
   if (state.to_move !== state.seat || state.game_over) return;
   const g = groupActions(state.legal_actions);
@@ -2791,13 +4760,20 @@ function renderBoardDynamic() {
   for (const [eid, actions] of Object.entries(g.edge)) {
     const e = board.edges[eid];
     const p0 = vertexById[e.v0], p1 = vertexById[e.v1];
-    const line = el("line", {x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, class: "clickable-edge"});
-    line.addEventListener("click", () => sendAction(actions[0]));
-    clickEdgeLayer.appendChild(line);
+    // The bar stops short of both corners, so it stays clear of whatever
+    // stands on them and of the bars of the edges it meets there.
+    const [a, b] = EDGE_MARK.map((t) => ({x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t}));
+    const ends = {x1: a.x, y1: a.y, x2: b.x, y2: b.y};
+    const target = el("g", {class: "clickable-edge"},
+      el("line", {...ends, class: "edge-mark-rim"}),
+      el("line", {...ends, class: "edge-mark"}),
+      el("line", {...ends, class: "edge-hit"}));
+    target.addEventListener("click", () => sendAction(actions[0]));
+    clickEdgeLayer.appendChild(target);
   }
   // A city target reads as a diamond (the same rotated-square mark
-  // upgrading it will actually place, see renderBoardDynamic's buildings
-  // loop) rather than the settlement/setup circle, so the highlight itself
+  // upgrading it will actually place, see buildingPiece) rather than the
+  // settlement/setup circle, so the highlight itself
   // tells you which action a vertex is offering before you click it. Sized
   // in JS rather than through the coarse-pointer CSS bump .clickable-vertex
   // uses for circles: a CSS width/height override on a <rect> would grow it
@@ -2810,7 +4786,7 @@ function renderBoardDynamic() {
     if (actions[0].type === "BUILD_CITY") {
       // 22 to mirror the settlement circle's own target-vs-actual relationship
       // (r=11 highlight around a rendered r=12 piece) — the actual city is
-      // 24x24 (see renderBoardDynamic's buildings loop); this was stuck at
+      // 24x24 (see buildingPiece); this was stuck at
       // the pre-enlargement 16 until that piece grew and this didn't follow.
       const side = coarsePointer ? 26 : 22;
       target = el("rect", {
@@ -2861,11 +4837,57 @@ function renderBoardButtons() {
   showFab("undo-build", myTurn && Boolean(state.can_undo));
   showFab("roll-dice", offered("ROLL"));
   showFab("end-turn", offered("END_TURN"));
-  showFab("buy-dev-card", offered("BUY_DEV_CARD"));
+  const buy = offered("BUY_DEV_CARD");
+  showFab("buy-dev-card", buy);
+  const deck = document.getElementById("buy-dev-card");
+  deck.classList.add("dealt");
+  deck.disabled = !buy;
+  renderDeck();
 }
 
 function showFab(id, on) {
   document.getElementById(id).classList.toggle("show", on);
+}
+
+// The development cards left in the deck, on the deck's own corner card.
+// Public, so every reader sees it; drawn again after each feed entry that
+// plays (advance), so a card bought by another seat leaves the deck as it is
+// shown being bought.
+function renderDeck() {
+  const left = state.dev_cards_remaining ?? 0;
+  const deck = document.getElementById("buy-dev-card");
+  deck.querySelector(".deck-count").textContent = String(left);
+  const says = deck.disabled
+    ? `Development cards: ${left} left`
+    : `Buy development card (${left} left)`;
+  deck.title = says;
+  deck.setAttribute("aria-label", says);
+}
+
+// The bank's resource cards, one pile a resource along the board's top edge.
+// Public, so every reader sees it; the piles are made once and their counts
+// written on each render and after each feed entry that plays (advance).
+function renderBank() {
+  const bank = document.getElementById("bank");
+  if (!state.bank) return;
+  if (!bank.childElementCount) {
+    for (const name of Object.keys(RESOURCE_ICONS)) {
+      const pile = resourceCardTile(name, {extraClasses: ["bank-pile"]});
+      pile.dataset.resource = name;
+      const count = html("span", {class: "bank-count"});
+      count.style.color = TERRAIN_ICON_INK[RESOURCE_TERRAIN[name]];
+      pile.appendChild(count);
+      bank.appendChild(pile);
+    }
+  }
+  bank.classList.add("dealt");
+  for (const pile of bank.children) {
+    const name = pile.dataset.resource;
+    const left = state.bank[name] ?? 0;
+    pile.querySelector(".bank-count").textContent = String(left);
+    pile.classList.toggle("empty", left === 0);
+    pile.title = `Bank: ${left} ${name}`;
+  }
 }
 
 // The wire action of a given type, or null. Read twice for each corner
@@ -2891,7 +4913,7 @@ const MODAL_AUTO = new Set(["discard", "steal"]);
 // the game is actually waiting on: an offer has to be answered, and cards owed
 // to the bank after a seven have to be handed over. "steal" is here because
 // closing it only backs out to the hex list, not out of the move.
-const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal", "new-game"]);
+const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal", "new-game", "pick-bot"]);
 
 // One button size everywhere in the modal: a 40px square carrying a glyph
 // and nothing else. `label` is the full tooltip/screen-reader sentence — the
@@ -3117,8 +5139,14 @@ function loadComposer(signed) {
 //   "discard"        cards owed to the bank after a seven (syncModal)
 //   "steal"          a robber hex with more than one victim (syncModal)
 //   "new-game"       the header's New game button (newGame)
-function openModal(mode, {give = null} = {}) {
+function openModal(mode, {give = null, seat = null} = {}) {
   modalMode = mode;
+  if (mode === "pick-bot") {
+    const player = state.players.find((p) => p.seat === seat) || {};
+    const closed = (state.locked || []).includes(seat);
+    const current = player.bot || (closed ? CLOSE_SEAT : "");
+    pickBot = {seat, model: current, was: current};
+  }
   if (mode === "new-game") {
     // Every open starts from what the server deals when told nothing.
     newGameBoard = "spiral";
@@ -3133,6 +5161,8 @@ function openModal(mode, {give = null} = {}) {
     monopolyPick = null;
   }
   document.getElementById("modal").classList.add("show");
+  // The bot picker has its own, wider layout (#modal-inner.pick).
+  document.getElementById("modal-inner").classList.toggle("pick", mode === "pick-bot");
   // See the CSS comment on #undo-build.reach-modal: every other mode leaves
   // the corner button behind the backdrop like any other board control, only
   // "steal" needs it reaching through.
@@ -3151,6 +5181,7 @@ function closeModal() {
   if (modalMode === "steal") pendingRobberHex = null;
   modalMode = null;
   document.getElementById("modal").classList.remove("show");
+  document.getElementById("modal-inner").classList.remove("pick");
   document.getElementById("undo-build").classList.remove("reach-modal");
 }
 
@@ -3205,6 +5236,7 @@ function renderModal() {
     else if (modalMode === "steal") renderStealMode(g, title, body);
     else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
     else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
+    else if (modalMode === "pick-bot") renderPickBotMode(title, body);
     else renderTradeMode(title, body, actions);
   }
 
@@ -3289,6 +5321,77 @@ function renderNewGameMode(title, body, actions) {
   deal.id = "deal-new-game";
   deal.addEventListener("click", dealNewGame);
   actions.appendChild(deal);
+}
+
+// One seat's bot: a card per bot this game type offers (its name, version and
+// description, `GET /api/models`), the one seated marked. Tapping a card
+// seats that bot; before the first move the foot can leave the seat open or
+// close it instead.
+function renderPickBotMode(title, body) {
+  const {seat, was} = pickBot;
+  title.textContent = `${colorName(seat)} seat`;
+  modalCloseGlyph("Cancel", closeModal);
+  const entries = modelsByType[state.game_type] || {};
+  const names = Object.keys(entries);
+  if (was && was !== CLOSE_SEAT && !names.includes(was)) names.push(was);
+  names.sort((a, b) => a.localeCompare(b));
+  const list = html("div", {class: "bot-cards"});
+  for (const name of names) {
+    const info = entries[name] || {};
+    const seated = was === name;
+    const card = html("button", {
+      type: "button", class: `bot-card${seated ? " seated" : ""}`, "data-model": name,
+      "aria-pressed": String(seated),
+    });
+    const head = html("div", {class: "bot-card-head"});
+    const nameNode = html("b", {class: "bot-card-name"});
+    nameNode.textContent = info.label || name;
+    head.appendChild(nameNode);
+    if (info.version) {
+      const version = html("span", {class: "bot-card-version"});
+      version.textContent = info.version;
+      head.appendChild(version);
+    }
+    if (seated) head.appendChild(html("span", {class: "bot-card-seated"}, "Seated"));
+    card.appendChild(head);
+    const about = html("div", {class: `bot-card-about${info.description ? "" : " none"}`});
+    about.textContent = info.description || "No description.";
+    card.appendChild(about);
+    card.addEventListener("click", () => chooseBot(name));
+    list.appendChild(card);
+  }
+  body.appendChild(list);
+  if (!state.started && !(state.fixed_seats || []).includes(seat)) {
+    const foot = html("div", {class: "bot-pick-foot"});
+    for (const [value, text] of [["", "Leave open"], [CLOSE_SEAT, "Close seat"]]) {
+      const on = was === value;
+      const btn = html("button", {
+        type: "button", "data-choice": "seat", "data-value": value, "aria-pressed": String(on),
+        class: on ? "chosen" : "",
+      }, text);
+      btn.addEventListener("click", () => chooseBot(value));
+      foot.appendChild(btn);
+    }
+    body.appendChild(foot);
+  }
+}
+
+// The pick shows on its row at once, dimmed, while the server seats it: the
+// first seat of a model can wait on it loading. A refusal puts the row back.
+async function chooseBot(model) {
+  const {seat, was} = pickBot;
+  closeModal();
+  if (model === was) return;
+  pendingSeat = {seat, label: model === CLOSE_SEAT ? "(closed)" : model ? botLabel(model) : "(empty)"};
+  render();
+  try {
+    if (model === CLOSE_SEAT) await closeSeat(seat);
+    else if (model === "") await reopenSeat(seat);
+    else await swapBot(seat, model);
+  } finally {
+    pendingSeat = null;
+    render();
+  }
 }
 
 // A caption over one button per option, the chosen one pressed. `key` names
@@ -3769,26 +5872,158 @@ function drawLog(id, entries) {
   const logEl = document.getElementById(id);
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
   logEl.innerHTML = "";
+  let shown = null;
   for (const entry of entries) {
-    // "round\ttext" from the server — split once so the number gets its own
-    // fixed-width column (.log-turn) and every line's text lines up
-    // regardless of digit count.
+    // "round\ttext" from the server: the round heads its own lines.
     const tab = entry.indexOf("\t");
-    const row = html("div", {class: "log-line"});
-    row.appendChild(html("span", {class: "log-turn"}, tab === -1 ? "" : entry.slice(0, tab)));
-    row.appendChild(html("span", {}, tab === -1 ? entry : entry.slice(tab + 1)));
-    logEl.appendChild(row);
+    const round = tab === -1 ? null : entry.slice(0, tab);
+    const text = tab === -1 ? entry : entry.slice(tab + 1);
+    if (round !== null && round !== shown) {
+      logEl.appendChild(html("div", {class: "log-round"}, `ROUND ${Number(round)}`));
+      shown = round;
+    }
+    logEl.appendChild(logLine(text));
   }
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// What the server's log line says, read back into parts: a seat ("Red
+// (Ada)", `_who`), the hex the robber went to ("8 Wood"), a roll, a count of
+// a resource ("2 Brick"), or a resource on its own. The server writes the
+// log as plain words for every client; only this page dresses it.
+const LOG_RESOURCES = "Wood|Brick|Sheep|Wheat|Ore";
+const LOG_PART = new RegExp(
+  "(?<seat>(?<color>Red|Green|Purple|Blue|Seat \\d+) \\((?<label>[^()]*)\\))" +
+  `|(?<=robber to )(?<hex>\\d+) (?<hexres>${LOG_RESOURCES})\\b` +
+  "|(?<=rolled )(?<roll>\\d+)(?=\\.)" +
+  `|\\b(?<count>\\d+) (?<res>${LOG_RESOURCES})\\b` +
+  `|\\b(?<bare>${LOG_RESOURCES})\\b`, "g");
+
+function seatOfColor(word) {
+  const at = SEAT_COLOR_NAMES.indexOf(word);
+  if (at >= 0) return at;
+  const n = /^Seat (\d+)$/.exec(word);
+  return n ? Number(n[1]) - 1 : null;
+}
+
+// The kind of action a line tells, as the icon its chip wears.
+function logIcon(text) {
+  if (/ wins with /.test(text)) return "victory-point";
+  if (/ rolled \d/.test(text)) return "dice";
+  if (/ moved the robber /.test(text)) return "robber";
+  const bank = / traded (\d+) \w+ for (\d+) \w+ with the bank\./.exec(text);
+  if (bank) return Number(bank[1]) >= 4 * Number(bank[2]) ? "bank" : "ship";
+  const played = / played (?:a )?(Knight|Road Building|Monopoly|Year of Plenty)/.exec(text);
+  if (played) return DEV_CARD_ICONS[played[1] === "Year of Plenty" ? "Year Of Plenty" : played[1]];
+  if (/ (placed|built|bought) /.test(text)) return "hammer";
+  if (/ (offers|counters|accepts|declines|traded|discarded) |^Everyone declines/.test(text)) return "card";
+  return null;
+}
+
+function logGlyph(resource) {
+  const glyph = html("span", {class: "log-glyph", title: resource});
+  glyph.appendChild(iconSvg(RESOURCE_ICONS[resource], {fill: CAPTION_INK[resource]}));
+  return glyph;
+}
+
+// One sentence of a log line as page nodes: each seat by what it is called
+// alone ("Rehex", not "Red (Rehex)") in its colour, cards as glyphs,
+// a roll or the robber's hex as a number token (6 and 8 red, a seven dark).
+// `seats` collects the seats it names, in order.
+function logWords(text, seats) {
+  const nodes = [];
+  let at = 0, lastWasCard = false;
+  const words = (chunk) => {
+    // Between two cards a comma becomes a space: the glyphs separate them.
+    if (lastWasCard && chunk === ", ") { nodes.push(document.createTextNode(" ")); return; }
+    if (chunk) { nodes.push(document.createTextNode(chunk)); lastWasCard = false; }
+  };
+  const token = (value) => {
+    const n = Number(value);
+    const pill = html("span", {class: `log-roll${n === 6 || n === 8 ? " hot" : ""}${n === 7 ? " seven" : ""}`});
+    pill.textContent = value;
+    return pill;
+  };
+  for (const m of text.matchAll(LOG_PART)) {
+    const g = m.groups;
+    words(text.slice(at, m.index));
+    at = m.index + m[0].length;
+    if (g.seat) {
+      const seat = seatOfColor(g.color);
+      seats.push(seat);
+      const name = html("span", {class: "log-seat"});
+      name.textContent = g.label;
+      if (seat !== null && seatInk(seat)) name.style.color = seatInk(seat);
+      nodes.push(name);
+      lastWasCard = false;
+    } else if (g.hex) {
+      nodes.push(token(g.hex), document.createTextNode(" "), logGlyph(g.hexres));
+      lastWasCard = false;
+    } else if (g.roll) {
+      nodes.push(token(g.roll));
+      lastWasCard = false;
+    } else if (g.res) {
+      nodes.push(document.createTextNode(`${g.count} `), logGlyph(g.res));
+      lastWasCard = true;
+    } else {
+      nodes.push(logGlyph(g.bare));
+      lastWasCard = true;
+    }
+  }
+  words(text.slice(at));
+  return nodes;
+}
+
+// Where a line's sentences part: before each that starts with a seat, or
+// with "Everyone" or "Traded with" (a trade round's closing words).
+const LOG_SENTENCE = /(?<=\.) (?=(?:Red|Green|Purple|Blue|Seat \d+) \(|Everyone |Traded with )/;
+
+// One line of the log: its chip, of what kind of action it tells, in the
+// colour of the seat it starts with; its first sentence, then each further
+// one (a roll's takings, a trade round's answers) on a line of its own.
+function logLine(text) {
+  const row = html("div", {class: "log-line"});
+  const seats = [];
+  const body = html("span", {class: "log-text"});
+  text.split(LOG_SENTENCE).forEach((sentence, i) => {
+    const nodes = logWords(sentence, seats);
+    if (i === 0) { body.append(...nodes); return; }
+    const sub = html("span", {class: "log-sub"});
+    sub.append(...nodes);
+    body.appendChild(sub);
+  });
+  const actor = seats.length ? seats[0] : null;
+  const icon = logIcon(text);
+  const chip = html("span", {class: "log-chip"});
+  if (actor !== null && seatInk(actor)) chip.style.setProperty("--seat", seatInk(actor));
+  if (icon) chip.appendChild(iconSvg(icon));
+  if (icon === "victory-point") row.classList.add("win");
+  row.appendChild(chip);
+  row.appendChild(body);
+  return row;
 }
 
 // --- Boot -----------------------------------------------------------------
 
 document.getElementById("new-game").addEventListener("click", newGame);
 // A server keeps rankings only when it is given a ranker; a 404 here is
-// the usual answer, and the menu then links nothing.
+// the usual answer, and the menu then has no Rankings tab.
 fetch("/api/rankings", {cache: "no-store"}).then((res) => {
-  document.getElementById("rankings-link").hidden = !res.ok;
+  document.querySelector('#menu-tabs [data-tab="rankings"]').hidden = !res.ok;
+}).catch(() => {});
+// The tabs the server adds for this client, after the page's own; an older
+// server answers 404 and adds none.
+fetch("/api/menu", {cache: "no-store"}).then((res) => (res.ok ? res.json() : {tabs: []})).then((menu) => {
+  const tabs = document.getElementById("menu-tabs");
+  (menu.tabs || []).forEach((tab, i) => {
+    const button = document.createElement("button");
+    button.dataset.tab = `server-${i}`;
+    button.dataset.src = tab.url;
+    button.setAttribute("aria-pressed", "false");
+    button.textContent = tab.label;
+    button.addEventListener("click", () => showMenuTab(button.dataset.tab));
+    tabs.appendChild(button);
+  });
 }).catch(() => {});
 // A corner button is only on screen when its action is on offer (see
 // renderBoardButtons), so re-reading it here always finds the same one that
@@ -3890,8 +6125,8 @@ function setLogOpen(open) {
   logSheetOpen = open;
   logSheet.classList.toggle("show", open);
   if (!open) return;
-  // At the front door there is no game yet: no code to hand out, no log.
-  document.getElementById("this-game").hidden = !state;
+  // At the front door there is no game yet: no code to hand out, no log
+  // (showMenuTab hides the code there).
   document.getElementById("this-game-code").textContent = tableCode;
   showMenuTab(menuTab);
 }
@@ -3903,6 +6138,28 @@ function showMenuTab(tab) {
   }
   document.getElementById("log-full").hidden = tab !== "log";
   document.getElementById("history").hidden = tab !== "history";
+  const src = document.querySelector(`#menu-tabs [data-tab="${tab}"]`)?.dataset.src;
+  // This game's code and link belong to the log and the history, not to a
+  // page of its own.
+  document.getElementById("this-game").hidden = !state || Boolean(src);
+  // A tab the server adds is a page of its own and takes the page's width
+  // (#log-sheet.page); the rankings fit the panel.
+  logSheet.classList.toggle("page", Boolean(src) && tab !== "rankings");
+  let frame = null;
+  for (const each of document.querySelectorAll("#menu-frames iframe")) {
+    each.hidden = each.dataset.tab !== tab;
+    if (!each.hidden) frame = each;
+  }
+  if (src) {
+    if (!frame) {
+      frame = document.createElement("iframe");
+      frame.dataset.tab = tab;
+      frame.title = document.querySelector(`#menu-tabs [data-tab="${tab}"]`).textContent;
+      frame.src = src;
+      document.getElementById("menu-frames").appendChild(frame);
+    }
+    return;
+  }
   if (tab === "history") { renderHistory(); return; }
   // Drawn on the way up rather than on every render — renderLog skips it
   // while it's closed.
@@ -3997,13 +6254,30 @@ for (const button of document.querySelectorAll("#menu-tabs button")) {
 }
 // Escape unwinds the innermost thing first: whichever modal mode can be
 // walked away from, then the menu.
+// Caught on the way down, so a tap on a stat opens the glossary and goes no
+// further: at a table being read, the row under it opens that seat's hand.
+document.getElementById("players").addEventListener("click", (e) => {
+  const chip = e.target.closest(".stat");
+  if (!chip) return;
+  e.stopPropagation();
+  openGlossary(chip);
+}, true);
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#glossary")) closeGlossary();
+});
+window.addEventListener("resize", closeGlossary);
+new ResizeObserver(() => fitCorners()).observe(document.getElementById("board-pane"));
+new ResizeObserver(() => fitPage()).observe(document.querySelector("body > header"));
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if (!document.getElementById("glossary").hidden) { closeGlossary(); return; }
   if (modalDismissible()) { closeModal(); return; }
   setLogOpen(false);
 });
 
 (async function init() {
+  // After the first paint, so the page shows before the water's pictures are worked out.
+  setTimeout(() => { try { paintWater(); } catch (e) { /* the gradient alone */ } }, 0);
   await loadModels();
   // A code in the URL is somebody handing us one specific table, and it is
   // the only thing we try: dealing a different game instead would move the
@@ -4029,6 +6303,8 @@ document.addEventListener("keydown", (e) => {
   await loadBoard();
   render();
   settle();
+  // Sound left on last time: the clips load now, to play from the first click.
+  if (soundOn()) readyAudio();
 })();
 </script>
 </body>

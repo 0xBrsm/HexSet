@@ -35,12 +35,10 @@ from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
 from . import gamelog, lockstep
 from ._source import source as _source
-from .actions import apply
 from .board.board import BOARD_MODES, Board, base_board
 from .deals import Deal, DealParams, Dealing, deal_seed
 from . import seeds as seed_policy
-from .economy import hand_size
-from .game import MAX_TURNS, Game, is_over, start, to_move
+from .game import MAX_TURNS, Game, start
 from .rules import STANDARD_GAME, GameType
 from .state import city_count, road_count, settlement_count
 from .trading import TradeParams, params_of
@@ -67,8 +65,9 @@ class Exhausted(RuntimeError):
     entrant took under `compete`, the policy id in each seat under
     `compete_batched`.
 
-    Not raised by `run_seated`, so a served table with a wedged bot is the
-    server's problem to survive rather than an exception through a live game.
+    Not raised by `hexset.gym.driver.play_seated`, so a served table with a
+    wedged bot is the server's problem to survive rather than an exception
+    through a live game.
     """
 
     def __init__(self, *, seed: int, index: int, seating: tuple[int, ...], turns: int):
@@ -146,8 +145,9 @@ _UNLISTED_PRESETS: set[str] = set()
 _PRESET_PROFILES: dict[str, dict[str, str]] = {}
 
 #: What a preset's profile may say: a client's profile less its name, which is
-#: the preset's own (`hexset.server.constants.PROFILE_FIELDS`).
-BOT_PROFILE_FIELDS = ("version", "owner", "url", "description")
+#: the preset's own (`hexset.server.constants.PROFILE_FIELDS`), and a `label`,
+#: the name the server shows for the bot in place of that name.
+BOT_PROFILE_FIELDS = ("version", "owner", "url", "description", "label")
 
 
 def register_preset(
@@ -458,12 +458,13 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     entrant's trader when it names one (`traded`), dealing as the entrant
     names (`hexset.deals.Dealing`). Raises `ValueError` for a
     kind no loaded runtime registers."""
-    bot = traded(_spawn(entrant, board, rng), entrant.trader, board, rng)
+    bot = _spawn(entrant, board, rng)
+    bot = traded(bot, entrant.trader, board, rng, hold=getattr(bot, "hold", None))
     return bot if entrant.deals is None else Dealing(bot, entrant.deals, deal_seed(rng))
 
 
 def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, veto: bool = False,
-           veto_picks: bool = False) -> Bot:
+           veto_picks: bool = False, hold: object = None) -> Bot:
     """`bot`'s moves over `trader`'s trading (`hexset.bots.TradesBy`), the
     trader named as a lineup names it; `bot` itself where `trader` is `None`.
     The trader is seeded off `rng`'s state without drawing from it, so it
@@ -474,13 +475,21 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
     every exchange the trader would make must also clear `bot`'s gain above
     `bot`'s own floor. `bot` must trade (`max_offers` not `0`), or it would
     veto everything. With `veto_picks` as well, the veto also chooses which
-    taker of the seat's own offer to deal with (`Vetoed` ``picks``)."""
+    taker of the seat's own offer to deal with (`Vetoed` ``picks``).
+
+    `hold` is the seat's own reading of the hidden cards
+    (`hexset.view.HoldReading`, a checkpoint's `hold_of`): a trader that
+    reads hidden cards and has no reading of its own (a `hold` attribute that
+    is `None`) takes it, so it deals its worlds and holding odds as the seat
+    does."""
     if trader is None:
         return bot
     from .bots import TradesBy, Vetoed
 
     seed = int.from_bytes(hashlib.sha256(repr(rng.getstate()).encode()).digest()[:8], "big")
     gate = _spawn(entrant_from_name(trader), board, random.Random(seed))
+    if hold is not None and hasattr(gate, "hold") and gate.hold is None:
+        gate.hold = hold
     if veto:
         if not params_of(bot).trades:
             raise ValueError(f"a seat that does not trade cannot veto its trader {trader!r}")
@@ -703,69 +712,6 @@ def seat_bots(
         game.embargoes = game.embargoes | frozenset(closed)
 
 
-def run_seated(
-    game: Game,
-    bots: Sequence[Bot],
-    action_cap: int = MAX_ACTIONS,
-    *,
-    tape: "Tape",
-    cleared: list[ClearedTrade] | None = None,
-) -> None:
-    """The engine's one loop: step `game` with `bots` until it is over or
-    `action_cap` is reached. `game` must already be seated (`seat_bots`).
-
-    Every step is filed on `tape` (`hexset.record.Tape`): there is no
-    unrecorded loop. `cleared` is a hook, not a branch: the steps taken are
-    identical with or without it.
-    """
-    from .bots.base import watch, watches
-
-    watching = [bot if watches(bot) else None for bot in bots]
-    actions = 0
-    while not is_over(game) and actions < action_cap:
-        seat = to_move(game)
-        bot = bots[seat]
-        before = len(game.trades)
-        shown_before = len(game.shown)
-        if cleared is not None:
-            # true state: a census of who was flush cannot be read off one
-            # seat's view of the table.
-            true_state = game.state(0, hidden=False)
-            hands = [hand_size(true_state, s) for s in range(game.num_players)]
-            turn, phase = game.turns, game.phase.name
-            step = actions
-        action = bot.choose(game)
-        # A bot modelling the other seats reads each move from its own seat
-        # (`hexset.bots.watch`), before it is applied.
-        for viewer, other in enumerate(watching):
-            watch(other, game, seat, action, viewer)
-        apply(game, action)
-        # An END_TURN clears `game.shown`, and shows nothing itself.
-        tape.step(action, game.trades[before:], game.shown[shown_before:], before=before)
-        if cleared is not None:
-            for trade in game.trades[before:]:
-                cleared.append(
-                    ClearedTrade(
-                        step=step,
-                        turn=turn,
-                        phase=phase,
-                        a=trade.a,
-                        b=trade.b,
-                        received=tuple(trade.received),
-                        hand_a=hands[trade.a],
-                        hand_b=hands[trade.b],
-                        gain_a=trade.gain_a,
-                        gain_b=trade.gain_b,
-                    )
-                )
-                # Several trades can clear inside one step; each later one
-                # sees the hands the earlier ones left behind.
-                moved = sum(trade.received)
-                hands[trade.a] += moved
-                hands[trade.b] -= moved
-        actions += 1
-
-
 @dataclass(frozen=True)
 class Outcome:
     """One played game, as `_play_dealt` writes it and hands it back.
@@ -849,30 +795,18 @@ def deal_seats(
 Job = tuple[tuple[Entrant, ...], int, int, int, "bool | tuple[int, ...]", str, GameType, int, str]
 
 
-def _play_dealt(
-    job: Job, journal: str | os.PathLike, *, header: dict | None = None,
-    extra: dict | None = None,
-) -> Outcome:
-    """Play game `index` of the job, write it to `journal` and return its
-    `Outcome`, record included.
-
-    The game's line (`_journal_entry`, plus `extra`) is written and fsynced
-    before this returns, by whichever process plays the game, so no game
-    played here goes unwritten: there is no way to play a dealt game without
-    naming its journal. `header`, when given, heads a journal that is still
-    empty (`gamelog.append_after_header`); a journal opened elsewhere
-    (`compete`, `compete_lanes`) already has its own. Module level and taking
-    only picklable arguments, so a pool can call it. Every random stream
-    derives from the seed and the game index, so a game plays identically
-    whichever worker draws it.
-    """
-    if not journal:
-        raise ValueError("a game is played into a journal: name one")
+def _deal_job(job: Job) -> tuple[Game, list[Bot], tuple[int, ...], int]:
+    """Game `index` of the job dealt and seated: the game, the bot in each
+    seat, each entrant's seat and the board index. Every random stream
+    derives from the seed and the board index, so a game plays identically
+    whichever worker or lane draws it."""
     if len(job) != 9 or not isinstance(job[5], str) or not isinstance(job[6], GameType):
         raise TypeError(
             "a game's job is (entrants, index, seed, action_cap, antithetic, trade_mode, "
             f"game_type, turn_cap, board_mode), not {tuple(type(part).__name__ for part in job)}"
         )
+    from .record import recording
+
     (entrants, index, seed, action_cap, antithetic, trade_mode,
      game_type, turn_cap, board_mode) = job
     seats = len(entrants)
@@ -897,19 +831,26 @@ def _play_dealt(
         lineup[seats_taken[e]] = spawn(
             entrant, board, random.Random(f"{seed}:{board_index}:{e}")
         )
-
-    game, record, cleared = _play_and_record(
-        lineup, board, seed, board_index, action_cap,
-        trade_mode=trade_mode, game_type=game_type, locked=retired,
-        turn_cap=turn_cap, first=first, no_trade=closed,
+    game = deal_game(
+        seed, board_index, seats, board=board,
+        chance=lambda rng: recording(rng, game_type.rules),
+        game_type=game_type, locked=retired, turn_cap=turn_cap, first=first,
     )
+    seat_bots(game, lineup, trade_mode, closed)
+    return game, lineup, tuple(seats_taken), board_index
+
+
+def _dealt_outcome(job: Job, game: Game, lineup: Sequence[Bot], seats_taken: Sequence[int], board_index: int,
+                   record: "Record", cleared: Sequence[ClearedTrade]) -> Outcome:
+    """A played game's `Outcome`, in entrant order."""
+    seats = len(seats_taken)
     searches = tuple(_search_log(lineup[seats_taken[e]]) for e in range(seats))
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score and the build census are
     # both read off the truth rather than off one seat's view of it.
     states = [game.state(seats_taken[e], hidden=False) for e in range(seats)]
     won = None if game.won_by is None else seats_taken.index(game.won_by)
-    outcome = Outcome(
+    return Outcome(
         winner=won,
         seat=None if won is None else game.won_by,
         turns=game.turns,
@@ -920,21 +861,55 @@ def _play_dealt(
             settlement_count(s, seats_taken[e]) for e, s in enumerate(states)
         ),
         cities=tuple(city_count(s, seats_taken[e]) for e, s in enumerate(states)),
-        cleared=cleared,
+        cleared=tuple(cleared),
         record=record,
-        index=index,
+        index=job[1],
         board_index=board_index,
         deals=tuple(game.deal_log),
         searches=searches if any(searches) else (),
     )
+
+
+def _write_outcome(journal, outcome: Outcome, turn_cap: int, header: dict | None, extra: dict | None) -> None:
     line = {**_journal_entry(outcome, exhausted=outcome.winner is None and outcome.turns >= turn_cap),
             **(extra or {})}
     if header is None:
         gamelog.append(journal, line)
     else:
         gamelog.append_after_header(journal, header, line)
-    return outcome
 
+
+def _play_dealt(
+    job: Job, journal: str | os.PathLike, *, header: dict | None = None,
+    extra: dict | None = None,
+) -> Outcome:
+    """Play game `index` of the job, write it to `journal` and return its
+    `Outcome`, record included.
+
+    The game is dealt and seated (`_deal_job`) and played on one lane of a
+    `hexset.gym.driver.Driver` (`play_seated`): each seat's bot is asked its
+    own `choose`, one game at a time. The game's line (`_journal_entry`, plus
+    `extra`) is written and fsynced before this returns, by whichever process
+    plays the game, so no game played here goes unwritten: there is no way to
+    play a dealt game without naming its journal. `header`, when given, heads
+    a journal that is still empty (`gamelog.append_after_header`); a journal
+    opened elsewhere (`compete`, `compete_lanes`) already has its own. Module
+    level and taking only picklable arguments, so a pool can call it.
+    """
+    if not journal:
+        raise ValueError("a game is played into a journal: name one")
+    from .gym.driver import play_seated
+    from .record import Tape
+
+    game, lineup, seats_taken, board_index = _deal_job(job)
+    seed, action_cap, turn_cap = job[2], job[3], job[7]
+    tape = Tape()
+    cleared: list[ClearedTrade] = []
+    play_seated(game, lineup, action_cap, tape=tape, cleared=cleared)
+    record = tape.sealed(game, seed=game_key(seed, board_index))
+    outcome = _dealt_outcome(job, game, lineup, seats_taken, board_index, record, cleared)
+    _write_outcome(journal, outcome, turn_cap, header, extra)
+    return outcome
 
 
 def _play_one(
@@ -973,15 +948,14 @@ def _play_one(
 _MOVERS = ("mover", "proposer", "bot", "first", "second")
 
 
-def search_logs(bot: object) -> list[list]:
-    """The decision logs of the searchers behind a seat (`decision_log`, as
-    `hexset.rollout.PairedRollouts` keeps one), found through the wrappers
-    the seat's bot is dealt in (`TradesBy`, `Vetoed`, `Dealing`, `Coalition`,
-    both halves of a `Handoff`), in that order. Each is the searcher's own
-    list, so a decision it makes later appears in it; a seat that keeps none
-    has no logs. Read without attribute delegation, since a wrapper passes
-    unknown names to its trader, not to the bot that moves."""
-    found: list[list] = []
+def searchers(bot: object) -> list:
+    """The searchers behind a seat: each object keeping a `decision_log` (as
+    `hexset.rollout.PairedRollouts` and `hexset.mcts.Search` do), found
+    through the wrappers the seat's bot is dealt in (`TradesBy`, `Vetoed`,
+    `Dealing`, `Coalition`, both halves of a `Handoff`), in that order. Read
+    without attribute delegation, since a wrapper passes unknown names to its
+    trader, not to the bot that moves."""
+    found: list = []
     queue, seen = [bot], set()
     while queue:
         current = queue.pop(0)
@@ -993,7 +967,7 @@ def search_logs(bot: object) -> list[list]:
         except AttributeError:
             log = None
         if log is not None:
-            found.append(log)
+            found.append(current)
             continue
         for name in _MOVERS:
             try:
@@ -1001,6 +975,13 @@ def search_logs(bot: object) -> list[list]:
             except AttributeError:
                 pass
     return found
+
+
+def search_logs(bot: object) -> list[list]:
+    """The decision logs of the searchers behind a seat (`searchers`), each
+    the searcher's own list, so a decision it makes later appears in it; a
+    seat that keeps none has no logs."""
+    return [object.__getattribute__(s, "decision_log") for s in searchers(bot)]
 
 
 def _search_log(bot: object) -> tuple[dict, ...]:
@@ -1098,37 +1079,6 @@ def _tournament(names: Sequence[str], outcomes: Sequence[Outcome], records: bool
         cleared=tuple(o.cleared for o in outcomes) if records else (),
         records=tuple(o.record for o in outcomes) if records else (),
     )
-
-
-def _play_and_record(
-    lineup: list[Bot],
-    board: Board,
-    seed: int,
-    index: int,
-    action_cap: int,
-    *,
-    trade_mode: str = "round",
-    game_type: GameType = STANDARD_GAME,
-    locked: Iterable[int] = (),
-    turn_cap: int = MAX_TURNS,
-    first: int = 0,
-    no_trade: Iterable[int] = (),
-) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
-    """The engine's loop (`run_seated`) over a game dealt with
-    `hexset.record.recording`, with its `Tape` and the `ClearedTrade` census
-    attached: the game, its record and its cleared trades."""
-    from .record import Tape, recording
-
-    game = deal_game(
-        seed, index, len(lineup), board=board,
-        chance=lambda rng: recording(rng, game_type.rules),
-        game_type=game_type, locked=locked, turn_cap=turn_cap, first=first,
-    )
-    seat_bots(game, lineup, trade_mode, no_trade)
-    tape = Tape()
-    cleared: list[ClearedTrade] = []
-    run_seated(game, lineup, action_cap, tape=tape, cleared=cleared)
-    return game, tape.sealed(game, seed=game_key(seed, index)), tuple(cleared)
 
 
 def compete(
@@ -1374,18 +1324,22 @@ def compete_lanes(
     (`hexset.lockstep`), and return every outcome by key.
 
     `jobs[key] = (entrants, seed, index)` is the game `compete(entrants,
-    seed=seed, ...)` plays as its `index`-th, played by the same code
-    (`_play_dealt`): the same board, dice and seating (`deal_seats`, with the
+    seed=seed, ...)` plays as its `index`-th, dealt by the same code
+    (`_deal_job`): the same board, dice and seating (`deal_seats`, with the
     antithetic `complement` as in `compete`), each seat built by `spawn`
     exactly as `compete` builds it, a served file with the trader, veto and
     deals its metadata names. So two jobs with one `seed` and `index` and
     lineups differing in one entrant are two arms of a paired comparison on
-    the same deal and seat. The one difference from `compete` is numerical:
-    a lane's forwards are run in batches shared with other games, never on a
-    single row (`hexset.lockstep`), so a decision that turns on the last bit
-    of a forward can go the other way. Where every network seated is batch
-    invariant (`hexset.lockstep.batch_invariant`) lane games are the same at
-    any `lanes`, `workers` and job order.
+    the same deal and seat. Each game is a lane of `hexset.lockstep.pool_lanes`
+    played to its end on a `hexset.gym.driver.Driver` (`play_seated`), so
+    every forward a bot makes, its move, trade gate, veto, robber deals and
+    search leaves, runs in one batch with the other lanes' waiting forwards.
+    The one difference from `compete` is numerical: a lane's forwards are run
+    in batches shared with other games, never on a single row, so a decision
+    that turns on the last bit of a forward can go the other way. Where every
+    network seated is batch invariant (`hexset.lockstep.batch_invariant`)
+    lane games are the same at any `lanes`, `workers` and job order, and the
+    same as the games of any other batching from two rows up.
 
     A key is a string, an integer or a tuple of them, and names its game in
     the journal: a header line with the run's settings, then one line per
@@ -2115,12 +2069,12 @@ __all__ = [
     "register_entrant_kind", "register_preset", "register_spec", "preset_profile", "BOT_PROFILE_FIELDS",
     "unregister_entrant_kind", "unregister_preset", "unregister_spec",
     "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT", "KIND_HINT",
-    "spawn", "traded", "search_logs",
+    "spawn", "traded", "search_logs", "searchers",
     # the game law
     "MAX_ACTIONS", "board_key", "game_key", "seat_key", "deal_board", "deal_game", "deal_seats",
     "half_turn", "seat_of",
     # playing
-    "seat_bots", "run_seated", "compete", "compete_lanes", "Exhausted",
+    "seat_bots", "compete", "compete_lanes", "Exhausted",
     # results
     "Tournament", "Standing", "Outcome", "ClearedTrade", "Estimate", "wilson",
     "mean_interval", "pooled", "read_journal", "journal_tournament", "read_lane_journal",

@@ -34,7 +34,8 @@ profile is served with it in place of anything the ranker wrote there, its
 without ranking again. A server bot has no client: a row whose `id` is
 `bot:<entry>` (`BOT_ID`) carries the profile its preset or its model file
 declares (`api.bot_profile`; on a board keyed by a game type, the file
-offered there), the version the server runs now. One that is no longer
+offered there), the version the server runs now, and is named by the
+profile's `label` where it has one. One that is no longer
 offered keeps what the ranker wrote.
 
 A ranker that raises, or returns something `check` refuses, is logged and
@@ -537,7 +538,10 @@ class Rankings:
 
             # A board keyed by a game type shows the bot that plays there.
             profile = bot_profile(row["id"][len(BOT_ID):], board if board in GAME_TYPES else None)
-            return {**row, **{field: profile.get(field) for field in PROFILE_FIELDS[1:]}} if profile else row
+            if not profile:
+                return row
+            return {**row, "name": profile.get("label") or row["name"],
+                    **{field: profile.get(field) for field in PROFILE_FIELDS[1:]}}
         profile = self._profiles.get(row["id"]) if row["id"] else None
         if profile is None:
             return row

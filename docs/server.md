@@ -23,7 +23,8 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--device` | `cpu` | ONNX Runtime device; another value asks for `<DEVICE>ExecutionProvider` with CPU fallback |
 | `--rollout-workers` | `0` | Worker processes a seated model that searches by paired rollouts plays its worlds out in: one pool per model file, shared by every seat of it, started at its first seat and replaced when the file changes. `0` plays them in the server's own process; other models ignore it |
 | `--games-dir` | `$HEXSET_UI_GAMES_DIR` | Journal directory; an empty string takes the default. Every game is journalled |
-| `--forwarded-header` | none | The header a reverse proxy puts the client's address in (`CF-Connecting-IP`, `X-Forwarded-For`: its last entry); without it, the socket peer |
+| `--search-logs` | off | Write every search decision a server bot makes beside the game's journal ([below](#saved-games)) |
+| `--forwarded-header` | none | The header a reverse proxy puts the client's address in (`CF-Connecting-IP`, `X-Forwarded-For`: its last entry); repeatable, the first a request carries an address in winning; without it, the socket peer |
 | `--games-per-period` | `100` | New games one client address may deal per rolling `--period-days`, through the page, the API and MCP alike, counted across restarts from the journals; `0` is no limit |
 | `--period-days` | `30` | The window `--games-per-period` counts over |
 | `--live-tables-per-ip` | `5` | Unfinished games one client address may have in play at once; `0` is no limit |
@@ -33,15 +34,24 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--rankings-min-games` | `10` | Ranking rows that played fewer games are not shown |
 | `--ranked-bot` | none | The opponent the [ranked queue](api.md#ranked-play) seats in a table's one seat no player fills, as the opponent picker names it; it never takes two seats at a table. Without one, a ranked table waits for players to fill it |
 | `--ranked-entrant` | none | A server bot, as the opponent picker names it, that plays [ranked games](api.md#ranked-play) itself: one at a time at each game type it is offered at, ranked as `bot:<name>`. Repeat for more; a name the server does not offer, or the `--ranked-bot`, stops it at start |
+| `--chance-model` | none | The model, as the opponent picker names it, that rates a seated player's [win chance](api.md#win-chance) at every unranked table of a game type it is offered at, whether or not it sits there. A name not offered as a model file stops the server at start. Without one, a table's own model seat rates it |
 | `--preset-modes` | none | `NAME=TYPE[,TYPE...]`: offer the preset `NAME` at these game types only, as a model file's `modes` declare its own; at other game types the picker leaves it out and seating it is a 400. Repeat for more presets; a name that is not a listed preset, or a game type the server does not deal, stops it at start. A preset not named is offered at every game type |
+| `--menu-tab` | none | `LABEL=URL`: a tab the game page's menu shows after its own, opening `URL` in a frame of the menu ([below](#menu-tabs)). Repeatable |
+| `--menu-tab-for` | none | A client network (CIDR) shown the `--menu-tab` tabs; repeatable. Naming none shows them to every client |
 | `--api-keys` | none | A JSON file of API keys, `{"<key>": {"name": "<holder>", "games_per_period": <n>}}`: a deal sent with one on `X-HexSet-Key` counts against that key's `games_per_period` (`0` is no limit) instead of its address's `--games-per-period`. Read at start |
+
+At start the server builds every bot it offers once, in the background, so
+the first seat of a model does not wait on its file loading (or, with
+`--rollout-workers`, its worker processes starting).
 
 Behind a reverse proxy or tunnel, name its header with `--forwarded-header`,
 or every request appears to come from the proxy: one address, sharing one set
 of limits, and the journal and request log learn nothing about who played.
 The header is believed from every request, so a client that reaches the
 server without passing through the proxy can name any address it likes.
-Serve only through the proxy if that matters.
+Serve only through the proxy if that matters. A server reached through two
+proxies, a tunnel and a local one, names both headers, the tunnel's first:
+the first header a request carries an address in is the one believed.
 
 Environment:
 
@@ -53,6 +63,7 @@ Environment:
 - `HEXSET_UI_GAMES_DIR`: the journal directory when `--games-dir` is
   omitted; unset or empty, `games` under the working directory. No setting
   turns journaling off.
+
 
 ## Docker
 
@@ -85,20 +96,32 @@ and chance outcomes included. A journal that cannot be written disables
 journaling for that game with one logged line; play continues.
 
 A game not in memory is rebuilt from its journal on the first request
-for its code, after a restart or otherwise:
+for its code, after a restart or otherwise. A game nobody has read and
+nobody has moved in for 15 minutes is dropped from memory, its journal left
+open, and rebuilt the same way when its code is next asked for:
 
 - an unfinished game comes back live and keeps journaling into the same file;
 - a finished game comes back read-only;
-- a game evicted after 24 hours untouched is closed, and its code is a 404;
 - a journal that does not replay is closed, and its code is a 404.
 
 A game whose journal could not be written cannot be recovered.
+
+With `--search-logs`, every decision a server bot's search makes
+(`hexset.arena.search_logs`: a paired-rollout or MCTS seat) is appended to
+`search/<game id>.jsonl` under the journal directory, one JSON line per
+decision as `Decision.to_json` writes it, `seat` included, once the move is
+decided. A rebuilt game appends to the same file. The journal directory's
+`*.jsonl` readers do not look in `search/`. A file that cannot be written
+is reported once and play goes on.
 
 Rebuilt games keep their seats, names and client identities. Bot seats get
 fresh tokens and resume. A person's seat comes back claimed and without a
 token, so `/api/join` cannot hand it to someone else; its owner gets a new
 token through `/api/reclaim`. The browser keeps its client secret and
-reclaims on its own.
+reclaims on its own: on opening a game without a working token, and when an
+open page's token stops working, sending a refused request again with the
+fresh token. It forgets a saved token only after the server answers that no
+seat at that game is its own.
 
 `journal_of(record, directory, *, code, names=None, notes=())` in
 `hexset.server._journal` writes a replayable `hexset.record.Record` as a
@@ -108,6 +131,23 @@ chance outcomes are the recorded ones. `notes` are the record's trade
 rounds as `(step, traded, RoundNote)`, each placed after the action at
 `step` and the first `traded` exchanges filed on it.
 
+## Menu tabs
+
+The game page's menu has a tab for the game log and one for the games the
+browser has played, and a Rankings tab on a server with a ranker. Each
+`--menu-tab LABEL=URL` adds a tab after those, labelled `LABEL`, that opens
+`URL` in a frame of the menu the first time it is shown. With
+`--menu-tab-for`, only a client whose address (as `--forwarded-header`
+gives it) is in one of the networks named is told of the tabs, through
+`GET /api/menu` ([api.md](api.md#menu-tabs)):
+
+```sh
+python -m hexset.server.web --menu-tab "Notes=https://example.org/notes" \
+    --menu-tab-for 10.0.0.0/8 --menu-tab-for 100.64.0.0/10
+```
+
+The page it opens has to allow being framed by this server's page.
+
 ## Rankings
 
 The server ranks nothing itself. Given `--ranker MODULE:FUNCTION`, it calls
@@ -116,7 +156,7 @@ and serves what it returns. Only a table the ranked queue dealt
 ([api.md](api.md#ranked-play)) counts; a casual one never reaches the ranker.
 The rankings are served as `GET /api/rankings` ([api.md](api.md#rankings)),
 the MCP `rankings` tool, and a page at `/rankings` that the game page's
-menu links. The module only has to be importable, from the installed
+menu shows as its Rankings tab. The module only has to be importable, from the installed
 packages or `PYTHONPATH`.
 
 ```python

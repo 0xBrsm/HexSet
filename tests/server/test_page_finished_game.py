@@ -177,9 +177,9 @@ def test_the_roster_keeps_its_height_when_a_game_ends(running_server, browser):
     over_page.wait_for_selector(".player-row")
     over_heights = _row_heights(over_page)
 
-    assert live_page.locator("#players select").count() > 0
+    assert live_page.locator("#players .bot-pick").count() > 0
     assert live_page.locator("#players input").count() == 1
-    assert over_page.locator("#players select, #players input").count() == 0
+    assert over_page.locator("#players .bot-pick, #players input").count() == 0
 
     assert live_heights and over_heights
     every = live_heights + over_heights

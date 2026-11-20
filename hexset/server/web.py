@@ -46,13 +46,16 @@ seat it claims and used for the per-address deal limits. The address is the
 socket peer, or with `--forwarded-header` the address that header carries
 (its last comma-separated entry, the one a proxy appends to
 `X-Forwarded-For`), falling back to the peer when the header is missing or
-holds no address. The header is believed from every request: keeping clients
+holds no address. Named more than once, the first header a request carries
+an address in wins, for a server reached through more than one proxy. The header is believed from every request: keeping clients
 from reaching the server except through the proxy that sets it is the
 deployment's job. The request log prints the same address.
 
 `GET /rankings` is the rankings' own page, which reads
 `GET /api/rankings`; there is one only when `--ranker` names the function
-that makes it (`rankings.py`).
+that makes it (`rankings.py`). The game page's menu shows it as a tab, and
+any `--menu-tab` the server is given beside it, to the client networks
+`--menu-tab-for` names (`GET /api/menu`).
 
 Run it with `python -m hexset.server.web`. Opponents come from
 `api.model_catalogue()`: every preset the `--runtime` modules register, plus
@@ -71,6 +74,7 @@ import threading
 import traceback
 import urllib.parse
 import webbrowser
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -91,6 +95,7 @@ from .api import (
     catanatron_seatable,
     load_api_keys,
     listed_models,
+    model_catalogue,
     model_options,
 )
 from .constants import KEY_HEADER, TOKEN_HEADER
@@ -117,6 +122,12 @@ APP_FILES = {
     "/icon-512.png": ("icon-512.png", "image/png"),
     "/icon-maskable.png": ("icon-maskable.png", "image/png"),
     "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+}
+# The page's sound effects (`static/sounds`, CC0): path -> (file, content type),
+# every `.ogg` there and nothing else.
+SOUND_FILES = {
+    f"/sounds/{path.name}": (f"sounds/{path.name}", "audio/ogg")
+    for path in sorted((STATIC_DIR / "sounds").glob("*.ogg"))
 }
 
 # MCP protocol versions understood, and what `initialize` answers with when a
@@ -153,16 +164,20 @@ def forwarded_ip(value: str | None) -> str | None:
 class HexSetServer(ThreadingHTTPServer):
     """The served table over HTTP: `tables` behind `Handler`, one thread per
     request, with the live MCP sessions. `forwarded_header`, when set, names
-    the header a proxy puts the client's address in."""
+    the header a proxy puts the client's address in, or several, tried in
+    order."""
 
     daemon_threads = True
 
     def __init__(
-        self, address: tuple[str, int], tables: Tables, forwarded_header: str | None = None
+        self, address: tuple[str, int], tables: Tables,
+        forwarded_header: str | Sequence[str] | None = None,
     ) -> None:
         super().__init__(address, Handler)
         self.tables = tables
-        self.forwarded_header = forwarded_header
+        if isinstance(forwarded_header, str):
+            forwarded_header = (forwarded_header,)
+        self.forwarded_headers: tuple[str, ...] = tuple(forwarded_header or ())
         # This server's configured host, for Origin validation.
         self.host = address[0]
         # Every live MCP session: Mcp-Session-Id -> mcptools.Session.
@@ -189,11 +204,13 @@ class Handler(BaseHTTPRequestHandler):
     server: HexSetServer  # narrows the inherited attribute's type
 
     def client_ip(self) -> str:
-        """The client's address: the one `forwarded_header` carries, else
-        the socket peer."""
-        header = self.server.forwarded_header
-        forwarded = forwarded_ip(self.headers.get(header)) if header else None
-        return forwarded or self.client_address[0]
+        """The client's address: the one the first of `forwarded_headers`
+        to carry one gives, else the socket peer."""
+        for header in self.server.forwarded_headers:
+            forwarded = forwarded_ip(self.headers.get(header))
+            if forwarded:
+                return forwarded
+        return self.client_address[0]
 
     def origin(self, via: str) -> Origin:
         return Origin(
@@ -267,6 +284,9 @@ class Handler(BaseHTTPRequestHandler):
             self._file(RANKINGS_HTML, "text/html; charset=utf-8")
         elif self.path.partition("?")[0] in APP_FILES:
             name, content_type = APP_FILES[self.path.partition("?")[0]]
+            self._file(STATIC_DIR / name, content_type)
+        elif self.path.partition("?")[0] in SOUND_FILES:
+            name, content_type = SOUND_FILES[self.path.partition("?")[0]]
             self._file(STATIC_DIR / name, content_type)
         elif self.path.startswith("/api/") or self.path.partition("?")[0] == "/api":
             self._serve("GET", {})
@@ -456,6 +476,16 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def chance_model(parser: argparse.ArgumentParser, name: str) -> str:
+    """`--chance-model NAME`, held to an entry `model_catalogue` offers as a
+    model file at some game type: a preset has no value head to read."""
+    files = sorted({entry for offered in model_catalogue().values()
+                    for entry, held in offered.items() if held.name is not None})
+    if name not in files:
+        parser.error(f"--chance-model: no model file offered as {name}; one of {files}")
+    return name
+
+
 def preset_modes(parser: argparse.ArgumentParser, given: list[str]) -> dict[str, tuple[str, ...]]:
     """`--preset-modes NAME=TYPE[,TYPE...]` as preset -> game types, each
     held to a preset the loaded runtimes list and to game types the server
@@ -505,10 +535,11 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
-        "--forwarded-header", default=None, metavar="NAME",
+        "--forwarded-header", action="append", default=[], metavar="NAME",
         help="The header a reverse proxy puts the client's address in (e.g. "
-             "CF-Connecting-IP, X-Forwarded-For). Believed from every request, so "
-             "serve only through that proxy. Default: none, the socket peer.",
+             "CF-Connecting-IP, X-Forwarded-For). Repeat for more proxies: the first "
+             "header a request carries an address in wins. Believed from every request, "
+             "so serve only through those proxies. Default: none, the socket peer.",
     )
     parser.add_argument(
         "--games-per-period", type=int, default=Config.games_per_period,
@@ -560,10 +591,21 @@ def main(argv: list[str] | None = None) -> None:
              "bot:<NAME>. Repeat for more. Default: none.",
     )
     parser.add_argument(
+        "--chance-model", default=None, metavar="NAME",
+        help="The model, as the opponent picker names it, that rates a seated player's win "
+             "chance at every unranked table of a game type it is offered at, whether or not "
+             "it sits there. Default: none, and a table's own model seat rates it.",
+    )
+    parser.add_argument(
         "--rollout-workers", type=int, default=0, metavar="N",
         help="Worker processes a seated model that searches by paired rollouts plays its "
              "worlds out in, one pool shared by every seat of that model file (default: 0, "
              "in the server's own process). Other models ignore it.",
+    )
+    parser.add_argument(
+        "--search-logs", action="store_true",
+        help="Write every search decision a server bot makes to <games dir>/search/<game id>.jsonl, "
+             "one JSON line per decision, beside the game's journal. Default: off.",
     )
     parser.add_argument(
         "--preset-modes", action="append", default=[], metavar="NAME=TYPE[,TYPE...]",
@@ -575,6 +617,16 @@ def main(argv: list[str] | None = None) -> None:
         help=f"Ranking rows that played fewer games are not shown "
              f"(default: {Config.rankings_min_games}).",
     )
+    parser.add_argument(
+        "--menu-tab", action="append", default=[], metavar="LABEL=URL",
+        help="A tab the game page's menu shows beside its own, opening URL inside the menu. "
+             "Repeat for more. Default: none.",
+    )
+    parser.add_argument(
+        "--menu-tab-for", action="append", default=[], metavar="CIDR",
+        help="A client network shown the --menu-tab tabs; repeat for more. "
+             "Default: none named, and every client is shown them.",
+    )
     args = parser.parse_args(argv)
     load_runtime(*args.runtime)
     api.PRESET_MODES.update(preset_modes(parser, args.preset_modes))
@@ -584,6 +636,19 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(f"--ranked-entrant: no bot named {', '.join(unknown)}; one of {listed_models()}")
     if args.ranked_bot in entrants:
         parser.error(f"--ranked-entrant: {args.ranked_bot} is the --ranked-bot, which fills seats")
+    if args.chance_model is not None:
+        chance_model(parser, args.chance_model)
+    menu_tabs = []
+    for spec in args.menu_tab:
+        label, _, url = spec.partition("=")
+        if not label.strip() or not url.strip():
+            parser.error(f"--menu-tab: {spec!r} is not LABEL=URL")
+        menu_tabs.append((label.strip(), url.strip()))
+    for network in args.menu_tab_for:
+        try:
+            ipaddress.ip_network(network, strict=False)
+        except ValueError:
+            parser.error(f"--menu-tab-for: {network!r} is not a network")
 
     config = Config(
         device=args.device,
@@ -600,11 +665,18 @@ def main(argv: list[str] | None = None) -> None:
         rankings_min_games=args.rankings_min_games,
         ranked_bot=args.ranked_bot,
         ranked_entrants=entrants,
+        chance_model=args.chance_model,
         rollout_workers=args.rollout_workers,
+        search_logs=args.search_logs,
+        menu_tabs=tuple(menu_tabs),
+        menu_tabs_for=tuple(args.menu_tab_for),
     )
     tables = Tables(config)
     if entrants:
         tables.queue.start()
+    # Every offered bot built once in the background, so no first seat waits
+    # on a model loading (`api.warm_models`).
+    threading.Thread(target=api.warm_models, args=(config,), name="warm-models", daemon=True).start()
     server = HexSetServer((args.host, args.port), tables, args.forwarded_header)
 
     url = f"http://{args.host}:{args.port}/"

@@ -113,7 +113,8 @@ def test_rolled_sevens_follow_the_roller_share():
     assert hit["low"] / seen["low"] > 2 * hit["high"] / seen["high"]
 
 def test_the_engine_names_the_roller():
-    from hexset.arena import run_seated, seat_bots
+    from hexset.arena import seat_bots
+    from hexset.gym.driver import play_seated
     from hexset.bots import RandomBot
     from hexset.board.board import random_base_board
     from hexset.game import start
@@ -123,7 +124,7 @@ def test_the_engine_names_the_roller():
     bots = [RandomBot(random.Random(1)), RandomBot(random.Random(2))]
     game = start(board, len(bots), random.Random(3), game_type=DUEL_VARIANT_GAME, turn_cap=10_000)
     seat_bots(game, bots)
-    run_seated(game, bots, tape=Tape())
+    play_seated(game, bots, tape=Tape())
     assert set(game.chance.sevens) == {0, 1}
 
 def test_the_rules_select_the_source():

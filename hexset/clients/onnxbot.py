@@ -744,6 +744,7 @@ def spawn(
     game_type: str | None = None,
     workers: int = 0,
     pools: SharedPools | None = None,
+    search: bool = True,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
     Single forward or search over its own priors, and a trader to answer its
@@ -753,7 +754,9 @@ def spawn(
     processes beside this one (`hexset.rollout.RolloutPool`, each loading
     the file at one thread), and with 0 here alone. Other files ignore it.
     With `pools`, every bot spawned from one file shares one such pool
-    (`hexset.rollout.SharedPools`) instead of starting its own.
+    (`hexset.rollout.SharedPools`) instead of starting its own. `search=False`
+    plays the file one forward whatever search it declares, with its own
+    closer and trader as declared.
 
     A `closer` the file names plays its move wherever it has one, in place
     of the file's own (`hexset.arena.closed`); the trader trades for the
@@ -780,10 +783,10 @@ def spawn(
         )
     trader = declared_trader(loaded, path)
     closer = declared_closer(loaded, path)
-    own = _spawn_own(path, board, loaded, rng, device, threads, workers, pools)
+    own = _spawn_own(path, board, loaded, rng, device, threads, workers, pools, search)
     own = closed(own, closer, board, random.Random() if rng is None else rng)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
-                  veto_picks=trader_veto_pick_of(loaded))
+                  veto_picks=trader_veto_pick_of(loaded), hold=loaded.hold)
 
 
 def _pool(path, load_policy, workers, pools, loaded_as):
@@ -819,13 +822,14 @@ def _opponent_files(path: str, names: tuple[str, str]) -> tuple[str, str]:
     return os.path.join(here, names[0]), os.path.join(here, names[1])
 
 
-def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None):
+def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None, search=True):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
     (`hexset.clients.netbot.rollouts_for`), trading through its own gate.
     The file's `own_calibration` reaches every kind's gate, and an MCTS
-    file's leaves as well (`SearchConfig.own_calibration`)."""
-    if not loaded.search.searches:
+    file's leaves as well (`SearchConfig.own_calibration`). `search=False`
+    is the file's one forward."""
+    if not search or not loaded.search.searches:
         return network_bot(
             path, board, device=device, threads=threads, rng=rng,
             own_calibration=loaded.search.own_calibration,

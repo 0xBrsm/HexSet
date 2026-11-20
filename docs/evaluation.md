@@ -215,7 +215,18 @@ Every bench command that plays games keeps them in its `--journal`, and
 all but `throughput` resume with `--resume` ([guide.md](guide.md#benchmark-commands)).
 `compete_lanes` keeps a journal keyed by its own game keys, read by
 `read_lane_journal`; `read_game_journal` reads any game journal, its
-exhausted games included. A `LaneEnv` collector
+exhausted games included.
+
+Every entry point plays on `hexset.gym.driver.Driver`. `compete` and
+`_play_one` play one game at a time on one lane (`play_seated`), each seat's
+bot asked its own `choose`, so their games do not depend on how many
+workers play them. `compete_lanes` plays each game the same way, as a lane
+of `hexset.lockstep.pool_lanes`, up to `lanes` games in each worker: each
+forward any bot makes, its move, trade gate, veto, robber deals and search
+leaves, runs in one batch with the other lanes' waiting forwards. Where every exported graph
+seated gives the same answer at any batch size from two rows up
+(`hexset.lockstep.batch_invariant`), its games are the same at any `lanes`,
+`workers` and job order. A `LaneEnv` collector
 writes each finished `Episode` as one line with
 `hexset.gym.lanes.episode_entry`.
 
@@ -246,3 +257,20 @@ wrappers it is dealt in (a trader, a veto, a dealer, a coalition, both
 halves of a handoff). `compete` writes them into each game's journal line
 under `searches`, and `read_journal` returns them on each `Outcome`, so
 the run itself shows which decisions gained, and at what cost.
+
+`python -m hexset.redecide <journal> <out>` decides a run's logged
+decisions again under other seats, without playing a game. It replays each
+game's record, finds each searched decision the entrant (`--entrant`,
+default 0) logged at the step where it was played, and has the searcher
+behind each named seat (`--arm NAME=SPEC`, a lineup name; `--runtime`
+imports the modules that register it) decide the position again. Before
+each decision every arm's searcher is reseeded from the arm's seed and the
+decision's place in the run, so arms that read a position alike decide it
+alike; the arm's seed is the seed policy's first analysis seed unless
+`--arm-seed NAME=SEED` names another, and an arm named twice on two seeds
+measures the search's own noise. `--where MODULE:FUNCTION` keeps only the
+positions where `FUNCTION(game, seat)` is true. Each game appends its
+"decision" rows (the played and logged moves and every arm's decision as
+its log writes it) and a "game" row tallying the decisions logged, matched,
+searched and kept; a rerun skips the games already tallied.
+`hexset.arena.searchers(bot)` returns the searchers behind a seat.

@@ -147,3 +147,64 @@ def test_a_runner_stops_once_the_same_error_keeps_coming_back(monkeypatch):
     runner.stop.set()
     assert not alive, "the runner kept retrying the same error"
     assert len(asked) == _runner.REPEATED_ERROR_LIMIT
+
+
+class _Decision:
+    def __init__(self, n, seat):
+        self.n, self.seat = n, seat
+
+    def to_json(self):
+        return {"turn": self.n, "seat": self.seat, "value": [0.5, 0.5]}
+
+
+class _Searching(RandomBot):
+    """A bot that logs one decision per move, as a searcher does (`hexset.arena.search_logs`
+    finds it by its `decision_log`)."""
+
+    def __init__(self, rng, seat):
+        super().__init__(rng)
+        self.decision_log, self._seat = [], seat
+
+    def choose(self, game):
+        self.decision_log.append(_Decision(len(self.decision_log), self._seat))
+        return super().choose(game)
+
+
+def test_an_embedded_seat_writes_each_search_decision_once(tmp_path):
+    import json
+
+    from hexset.server._runner import DecisionFile
+
+    game = _discard_round()
+    path = tmp_path / "search" / "g1.jsonl"
+    brains = [LocalSearchBrain(_Searching(random.Random(s), s), game, decisions=DecisionFile(path))
+              for s in (0, 2)]
+    brains[0].decide(transport=None, token="", seat=0)
+    brains[1].decide(transport=None, token="", seat=2)
+    brains[0].decide(transport=None, token="", seat=0)
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    # two seats share the game's file; each line names its seat, none is written twice
+    assert [(r["seat"], r["turn"]) for r in rows] == [(0, 0), (2, 0), (0, 1)]
+
+
+def test_a_search_log_that_cannot_be_written_leaves_play_alone(tmp_path, capsys):
+    from hexset.server._runner import DecisionFile
+
+    (tmp_path / "search").write_text("a file where the directory would go")
+    brain = LocalSearchBrain(_Searching(random.Random(0), 0), _discard_round(),
+                             decisions=DecisionFile(tmp_path / "search" / "g1.jsonl"))
+    assert brain.decide(transport=None, token="", seat=0)
+    assert brain.decide(transport=None, token="", seat=0)
+    assert capsys.readouterr().err.count("search log disabled") == 1
+
+
+def test_a_tables_search_log_is_named_as_its_journal_only_when_asked_for(tmp_path):
+    from hexset.server.api import SEARCH_DIR, Config, Seat, SeatKind, build_session, search_file
+
+    seats = [Seat(kind=SeatKind.PLAYER, name="Ada", token="t-Ada")] + [
+        Seat(kind=SeatKind.BOT, name="test-trader", spec="test-trader") for _ in range(3)]
+    session = build_session("ABC123", seats, Config(games_dir=str(tmp_path), seed=99), first=0)
+    assert search_file(session, Config(games_dir=str(tmp_path))) is None
+    file = search_file(session, Config(games_dir=str(tmp_path), search_logs=True))
+    assert file.path == tmp_path / SEARCH_DIR / f"{session.journal.game_id}.jsonl"
+    assert file.path.parent.parent == session.journal.path.parent

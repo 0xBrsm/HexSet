@@ -111,7 +111,8 @@ def test_a_name_given_at_one_game_is_the_browsers_at_the_next(running_server):
             with page.expect_response(lambda r: r.url.endswith("/api/name")):
                 page.fill('#players input[title="Your name at this game"]', "Zed")
                 page.press('#players input[title="Your name at this game"]', "Enter")
-            assert page.evaluate("localStorage.getItem('hexset.name')") == "Zed"
+            # stored once the page has read the answer, a moment after it arrives
+            page.wait_for_function("localStorage.getItem('hexset.name') === 'Zed'", timeout=5000)
 
             page.click("#new-game")
             page.wait_for_selector("#modal.show #deal-new-game")

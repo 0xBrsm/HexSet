@@ -49,6 +49,7 @@ decision begun a move at a time as a decision of its legal moves alone.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import product
@@ -679,8 +680,11 @@ class Plans:
     (`tensors`).
 
     Plans are kept per game, by identity, so one `Plans` serves every game a
-    process plays; a game that ended inside a decision leaves its plan behind,
-    and once `LIMIT` games hold one they are all dropped.
+    process plays. A plan holds its game weakly and goes when the game does:
+    a game that ended inside a decision takes its plan with it, and no number
+    of games in flight at once (a search's playout copies, say) pushes out a
+    plan its game will still ask for. A game is any weakly referable object
+    the decision functions read (`Game`, or a native playout copy).
 
     A caller that plays some other move at a position where a plan is held
     (a search overriding the policy's own move) drops the game's plan
@@ -689,22 +693,32 @@ class Plans:
     plan without playing it, and `keep` puts one in place, for a caller that
     chose the whole decision itself."""
 
-    LIMIT = 256
-
     def __init__(self) -> None:
-        self._plans: dict[int, tuple[Game, int, list[Action]]] = {}
+        self._plans: dict[int, tuple[weakref.ref, int, list[Action]]] = {}
+
+    def _keep(self, game: Game, seat: int, rest: list[Action]) -> None:
+        key, plans = id(game), self._plans
+
+        def gone(ref: weakref.ref) -> None:
+            # Only this plan's own reference may drop it: the id can be reused
+            # by a later game whose plan is not this one.
+            held = plans.get(key)
+            if held is not None and held[0] is ref:
+                del plans[key]
+
+        plans[key] = (weakref.ref(game, gone), seat, rest)
 
     def planned(self, game: Game, seat: int, options: Sequence[Action]) -> bool:
         """Whether `act` would answer `seat` at `game` from a plan it holds,
         without asking `decide` or `finish`. Changes nothing."""
         plan = self._plans.get(id(game))
-        return plan is not None and plan[0] is game and plan[1] == seat and bool(plan[2]) and plan[2][0] in options
+        return plan is not None and plan[0]() is game and plan[1] == seat and bool(plan[2]) and plan[2][0] in options
 
     def peek(self, game: Game, seat: int) -> tuple[Action, ...]:
         """The moves left of `seat`'s plan at `game`, in order; none where it
         holds none. Changes nothing."""
         plan = self._plans.get(id(game))
-        return tuple(plan[2]) if plan is not None and plan[0] is game and plan[1] == seat else ()
+        return tuple(plan[2]) if plan is not None and plan[0]() is game and plan[1] == seat else ()
 
     def drop(self, game: Game) -> None:
         """Forget any plan held for `game`."""
@@ -717,29 +731,25 @@ class Plans:
         self._plans.pop(id(game), None)
         if not parts:
             return
-        if len(self._plans) > self.LIMIT:
-            self._plans.clear()
-        self._plans[id(game)] = (game, seat, list(parts))
+        self._keep(game, seat, list(parts))
 
     def act(self, game: Game, seat: int, options: Sequence[Action], decide, finish) -> Action:
         """`seat`'s move at `game` from `options`, its legal atomic moves."""
         plan = self._plans.pop(id(game), None)
-        if plan is not None and plan[0] is game and plan[1] == seat and plan[2] and plan[2][0] in options:
+        if plan is not None and plan[0]() is game and plan[1] == seat and plan[2] and plan[2][0] in options:
             rest = plan[2][1:]
             if rest:
-                self._plans[id(game)] = (game, seat, rest)
+                self._keep(game, seat, rest)
             return plan[2][0]
         if len(options) == 1:
             return options[0]
         if inside(game):
             return finish(game, seat, tuple(options))
         choice = decide(game, seat)
-        if len(self._plans) > self.LIMIT:
-            self._plans.clear()
         if isinstance(choice, Compound):
             first, rest = choice.parts[0], list(choice.parts[1:])
             if rest:
-                self._plans[id(game)] = (game, seat, rest)
+                self._keep(game, seat, rest)
             choice = first
         if choice not in options:
             raise RuntimeError(f"the decision chosen opens with {choice}, not among {tuple(options)}")

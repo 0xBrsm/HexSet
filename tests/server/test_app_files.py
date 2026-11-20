@@ -8,13 +8,14 @@ from __future__ import annotations
 import json
 import re
 import struct
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 import pytest
 
 from _page_server import serving
-from hexset.server.web import APP_FILES, STATIC_DIR
+from hexset.server.web import APP_FILES, SOUND_FILES, STATIC_DIR
 
 SRC = Path(__file__).resolve().parents[2]
 PORT = 8814
@@ -64,3 +65,21 @@ def test_the_game_page_is_installable(site) -> None:
             assert png_size(body) == icon["sizes"], icon["src"]
     sizes = {icon["sizes"] for icon in manifest["icons"] if icon["purpose"] == "any"}
     assert {"192x192", "512x512"} <= sizes
+
+
+def test_every_sound_the_page_plays_is_served_and_nothing_else(site) -> None:
+    """The page's clips are the `.ogg` files under `static/sounds`, each
+    answered as `audio/ogg`, beside the note of their licence; a name that is
+    not one of them, or that reaches out of the directory, is a 404."""
+    page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    block = page[page.index("const SOUNDS = {"):page.index("};", page.index("const SOUNDS = {"))]
+    named = set(re.findall(r'"([A-Za-z0-9_-]+)"', block))
+    # Every clip played is served, and none is shipped that is not played.
+    assert named and {f"/sounds/{name}.ogg" for name in named} == set(SOUND_FILES)
+    assert "CC0" in (STATIC_DIR / "sounds" / "README.md").read_text(encoding="utf-8")
+    content_type, body = site("/sounds/dice-throw-1.ogg")
+    assert content_type == "audio/ogg" and body[:4] == b"OggS"
+    for path in ("/sounds/nope.ogg", "/sounds/README.md", "/sounds/../index.html"):
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            site(path)
+        assert refused.value.code == 404

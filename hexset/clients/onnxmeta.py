@@ -4,8 +4,10 @@ A served model names itself: the server's picker offers it by its `name`,
 at the game types its `modes` declare (`hexset.rules.GAME_TYPES` names, comma
 separated), with its `version`, and `commit` is the code it was built from.
 The filename plays no part. One name may be one file at some game types and
-another at the rest. A file may also declare an `owner`, a `url` and a
-`description` (`PROFILE_KEYS`), shown with it as a bot's profile is.
+another at the rest. A file may also declare an `owner`, a `url`, a
+`description` and a `label` (`PROFILE_KEYS`), shown with it as a bot's
+profile is; the `label` is the name shown for it in place of `name`, which
+stays the name clients ask for.
 
 Reading parses only the top level of the `ModelProto` protobuf, so listing a
 models directory never builds an inference session, and `with_metadata`
@@ -15,7 +17,8 @@ graph. `python -m hexset.clients.onnxmeta` shows or stamps a file::
     python -m hexset.clients.onnxmeta show model.onnx
     python -m hexset.clients.onnxmeta stamp in.onnx out.onnx \\
         --name mynet --modes standard --version 1.0 --commit 0123abcd \\
-        --owner octocat --description "A small policy net with 128-visit search."
+        --owner octocat --description "A small policy net with 128-visit search." \\
+        --label MyNet
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ SERVE_KEYS = ("name", "modes", "version", "commit")
 
 #: What a served file may say about itself besides, shown with it as a
 #: server bot's profile is (`stamp` writes those it is given).
-PROFILE_KEYS = ("owner", "url", "description")
+PROFILE_KEYS = ("owner", "url", "description", "label")
 
 
 def _varint(data: bytes, at: int) -> tuple[int, int]:

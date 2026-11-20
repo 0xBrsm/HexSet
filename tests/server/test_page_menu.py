@@ -141,8 +141,9 @@ def test_the_menu_hands_out_this_game_and_lists_the_games_played(running_server,
         page.click("#copy-link")
         page.wait_for_function("document.getElementById('copy-link').textContent === 'Copied'")
         assert page.evaluate("navigator.clipboard.readText()") == f"{BASE_URL}/{code}"
-        # This server keeps no rankings, so the menu links none.
-        assert not page.is_visible("#rankings-link")
+        # This server keeps no rankings and adds no tab, so the menu has its own two.
+        assert not page.is_visible('#menu-tabs [data-tab="rankings"]')
+        assert page.locator("#menu-tabs button:visible").count() == 2
 
         # History, newest first: this game, kept as it was dealt; the duel
         # won yesterday, from its record alone; the old game read from its

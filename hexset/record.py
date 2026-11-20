@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Iterable, Iterator, Sequence
 
 from .actions import Action, ActionType, apply, legal_actions
-from .arena import MAX_ACTIONS, run_seated as _run, seat_bots as _seat
+from .arena import MAX_ACTIONS, seat_bots as _seat
 from .board.board import Board, make_board
 from .board.coords import Hex
 from .board.ports import Port
@@ -256,9 +256,11 @@ def record_game(
     rng = random.Random(seed)
     game = start(board, len(bots), rng, chance=recording(rng, game_type.rules), turn_cap=turn_cap,
                  game_type=game_type)
+    from .gym.driver import play_seated
+
     _seat(game, bots, trade_mode)
     tape = Tape()
-    _run(game, bots, action_cap, tape=tape)
+    play_seated(game, bots, action_cap, tape=tape)
     record = tape.sealed(game, seed=seed)
     gamelog.append_after_header(
         journal,

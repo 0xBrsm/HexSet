@@ -5,6 +5,312 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.36.0
+
+### Breaking
+
+- **`hexset.arena.run_seated` is removed.** Every game is played on
+  `hexset.gym.driver.Driver`: `play_seated(game, bots, action_cap, tape=...,
+  cleared=None)` plays a seated game to its end with the same moves,
+  records and cleared-trade census `run_seated` gave. `compete`,
+  `compete_lanes` and `_play_one` keep their signatures and journals.
+- **`hexset.decisions.Plans.LIMIT` is removed.** A plan is dropped when
+  its game goes (below).
+- **`HexSetServer.forwarded_header` is now `forwarded_headers`**, a tuple
+  of header names; the constructor still takes one name or several.
+
+### Added
+
+- **`POST /api/reclaim` takes `"probe": true`.** A secret that matches no
+  seat then answers 200 with `{"token": null}` instead of a 403.
+
+- **A feed entry says what it changed on each seat's row: `after`.** Each
+  entry of a view's `feed.events` that changed a seat's row in `players`
+  carries `after`, seat to the keys of that row the action changed
+  (`victory_points`, `knights_played`, `road_length`, `longest_road`,
+  `largest_army`, `hand_size`, `dev_card_count`, `hand`, `dev_cards`) with
+  their values after it, hidden as the row itself is. Each exchange in an
+  entry's `trades` carries its own. An entry that changed the bank
+  carries `bank`, the bank's resource counts after it.
+
+- **`python -m hexset.redecide`: decide a run's logged search decisions
+  again.** It replays each game of a journal whose seats search, finds the
+  chosen entrant's logged searched decisions in the record, and decides
+  each again with every named seat's searcher (`--arm NAME=SPEC`), each
+  reseeded alike per decision from its seed, the seed policy's analysis
+  seeds. `--where MODULE:FUNCTION` keeps only the positions a function
+  picks. Each game's rows, one per decision and a tally, are appended and fsynced
+  as the game finishes; a rerun resumes.
+  `hexset.arena.searchers(bot)` gives the searchers behind a seat.
+
+- **Worlds weigh untyped resource cards by what each seat has shown.**
+  `HoldModel` takes `asked` and `offered` weights (1.0 each by default): an
+  untyped card of a resource the seat has asked for on its ledger
+  (`SeatLedger.want`) counts `asked` times as much as another when
+  `View.sample` deals the hidden cards, and one it has offered away
+  (`waste`) `offered` times. A checkpoint declares them as `hold_asked` and
+  `hold_offered`. `View.p_holds(hold=...)` reads the same weights,
+  `View.shown_weights(hold)` gives them per seat, and
+  `View.belief_key(hold)` keys a cache of worlds on everything a weighed
+  belief reads. Without weights that apply, every deal and its draws are
+  unchanged.
+
+- **The game page's menu shows the rankings as a tab.** On a server with a
+  ranker, the menu has a Rankings tab after Log and History, which shows
+  `/rankings` in a frame of the menu without the page's own header
+  (`/rankings?embed`); it replaces the link at the foot of the menu. The
+  frame is made the first time the tab is shown and kept while the page
+  is open.
+
+- **Server tabs in the game page's menu: `--menu-tab` and `GET /api/menu`.**
+  `--menu-tab LABEL=URL` (repeatable) adds a tab after the page's own that
+  opens `URL` in a frame of the menu, and `--menu-tab-for CIDR`
+  (repeatable) shows those tabs only to clients in the networks named.
+  `GET /api/menu` returns the tabs for the asking client.
+
+- **`--forwarded-header` is repeatable.** The first header named that a
+  request carries an address in gives the client's address, for a server
+  reached through both a tunnel and a local proxy.
+
+- **Server search logs: `--search-logs`.** The server writes every search
+  decision its bots make to `search/<game id>.jsonl` under the journal
+  directory, one `Decision.to_json` line per decision
+  (`hexset.server._runner.DecisionFile`). Off by default.
+
+- **Remote seats: `hexset.remote`.** A `Server` decides for many games' seats
+  at once, in priority order, and a `RemoteBot` seat sends it each call over
+  one connection with a heartbeat each way. The seat's local fallback bot
+  answers when the link is down or drops mid-call, the server refuses or
+  fails, or the decision's clock is nearly out (`set_clock`). `seat_at` and
+  `seen` reach both bots, and the server's search decision logs return with
+  each answer.
+
+- **`spawn(..., search=False)`** plays a file one forward whatever search its
+  metadata declares.
+
+- **A seat's win chance as the table's model rates it: `GET /api/chance`.**
+  At an unranked table, the route returns the asking seat's chance of
+  winning from one read of a model's value head, encoded from the asking
+  seat's side, with the table version it was read at. The model is the
+  server's `--chance-model` at every game type it is offered at, else the
+  table's own model seat. At a finished game the read is of its last
+  position still in play, and the replay view carries a seat's read at the
+  round it shows (`chance`). Ranked tables answer 409. The page shows the
+  chance under a seated player's cards, live, at a past round and at a
+  finished game, as a percent and a bar in the seat's colour. A toggle in
+  the board's corner hides it for that browser, and a click or a tap on it
+  opens a note saying what it is.
+
+- **A bot's shown name: the profile field `label`.** A preset's profile
+  (`hexset.arena.register_preset`) or a model file's metadata
+  (`hexset.clients.onnxmeta.PROFILE_KEYS`, `stamp --label`) may give a
+  `label`, up to 40 characters. The server shows a bot by it on the page, in
+  the log, in `/api/models` and on its rankings row, and a seat a bot holds
+  carries it as `label` in the view's `seats` where it differs from the
+  name. Clients ask for the bot, and rankings and journals key it, by its
+  entry. The shipped `catanatron` preset
+  is shown as `Catanatron`.
+
+- **A dealer's games on the driver: `LaneEnv(dealer=...)`.** A caller deals
+  and seats each game itself (`hexset.gym.lanes.Dealt`), every seat played
+  by its bot as the arena plays it; an `Episode` then carries its `Game` and
+  cleared trades, and no per-seat decisions (its record holds every move).
+  `hexset.gym.driver.play_seated` plays a seated game this way.
+
+- **The page plays other seats' actions back as they happen.** Captions at
+  the foot of the board name each action, newest at the bottom, and lead
+  with a glyph of its kind: a hammer for building or buying, a star for a
+  development card played, the bank or a port's ship for their trades. The
+  cards a caption names are drawn as glyphs. The dice roll and the
+  producing hexes light, pieces drop in, the robber moves, and each seat's
+  row shows the cards the action gained or lost it; a hex whose number
+  comes up under the robber flashes red. Each action is held long enough to
+  read, and a click on the board finishes the playback. A seat's own moves
+  are drawn at once. A view's new `feed` carries each action as its own
+  entry, hidden for its reader as the log is.
+
+  Sound, off by default, is turned on from the board's top-left corner and
+  plays for every seat's moves. It uses recorded card, chip and dice clips
+  from Kenney's *Casino Audio* (CC0): a sound for each kind of action and
+  piece, the end of a turn included, each at a level measured from its clip
+  as it loads. At the game's end one jingle plays for the winner and anyone
+  watching and another for the seats that lost, from Kenney's *Music
+  Jingles* (CC0). The files are in `static/sounds`, served under `/sounds/`.
+
+- **Bot cards.** A bot or open seat's name opens a card per bot the game type
+  offers, with its version and description, in place of the drop-down. A
+  pick shows on its row at once, dimmed until the server has seated it.
+
+- **The server builds every offered bot once at start** (`warm_models`), in
+  the background, so the first seat of a model does not wait on its file
+  loading or its rollout workers starting.
+
+### Changed
+
+- **The game page draws the board with depth.** The island stands on a sand
+  base, which shows as a beach around the coast and as the lines between the
+  tiles, and casts a soft shadow on the water; the water is lighter under
+  the island than at the pane's edges, and carries a fine chop of small
+  waves under broad patches a little paler or darker. Each land tile is
+  drawn in from its hex with rounded corners and carries one shade, lighter
+  at its upper left and darker at its lower right, a grain of dark and pale
+  specks, a line inside its outline that is pale toward the light and dark
+  away from it, and a shadow on the sand. Numbers, port markers, settlements
+  and cities cast a small shadow, and a settlement or city has a light line
+  inside its outline. A road casts a shadow and has a pale line along the
+  side that faces the light and a dark one along the other. A port's links
+  to its two corners are piers. The faint line along every edge is removed,
+  and each corner keeps its faint mark. The robber stands at the left
+  shoulder of its hex's number, over the edge of the chip and clear of its
+  digits, and that number is dimmed while it stands there; on a hex with no
+  number it stands in the middle. The tiles' texture is drawn once with the
+  board and the water's is two pictures made once when the page loads; both
+  are the same every time, and neither uses an SVG filter.
+
+- **A place a road may go is a short bar on the game page.** Each edge a
+  seat may build on shows a pale bar rimmed in the seat's colour over the
+  middle of the edge, clear of the corners at its ends, where it showed a
+  wide band of the colour along the whole edge. A click or a touch near
+  the bar builds there.
+
+- **The development deck stays on the game page's board.** The deck's card
+  in the board's top-right corner shows for every reader once a table is
+  dealt, with the number of cards left in the deck in its corner. It is
+  faded and cannot be clicked when buying is not on offer; it carries BUY
+  and takes a click when it is. The number drops as another seat's buy
+  plays back.
+
+- **The game page shows the bank.** The bank's five resource piles stand
+  a little faded on the board, each with its count, in a column under the deck when
+  the board and the players are side by side and in a row across the top
+  when they are stacked, where the board sits lower in its pane to leave
+  the row room. A pile the bank has run out of is an empty
+  outline. The counts change as each action plays back, from the feed
+  entries' `bank`.
+
+- **The game page's menu is a panel on a wide window.** With the board and
+  the players side by side, the menu opens 450 pixels wide at the page's
+  left edge, over the board, for its Log, History and Rankings; a tab the
+  server adds (`--menu-tab`) takes the page's whole width. On a phone the
+  menu still fills the screen.
+
+- **A wide game page keeps its width.** With the board and the players
+  side by side, the whole page (its header, the board and the sidebar, and
+  a dialog's backdrop over them) is
+  at most as wide as the sidebar and a board 1.4 times as wide as it is
+  tall, centred, with the header's and sidebar's dark panel colour on
+  either side. The captions that tell other seats' actions stack up from above
+  the bottom-right corner button, starting at the board's right edge,
+  where they sat over the foot of the board; on a short screen they stay at
+  the foot of the board, a size smaller.
+
+- **The game page's log reads at a glance.** Each round has a heading over
+  its lines. Each line starts with a chip of what kind of action it tells,
+  in the colour of the seat that took it; a seat shows as what it is called
+  alone (`Rehex` where the log reads `Red (Rehex)`), drawn in its colour;
+  the log's colours are the seats' own taken part way to grey;
+  cards show as their glyphs, and a roll or the robber's hex as a number
+  token, 6 and 8 in red and a seven dark. A roll's takings and a trade
+  round's answers each stand on a line of their own under it. Names in the
+  log are written as text, never read as markup. The server's log lines
+  are unchanged.
+
+- **A road that ends where another seat's road passes stops short of the
+  corner.** Where two seats' roads meet at a corner nobody has built on, a
+  road with none of its own seat's roads at that corner ends a little short
+  of it on the game page, clear of the road it meets; roads that carry on
+  through the corner are drawn to it.
+
+- **Seats are named by their colour.** The game log names a seat as its
+  colour on the game page and what it is called, `Red (Ada)`, where it
+  read `Player 1 (Ada)`; the seats are Red, Green, Purple and Blue, and a
+  seat keeps its name whichever seats are closed. The game page's heading
+  (`PURPLE'S TURN`, `PURPLE WINS`), its captions, trade buttons and bot
+  cards use the same names, the heading's and the captions' drawn in the
+  seat's colour (the heading's part way to grey, as in the log).
+
+- **A player row's icons open a glossary on the game page.** A click or a
+  tap on any stat in a player's row opens a short glossary of what each
+  icon counts, that icon's line lit, under the roster or over it where
+  there is no room below. Another click elsewhere, Escape, or the same
+  icon again closes it. At a table being read, the row's other parts still
+  open that seat's hand.
+
+- **The game page plays a roll where it produced.** Each hex with the rolled
+  number lights gold and its number jumps. Each building on it that collects
+  rings in its seat's colour and sends its cards to that seat's row, one for
+  a settlement and two for a city. The hex under the robber rings red at the
+  robber. The cards shown follow the roll's `gains` in the feed, so a
+  resource the bank ran short of sends none. Once the dice have landed they
+  leave the middle of the board for the roller's row. With reduced motion
+  the lights and rings fade in place and nothing crosses the board. The
+  whole-tile flash is removed.
+
+- **A seat's reading of the hidden cards reaches its robber deals and its
+  declared trader.** `ValueDealer` draws the worlds it reads each seat's
+  holdings and a steal's odds from by its network's `hold`, alike where it
+  has none. `hexset.arena.traded(..., hold=...)` gives the seat's reading to
+  a trader whose `hold` is `None`; a network, MCTS or rollout seat passes its
+  checkpoint's (`hold_of`), and an arena entrant with a lineup trader its
+  own bot's `hold`. A trader with a reading of its own keeps it.
+
+- **Journal appends release their lock before the fsync.** `hexset.gamelog.append`
+  and `append_after_header` hold the file's lock while they write and flush,
+  then fsync after releasing it, so writers sharing a journal no longer wait
+  on each other's fsyncs. Each append still returns only after its lines are on
+  disk, and lines still never interleave.
+
+- **The board's corner at a finished game, and its layout.** Sound sits in
+  the corner and the win chance's toggle under it. Both stay up once the
+  game is over, so either can be set between games; each is kept in the
+  browser and carries to its next game.
+
+- **The page reads `WAITING ON A TRADE` while another seat's trade round is
+  under way.**
+
+- **A game left idle is kept, not ended.** A table nobody has read and
+  nobody has moved in for `TABLE_TTL_SECONDS`, now 15 minutes (it was 24
+  hours), is dropped from memory with its journal left open
+  (`Table.release`), and its code rebuilds it from the journal where it
+  stopped, as after a restart. Before, it was filed as abandoned and its
+  code was a 404 for good. A table whose bots are still moving is not
+  dropped.
+
+### Fixed
+
+- **A Monopoly's log line counts its cards in words.** It reads "collected
+  3 cards" or "collected 1 card", where it read "collected 3 card(s)".
+
+- **The game page gets its seat back without a saved token.** Opening a game
+  with no working token, the page asks by its client secret whether a seat
+  there is its own, and sits there if so. When an open page's token stops
+  working, after a restart or once the server drops an idle game, the page
+  reclaims its seat: a request the server refuses is sent again with the
+  fresh token, and a page following the game reloads. A saved token is
+  forgotten only once the server answers that no seat at that game is the
+  browser's.
+
+- **The game page shows what each action did as it plays.** While another
+  seat's actions play back, the rows, the hand, the pieces left to place
+  and the board move on with each action once it has played, from its
+  `after` in the feed: cards a roll gave or a robber took show in the hand
+  then. Before, they showed the table as it stood before the first of the
+  view's actions until the last had played. A road that another seat builds
+  drops in under the settlements and cities at its ends.
+
+- **The board's corner toggles work while a turn plays back.** A click on
+  sound or win chance during playback was taken as a click to
+  skip it and did not toggle; it now toggles, and a click anywhere else on
+  the board still skips.
+
+- **A decision plan lasts as long as its game.** `hexset.decisions.Plans`
+  holds each game weakly and drops its plan when the game goes, instead of
+  clearing every plan once 256 games held one; `keep` does the same. A search
+  whose playout copies outnumbered that limit lost the plans of copies still
+  inside a decision, which then finished it a move at a time from the
+  position (a setup road chosen on its own). A native playout copy
+  (`NativeCopy`) is now weakly referable.
+
 ## 1.35.0
 
 ### Added

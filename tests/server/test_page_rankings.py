@@ -3,8 +3,9 @@
 ranker made, one tab each, leaves out the rows under the minimum games, marks
 the visitor's own row by the client id the game page sends, shows two checked
 rows head to head, and says so where the server keeps none; the game page's
-menu links it at a seat, only where there is one, and the New game modal
-never does. Skipped without Playwright, which is not one of this project's
+menu shows it as a tab, at a seat and to a spectator, only where there is
+one, beside any tab the server adds for the client's network, and the New
+game modal never links it. Skipped without Playwright, which is not one of this project's
 extras.
 """
 
@@ -76,7 +77,12 @@ def stop_bot_runners():
 
 @pytest.fixture(scope="module")
 def servers():
-    with serving(PORT, ranker=rank), serving(BARE_PORT):
+    # The ranked server adds a tab for loopback clients, which these are; the
+    # bare one adds one only for a network they are not in.
+    with serving(PORT, ranker=rank, menu_tabs=(("Live", f"{BARE_URL}/rankings"),),
+                 menu_tabs_for=("127.0.0.0/8",)), \
+            serving(BARE_PORT, menu_tabs=(("Live", f"{BASE_URL}/rankings"),),
+                    menu_tabs_for=("203.0.113.0/24",)):
         yield
 
 
@@ -160,7 +166,20 @@ def test_a_server_without_a_ranker_says_it_keeps_none(servers, browser):
         page.close()
 
 
-def test_the_menu_links_it_and_the_new_game_modal_does_not(servers, browser):
+def _rankings_tab(page) -> None:
+    """Opens the menu's Rankings tab and waits for its boards, drawn in the
+    menu's frame without the rankings page's own header."""
+    page.click("#open-log")
+    page.click('#log-sheet.show #menu-tabs [data-tab="rankings"]:visible')
+    assert page.get_attribute('#menu-tabs [data-tab="rankings"]', "aria-pressed") == "true"
+    assert not page.is_visible("#log-full") and not page.is_visible("#history")
+    assert not page.is_visible("#this-game")
+    frame = page.frame_locator('#menu-frames iframe[data-tab="rankings"]')
+    frame.locator("#board tbody tr").first.wait_for()
+    assert not frame.locator("header").is_visible()
+
+
+def test_the_menu_shows_it_as_a_tab_and_the_new_game_modal_does_not(servers, browser):
     page = browser.new_context().new_page()
     try:
         page.goto(f"{BASE_URL}/", wait_until="load")
@@ -172,13 +191,40 @@ def test_the_menu_links_it_and_the_new_game_modal_does_not(servers, browser):
         page.wait_for_selector("#modal.show #deal-new-game")
         assert not page.query_selector("#modal a")
         page.keyboard.press("Escape")
-        page.click("#open-log")
-        page.wait_for_selector('#log-sheet.show a#rankings-link[href="/rankings"]:visible')
+        _rankings_tab(page)
+        # Back to the log and to the rankings again: the same frame, kept.
+        page.click('#menu-tabs [data-tab="log"]')
+        assert page.is_visible("#log-full") and page.is_visible("#this-game")
+        assert not page.is_visible("#menu-frames iframe")
+        page.click('#menu-tabs [data-tab="rankings"]')
+        assert page.locator("#menu-frames iframe").count() == 1
+
+        # The server's own tab for this network, after the page's: its URL
+        # in a frame of its own beside the rankings'.
+        assert page.eval_on_selector_all("#menu-tabs button", "(bs) => bs.map((b) => b.textContent)") == [
+            "Log", "History", "Rankings", "Live"]
+        page.click('#menu-tabs button:text-is("Live")')
+        live = page.locator("#menu-frames iframe:visible")
+        assert live.get_attribute("src") == f"{BARE_URL}/rankings"
+        assert live.get_attribute("title") == "Live"
+        page.frame_locator("#menu-frames iframe:visible").locator("header h1").wait_for()
+        assert page.locator("#menu-frames iframe").count() == 2
+        code = page.text_content("#this-game-code")
+    finally:
+        page.close()
+
+    # A spectator at the same game has the same tabs.
+    page = browser.new_context().new_page()
+    try:
+        page.goto(f"{BASE_URL}/{code}", wait_until="load")
+        page.wait_for_selector("#players .player-row")
+        _rankings_tab(page)
+        page.wait_for_selector('#menu-tabs button:text-is("Live")')
     finally:
         page.close()
 
 
-def test_without_rankings_the_menu_links_nothing(servers, browser):
+def test_without_rankings_the_menu_has_no_rankings_tab(servers, browser):
     page = browser.new_context().new_page()
     try:
         front_door(page, BARE_URL)
@@ -189,7 +235,10 @@ def test_without_rankings_the_menu_links_nothing(servers, browser):
         page.wait_for_selector("#players .player-row")
         page.click("#open-log")
         page.wait_for_selector("#log-sheet.show")
-        assert not page.is_visible("#rankings-link")
+        assert not page.is_visible('#menu-tabs [data-tab="rankings"]')
+        # Its added tab is for another network.
+        assert page.eval_on_selector_all("#menu-tabs button:visible", "(bs) => bs.map((b) => b.textContent)") == [
+            "Log", "History"]
     finally:
         page.close()
 

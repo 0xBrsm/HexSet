@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from conftest import new_tables
-from hexset.server.api import LIVE_IDLE_SECONDS, ApiError, ApiKey, Origin, load_api_keys, stamp_client, PARALLEL_NOTICE
+from hexset.server.api import LIVE_IDLE_SECONDS, ApiError, ApiKey, Config, Origin, load_api_keys, stamp_client, PARALLEL_NOTICE
 from hexset.server.web import HexSetServer, forwarded_ip
 
 # A client that says what it is, as the HTTP API asks of any but the page.
@@ -85,6 +85,36 @@ def test_only_the_named_forwarding_header_is_read(serve, tmp_path):
     _deal(serve(forwarded_header="CF-Connecting-IP"), {"X-Forwarded-For": "203.0.113.7"})
     ips = sorted(c["ip"] for c in _clients(tmp_path))
     assert ips == ["127.0.0.1", "127.0.0.1", "203.0.113.7", "203.0.113.9"]
+
+
+def test_of_several_forwarding_headers_the_first_with_an_address_wins(serve, tmp_path):
+    both = ("CF-Connecting-IP", "X-Forwarded-For")
+    _deal(serve(forwarded_header=both), {"CF-Connecting-IP": "203.0.113.9", "X-Forwarded-For": "203.0.113.7"})
+    _deal(serve(forwarded_header=both), {"X-Forwarded-For": "198.51.100.1, 203.0.113.7"})
+    _deal(serve(forwarded_header=both), {"CF-Connecting-IP": "junk", "X-Forwarded-For": "203.0.113.8"})
+    _deal(serve(forwarded_header=both))
+    ips = sorted(c["ip"] for c in _clients(tmp_path))
+    assert ips == ["127.0.0.1", "203.0.113.7", "203.0.113.8", "203.0.113.9"]
+
+
+def test_the_menu_tabs_go_only_to_the_networks_named(serve):
+    tabs = (("Live", "https://example.org/live"), ("Notes", "/notes"))
+    listed = [{"label": "Live", "url": "https://example.org/live"}, {"label": "Notes", "url": "/notes"}]
+
+    def menu(base: str, headers: dict | None = None) -> dict:
+        request = urllib.request.Request(base + "/api/menu", headers=headers or {})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read())
+
+    assert menu(serve()) == {"tabs": []}
+    assert menu(serve(menu_tabs=tabs)) == {"tabs": listed}
+    inside = serve(forwarded_header="X-Forwarded-For", menu_tabs=tabs,
+                   menu_tabs_for=("10.0.0.0/8", "100.64.0.0/10"))
+    assert menu(inside, {"X-Forwarded-For": "10.1.2.3"}) == {"tabs": listed}
+    assert menu(inside, {"X-Forwarded-For": "100.100.1.2"}) == {"tabs": listed}
+    assert menu(inside, {"X-Forwarded-For": "203.0.113.7"}) == {"tabs": []}
+    assert menu(inside) == {"tabs": []}
+    assert Config(menu_tabs=tabs, menu_tabs_for=("10.0.0.0/8",)).menu_view(None) == []
 
 
 def test_forwarded_ip_takes_the_last_entry_and_rejects_garbage():

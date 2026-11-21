@@ -88,19 +88,18 @@ cleared inside, so a trade made after a build replays after that build.
 | `fragment_threshold` | `0.0` | The proposer cutoff a full target is gated on |
 | `max_fragments` | `1` | Fragments one target may be offered as (1 or 2) |
 | `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `ENUMERATION_CARDS`. One side of a fragment is always a single card |
-| `gate_plies` | `0` | Plies rolled forward over the exchanged hand before it is valued |
 | `fit_offers` | `False` | Put first the offers and counters that fit what the counterparty has shown it wants and will give up (`fit`, off the public ledger); elsewhere the same choice as without it. Offers are planned only under `fragment_trades`, so there it orders both; under card caps or a responder price alone it orders counters |
 | `trade_floor_relative` | `False` | Read the floor relative to the table's points: `trade_floor` times the deciding seat's share of the table's victory points (its own, hidden cards counted, over its own and every other seat's public points), so a seat behind clears exchanges a seat ahead would refuse |
-| `gate_own_frame` | `True` | Value every position from this seat's own frame, whoever is to move: the frame that reads its development cards. Off, a position another seat is to move in is valued from that seat's frame, on a world sampled from this seat's belief |
-| `gate_frames` | `"one"` | On another seat's turn, the frames a position is valued from, this seat's entry of each averaged: `"one"` (the frame above), `"pair"` (this seat's and the mover's) or `"all"` (every seat's) |
 | `open_asks` | `True` | Put up one open ask in place of several one-for-one asks for the same card ([open offers](#open-offers)). A gate planning its offers (`fragment_trades`) offers its plan instead |
 
 `TradeParams` raises `ValueError` for a negative `max_offers`, floor, risk or
-threshold, a cap below 1, `max_fragments` outside 1..2, a negative
-`gate_plies`, a `gate_frames` other than the three, and a `fragment_cards`
-wider than a declared `max_give_cards` under `fragment_trades`. `gate_plies`,
-`gate_own_frame` and `gate_frames` are read by the network gate
-(`hexset.clients.netbot`); a bot that searches sets its own depth.
+threshold, a cap below 1, `max_fragments` outside 1..2, and a
+`fragment_cards` wider than a declared `max_give_cards` under
+`fragment_trades`. The network gate (`hexset.clients.netbot`) values every
+position in its own seat's frame, one forward, whoever is to move.
+`TradeParams.from_meta` raises `ValueError` for metadata that sets a removed
+gate option: a `gate_plies` other than `0`, a `gate_own_frame` other than
+`1`, or any `gate_frames`.
 
 One set ships: **`UNLIMITED`**, `TradeParams()`, with no card caps, a floor
 at zero, no response charge, no offer budget and no planning; it makes open
@@ -311,7 +310,7 @@ strict = MyBot(rng, trade=replace(MY_TRADE, trade_floor=0.5))
 
 `trade` is the gate's whole parameter set. `DeclaredTrade` reads every limit
 the engine and `retune` ask a gate for (`trade_params`, `max_offers`,
-`trade_floor`, `gate_plies`, ...) through it, and its setters write through
+`trade_floor`, ...) through it, and its setters write through
 `retune`.
 
 A checkpoint declares its own in ONNX metadata; see

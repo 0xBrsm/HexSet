@@ -1,17 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""A rollout's other seats played by a conditioned model (`hexset.clients.conditioned`)."""
+"""A rollout's other seats played by a model of them (`hexset.clients.conditioned`)."""
 from __future__ import annotations
 
 import random
 
 import numpy as np
-import pytest
 
 from hexset.actions import ActionType, apply, legal_actions
 from hexset.board.board import random_base_board
 from hexset.bots.base import Closes, TradesBy, watch, watches
 from hexset.clients import conditioned as C
-from hexset.clients._modelmeta import search_config
 from hexset.game import Phase, start, to_move
 from hexset.rollout import paired_copy
 
@@ -25,7 +23,7 @@ def after_setup(seed: int = 0):
 
 
 class Uniform:
-    """A stand-in for `ConditionedPolicy`: a flat prior over each row's options."""
+    """A stand-in for the other seats' policy: the last option of each row."""
 
     width = 3
 
@@ -51,16 +49,6 @@ class Own:
 
     def score_rows(self, rows):
         return [(np.full(len(o), 1 / len(o)), (0.25,) * 4) for _, _, o in rows]
-
-
-def test_the_pair_is_named_beside_the_file_both_or_neither():
-    meta = {"search": "rollout", "opponents": "a.onnx", "opponent_encoder": "b.onnx"}
-    assert search_config(meta).rollout.opponents == ("a.onnx", "b.onnx")
-    assert search_config({"search": "rollout"}).rollout.opponents is None
-    for bad in ({"opponents": "a.onnx"}, {"opponent_encoder": "b.onnx"},
-                {"opponents": "../a.onnx", "opponent_encoder": "b.onnx"}):
-        with pytest.raises(ValueError):
-            search_config({"search": "rollout", **bad})
 
 
 def test_a_playout_routes_this_seat_to_its_own_policy_and_the_rest_to_the_model():
@@ -91,34 +79,10 @@ def test_the_context_carries_the_seat_and_every_condition_to_a_worker():
     assert worker.others.conditions[0][0] == 1
 
 
-def _policy_without_a_session(width=3, seed=0):
-    p = C.ConditionedPolicy.__new__(C.ConditionedPolicy)
-    p.width, p.conditions, p.rng = width, {}, random.Random(seed)
-    return p
-
-
-def test_copies_of_one_world_draw_alike_and_other_worlds_do_not():
+def test_copies_of_one_world_carry_its_seed_for_an_opponent_model_to_key_draws_by():
     world = after_setup()
     a, b, c = paired_copy(world, 7, 0), paired_copy(world, 7, 0), paired_copy(world, 8, 0)
-    p = _policy_without_a_session()
-    da = [p._uniform(a, 1) for _ in range(5)]
-    db = [p._uniform(b, 1) for _ in range(5)]
-    dc = [p._uniform(c, 1) for _ in range(5)]
-    assert da == db and da != dc
-    assert p._uniform(a, 2) != da[0]                # each seat its own stream
-    assert p.condition(3).tolist() == [0.0, 0.0, 0.0]
-
-
-def test_a_move_is_sampled_from_the_prior_by_its_draw():
-    p = _policy_without_a_session()
-    game = after_setup()
-    options = ("first", "second", "third")             # act_rows only indexes them
-    p.prior_rows = lambda rows: [np.array([0.2, 0.5, 0.3])]
-    picks = {}
-    for u, want in ((0.1, 0), (0.3, 1), (0.69, 1), (0.71, 2)):
-        p._uniform = lambda g, s, u=u: u
-        picks[u] = p.act_rows([(game, 0, options)])[0]
-        assert picks[u] == options[want]
+    assert a.paired_seed == b.paired_seed == 7 and c.paired_seed == 8
 
 
 class Watching:
@@ -142,40 +106,6 @@ def test_watch_reaches_the_mover_through_its_wrappers():
     assert watches(seat) and not watches(TradesBy(Closes(Own(), object()), object()))
 
 
-class Encoder:
-    def __init__(self) -> None:
-        self.steps = []
-
-    def step(self, game, seat, action):
-        self.steps.append((seat, action))
-        return np.full(3, len(self.steps), np.float32)
-
-
-def _opponents():
-    o = C.Opponents.__new__(C.Opponents)
-    o.rng, o.policy, o.encoder, o.moves = random.Random(0), _policy_without_a_session(), Encoder(), 0
-    o.hold = None
-    return o
-
-
-def test_the_model_reads_other_seats_moves_with_a_choice_never_its_own():
-    game = after_setup()
-    game.phase, game.current_player = Phase.ROLL, 1
-    o = _opponents()
-    roll = next(a for a in legal_actions(game) if a.type is ActionType.ROLL)
-    o.seen(game, 0, roll, 0)                         # our own move: not read
-    assert o.encoder.steps == []
-    # a seat whose only legal move is the roll has no choice to read
-    o.seen(game, 1, roll, 0)
-    assert o.encoder.steps == [] or len(legal_actions(game, 1)) > 1
-    game.phase = Phase.MAIN
-    end = next(a for a in legal_actions(game) if a.type is ActionType.END_TURN)
-    if len(legal_actions(game, 1)) > 1:
-        o.seen(game, 1, end, 0)
-        assert o.encoder.steps[-1] == (1, end)
-        assert o.policy.conditions[1].tolist() == [len(o.encoder.steps)] * 3
-
-
 def test_a_seat_watches_each_move_before_it_is_applied():
     from hexset.game import observe
     from hexset.seat import Seat
@@ -192,28 +122,3 @@ def test_a_seat_watches_each_move_before_it_is_applied():
     action = next(a for a in legal_actions(game) if a.type is ActionType.ROLL)
     seat.play(mover, action, roll=8)
     assert before == [(Phase.ROLL, mover, 0)]
-
-
-def test_the_model_reads_moves_in_worlds_dealt_by_its_hold_model(monkeypatch):
-    """`Opponents.seen` samples its world with the hold model it was given
-    (the searching file's), `None` dealing every unseen card alike."""
-    from hexset.holding import HoldModel
-    from hexset.view import View
-
-    model = HoldModel(shape=1.0, scale=(0.5, 1.0, 0.6, 0.6, 0.7))
-    holds = []
-    sample = View.sample
-
-    def recording(self, rng, hold=None):
-        holds.append(hold)
-        return sample(self, rng, hold)
-
-    monkeypatch.setattr(View, "sample", recording)
-    game = after_setup()
-    game.phase, game.current_player = Phase.ROLL, 1
-    roll = next(a for a in legal_actions(game) if a.type is ActionType.ROLL)
-    for hold in (None, model):
-        o = _opponents()
-        o.hold = hold
-        o.seen(game, 1, roll, 0)
-    assert holds == [None, model]

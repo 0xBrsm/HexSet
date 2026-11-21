@@ -45,7 +45,7 @@ from hexset.server.constants import RECORD_CONTRACTS
 from hexset.clients._modelmeta import (
     SearchConfig, closer_config, finish_decisions_config, gate_config, hold_config, robber_hits_config,
     robber_tip_config,
-    search_config, trader_config, trader_veto_config, trader_veto_of, trader_veto_pick_config, trader_veto_pick_of,
+    search_config, trader_config, trader_veto_config, trader_veto_of,
 )
 from hexset.trading import UNLIMITED, TradeParams
 
@@ -511,14 +511,12 @@ class Loaded:
     closer: str | None = None
     #: Whether the file's own gate vetoes that trader (`trader_veto`).
     trader_veto: bool = False
-    #: Whether that veto picks which taker to deal with (`trader_veto_pick`).
-    trader_veto_pick: bool = False
     #: How far its robber moves lean towards the leader (`robber_tip`).
     robber_tip: float = 0.0
     #: Whether its robber moves always hit another seat where one can be hit (`robber_hits`).
     robber_hits: bool = False
     #: How the other seats' held development cards are dealt in its search
-    #: and gate worlds (`hold_shape`, `hold_scale`); `None` deals them alike.
+    #: worlds (`hold_shape`, `hold_scale`); `None` deals them alike.
     hold: HoldModel | None = None
     #: The game types it plays (`modes`, `hexset.clients.onnxmeta.modes_of`).
     modes: tuple[str, ...] = (STANDARD_GAME.name,)
@@ -530,10 +528,6 @@ class Loaded:
     @property
     def trade_floor(self) -> float:
         return self.gate.trade_floor
-
-    @property
-    def gate_plies(self) -> int:
-        return self.gate.gate_plies
 
 
 #: What `threads` means when nothing asks for anything else. One, because an
@@ -626,7 +620,6 @@ def _load_cached(
         trader=trader_config(meta),
         closer=closer_config(meta),
         trader_veto=trader_veto_config(meta),
-        trader_veto_pick=trader_veto_pick_config(meta),
         robber_tip=robber_tip_config(meta),
         robber_hits=robber_hits_config(meta),
         hold=hold_config(meta),
@@ -785,7 +778,7 @@ def spawn(
     own = _spawn_own(path, board, loaded, rng, device, threads, workers, pools, search)
     own = closed(own, closer, board, random.Random() if rng is None else rng)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
-                  veto_picks=trader_veto_pick_of(loaded), hold=loaded.hold)
+                  hold=loaded.hold)
 
 
 def _pool(path, load_policy, workers, pools, loaded_as):
@@ -805,22 +798,6 @@ def _pool_policy(path: str, topology: Topology, device: str):
     return load(path, topology, device, 1).policy
 
 
-def _pool_routed(path: str, opponents: tuple[str, str], topology: Topology, device: str):
-    """A rollout worker's copy of a playout that plays the other seats by the
-    file's opponent pair (`SearchConfig.rollout.opponents`): its own policy at
-    its own seat, the pair's policy at every other, conditioned as the
-    searching process sends each share (`SeatRouted.context`)."""
-    from hexset.clients.conditioned import ConditionedPolicy, SeatRouted
-
-    return SeatRouted(load(path, topology, device, 1).policy, ConditionedPolicy(opponents[0], topology, threads=1))
-
-
-def _opponent_files(path: str, names: tuple[str, str]) -> tuple[str, str]:
-    """The opponent pair a file names, as paths beside it."""
-    here = os.path.dirname(os.path.abspath(path))
-    return os.path.join(here, names[0]), os.path.join(here, names[1])
-
-
 def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None, search=True):
     """`spawn` before any trader: the file's own one forward or search. A
     rollout file is the arena's `rollout:` entrant of the same settings
@@ -835,15 +812,6 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None,
         )
     rollout = loaded.search.rollout
     if rollout is not None:
-        opponents = pool_load = None
-        if rollout.opponents is not None:
-            from hexset.clients.conditioned import Opponents
-
-            files = _opponent_files(path, rollout.opponents)
-            opponents = Opponents(*files, board.topology, threads=threads,
-                                  rng=random.Random() if rng is None else random.Random(rng.getrandbits(64)),
-                                  hold=loaded.hold)
-            pool_load = partial(_pool_routed, path, files, board.topology, device)
         return rollouts_for(
             load(path, board.topology, device, threads),
             worlds=rollout.worlds,
@@ -852,14 +820,10 @@ def _spawn_own(path, board, loaded, rng, device, threads, workers=0, pools=None,
             horizon=rollout.horizon,
             full_setup=rollout.full_setup,
             rng=rng,
-            pool=_pool(path, pool_load or partial(_pool_policy, path, board.topology, device), workers, pools,
-                       (board.topology, device, rollout.opponents)),
+            pool=_pool(path, partial(_pool_policy, path, board.topology, device), workers, pools,
+                       (board.topology, device)),
             own_calibration=loaded.search.own_calibration,
-            opponents=opponents,
-            mix=rollout.mix,
-            anchor=rollout.anchor,
             det=rollout.det,
-            salt=rollout.salt,
             margin=rollout.margin,
             stop=rollout.stop,
             moves=rollout.moves,

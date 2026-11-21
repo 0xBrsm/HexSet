@@ -62,15 +62,11 @@ engine's board indexing.
 | `decisive` | The prior on one move at which a root is played without searching, under either search | Absent: every root with a choice is searched. A value that is not a number in (0, 1] fails the load |
 | `horizon` | Turns after the root at which a playout stops and is scored by the value head, under `search=rollout` | Absent: playouts run to the game's end. A value that is not a whole number of 1 or more fails the load |
 | `setup` | `full`: every opening root is played out whatever `decisive` says, under `search=rollout` | Absent: `decisive` applies everywhere. Any other value fails the load |
-| `mix` | A temperature in win chance: a searched root plays a candidate drawn from the mixed strategy over the candidates' scores and prior (`hexset.rollout.mixed_strategy`), under `search=rollout` | Absent or `0`: the best-scoring candidate. A value that is not a finite number of 0 or more fails the load |
-| `anchor` | The exponent on the prior that `mix` is anchored to: `1` the prior itself, `0` every candidate alike, under `search=rollout` | Absent: `1`. A value that is not a finite number of 0 or more fails the load |
-| `det` | `1`: each searched root draws its worlds, their seeds and its `mix` draw from a stream seeded by what the deciding seat can see (`hexset.game.observed_digest`) and `salt`, under `search=rollout` | Absent or `0`: the searcher's own running stream. Any other value fails the load |
-| `salt` | A whole number mixed into `det`'s seed | Absent: `0`. A value that is not a whole number, or one given without `det = 1`, fails the load |
-| `margin` | Standard errors: a searched root outside the setup phases plays another candidate than the policy's own move only where it beats that move by more than this many standard errors of their paired difference over the worlds (`hexset.rollout.PairedRollouts.margin`), under `search=rollout` | Absent or `0`: the best-scoring candidate. A value that is not a finite number of 0 or more, or one above 0 with a `mix` above 0, fails the load |
+| `det` | `1`: each searched root draws its worlds and their seeds from a stream seeded by what the deciding seat can see (`hexset.game.observed_digest`), under `search=rollout` | Absent or `0`: the searcher's own running stream. Any other value fails the load |
+| `margin` | Standard errors: a searched root outside the setup phases plays another candidate than the policy's own move only where it beats that move by more than this many standard errors of their paired difference over the worlds (`hexset.rollout.PairedRollouts.margin`), under `search=rollout` | Absent or `0`: the best-scoring candidate. A value that is not a finite number of 0 or more fails the load |
 | `stop` | Standard errors: under a `margin`, a candidate that trails the policy's own move by more than this many standard errors at a check is played no further (`hexset.rollout.PairedRollouts.stop`), under `search=rollout` | Absent or `0`: every candidate plays every world. A value that is not a finite number of 0 or more, or one above 0 without a `margin` above 0, fails the load |
 | `roots` | `moves`: every searched root a single move, whole options or not (`hexset.rollout.PairedRollouts.moves`), under `search=rollout` | Absent or `whole`: whole decisions where the policy lists them. Any other value fails the load |
 | `tie` | A win chance in [0, 1): under a `margin`, a root where no candidate passes it is decided by the point lead among the candidates whose score lies within this of the policy's own move, with `margin` standard errors to spare (`hexset.rollout.PairedRollouts.tie`), under `search=rollout` | Absent: 0.005 (`hexset.rollout.TIE`), which acts only under a `margin`. `0`: the lead plays no part. A value that is not a number in [0, 1), or one above 0 without a `margin` above 0, fails the load |
-| `opponents`, `opponent_encoder` | Two files beside this one that play every other seat of a playout, under `search=rollout` ([opponent models](#opponent-models)) | Absent: the file's own policy plays every seat. One without the other, or a name with a path in it, fails the load |
 | `own_calibration` | `"a,b"`: the seat's own win chance read as `sigmoid(a + b * logit(p))` (`hexset.mcts.calibrate_own`), the other seats scaled so the vector keeps its sum. Under `search=mcts`, at every evaluated position and in the trade gate; otherwise in the trade gate and robber deals alone | Absent: no recalibration. A value that is not two finite numbers with `b > 0` fails the load |
 | `finish_decisions` | Read the graph's values where a setup turn or Road Building card is finished, not inside it (`hexset.clients.finishing.Finishing`): for a value head taught only where decisions start | Off; `1`/`true`/`yes`/`on` enable it |
 | `committee` | Member files beside this one, joined by `+`, that vote with it ([committees](#committees)) | Absent: the file plays alone |
@@ -78,11 +74,18 @@ engine's board indexing.
 | `closer` | A bot, named as a lineup names it, whose move is played in place of the checkpoint's wherever the closer has one (`hexset.arena.closed`, `hexset.bots.Closes`) | Absent or empty: none |
 | `robber_tip` | Under one forward per decision, how far a robber move leans towards the leader (the other seat with the highest value): the leader's best robber move by prior is played in place of the chosen one where its prior is at least this fraction of the chosen one's (`hexset.clients.netbot.tip_robber`) | `0.0`, off; held to `[0.0, 1.0]`; an unreadable value is off |
 | `robber_hits` | Where a hex with another seat's building and none of the mover's is legal, a robber move goes only to such a hex (`hexset.clients.netbot.hit_robber`): never to an empty hex or one the mover shares. A seat with no cards still counts: the robber blocks its hex. Where no such hex is legal, every move stays, so the rule never forces the robber onto the mover's own hexes. One forward scores the remaining moves and plays the best by prior; `search=rollout` searches only the remaining moves; `search=mcts` plays the most-visited remaining move | Off; `1`/`true` enable it |
-| `hold_shape`, `hold_scale` | How other seats' held development cards are dealt in every world the seat samples (its search, its trade gate, its opponent model): a card of kind `k` is still unplayed after `c` of its owner's turns with probability `scale[k] ** (c ** shape)` (`hexset.holding.HoldModel`; `HoldModel.meta` writes both keys). `hold_scale` is one chance in (0, 1] per kind, comma separated, by `DevCard` | Absent: every unseen card is dealt alike. One key without the other, a shape that is not a positive number or a scale that is not one chance in (0, 1] per kind fails the load |
+| `hold_shape`, `hold_scale` | How other seats' held development cards are dealt in every world the seat's search samples: a card of kind `k` is still unplayed after `c` of its owner's turns with probability `scale[k] ** (c ** shape)` (`hexset.holding.HoldModel`; `HoldModel.meta` writes both keys). `hold_scale` is one chance in (0, 1] per kind, comma separated, by `DevCard` | Absent: every unseen card is dealt alike. One key without the other, a shape that is not a positive number or a scale that is not one chance in (0, 1] per kind fails the load |
 | `hold_asked`, `hold_offered` | How other seats' untyped resource cards (`View.unknown`) are dealt in every world the seat samples, by what each seat has shown the table on its ledger (`hexset.ledger.SeatLedger.want` and `waste`): an untyped card of a resource the seat has asked for counts `hold_asked` times as much as another, and one of a resource it has offered away `hold_offered` times (`HoldModel.shown`; `HoldModel.meta` writes both keys when either differs from 1). Each a positive number | Absent: 1 each, and every untyped card is dealt alike. One key without the other, either without `hold_shape` and `hold_scale`, or a weight that is not a positive number fails the load |
 
 Search keys are read only under the `search` that uses them, so a stale
 `simulations` does not turn a policy into a search.
+
+The keys of removed options fail the load of any file that sets them, naming
+the key ([load errors](#load-errors-and-fallbacks)): `mix`, `anchor`,
+`opponents`, `opponent_encoder`, `trader_veto_pick` and `gate_frames`, and a
+`salt` other than `0`, a `gate_plies` other than `0` or a `gate_own_frame`
+other than `1`. A file that sets `salt = 0`, `gate_plies = 0` or
+`gate_own_frame = 1` loads and plays as one without the key.
 
 ### How it trades
 
@@ -96,9 +99,6 @@ number is clamped to its bounds.
 | `max_offers` | Offers this gate makes on its own turn; `0` disables its trading | Absent: no limit of its own; clamped to 0..8. `max_trades` is read as `max_offers` when `max_offers` is absent |
 | `trade_floor` | Clearing floor on this checkpoint's own gains, in win probability | 0.0; clamped to `[0.0, 1.0]` |
 | `trade_floor_relative` | Scale the floor by the seat's share of the table's victory points | Off; `1`/`true`/`yes`/`on` enable it |
-| `gate_plies` | Plies rolled forward over the exchanged hand before it is valued | 0; at most 16 |
-| `gate_own_frame` | Value every position from this seat's own frame, whoever is to move | On; `0`/`false`/`no`/`off` disable it |
-| `gate_frames` | On another seat's turn, the frames a position is valued from and averaged: `one`, `pair` or `all` | `one`; any other word reads `one` |
 | `max_give_cards` | Cards this gate parts with in one exchange | Absent: no limit of its own; at least 1 |
 | `responder_card_risk` | Charge per outgoing card on a response | 0.0; clamped to `[0.0, 1.0]` |
 | `open_asks` | Put repeated one-for-one asks for a card up as one open ask ([open offers](trading.md#open-offers)) | On; `0`/`false`/`no`/`off` disable it |
@@ -109,9 +109,8 @@ number is clamped to its bounds.
 | `fit_offers` | Order counters, and under `fragment_trades` offers, by what the counterparty has shown it wants and gives up | Off; `1`/`true`/`yes`/`on` enable it |
 | `trader` | A bot, named as a lineup names it, that answers this checkpoint's trades while the checkpoint plays its moves | Absent or empty: the checkpoint's own gate |
 | `trader_veto` | Every exchange the `trader` would make must also clear this checkpoint's own gain above its `trade_floor` (`hexset.bots.Vetoed`) | Off; `1`/`true`/`yes`/`on` enable it |
-| `trader_veto_pick` | `gain`: the veto also picks which taker of the seat's own offer to deal with, the one its own value gains most from | Absent: the trader picks |
 
-`trade_floor` and `gate_plies` describe this checkpoint's value head. A file
+`trade_floor` describes this checkpoint's value head. A file
 declaring no trade key is read at `hexset.trading.UNLIMITED`: floor 0, so any
 strictly positive gain clears, no response charge, no offer budget, no
 planning, no card caps, and open asks on. `TradeParams.as_meta()` writes a
@@ -134,9 +133,13 @@ raises there, naming the file; load the registering module with
 - a missing or non-integer `players` or board count, or a board count that
   does not match the topology;
 - a present `iteration` that is not an integer;
-- a `decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt`, `margin`, `stop`, `tie`, `roots` or `own_calibration` that does not read,
-  and a lone `opponents` or `opponent_encoder`: these change what the seat
-  does, so the load fails rather than playing on a guess;
+- a `decisive`, `horizon`, `setup`, `det`, `margin`, `stop`, `tie`, `roots` or
+  `own_calibration` that does not read: these change what the seat does, so
+  the load fails rather than playing on a guess;
+- a key of a removed option: `mix`, `anchor`, `opponents`,
+  `opponent_encoder`, `trader_veto_pick` or `gate_frames` with any value, a
+  `salt` other than `0`, a `gate_plies` other than `0`, or a `gate_own_frame`
+  other than `1`;
 - a `committee` that names a member not beside the file, or a member that
   declares a committee of its own;
 - a `hold_shape` without `hold_scale`, or the reverse, or either out of range;
@@ -345,7 +348,7 @@ the selected action like any submitted move.
 Search scores a finished game as a one-hot winner vector in board-seat
 order; the value head must use win probabilities on that scale.
 
-Search and trade-gate continuation call the graph on batches of positions,
+Search and the trade gate call the graph on batches of positions,
 so export a dynamic batch axis. One forward per decision uses a batch of one.
 Value reads fall back to one call per row for a graph with a fixed batch
 size; action and prior reads do not.
@@ -401,12 +404,12 @@ and per-seat reach. On the standard board:
 next-roll odds to the table token. `9d` is the two-seat observation, defined
 only for two seats: each hand is exact, and only the development deck is
 hidden. `9d.1` appends each seat's production and bank rates to its token.
-`11d` is also two-seat: my token (35 wide) and the opponent's (27 wide)
+`11d` is also two-seat: the seat's own token (35 wide) and the opponent's (27 wide)
 have widths of their own, the table is a board block of three columns (the
 turn count, the next roll's chance of a seven, whether the dice have been
 thrown), and a hex reads its number one-hot. `11` is `11d` at two to four
-live seats: my token (40 wide) and one token per opponent (43 wide) in turn
-order after me, each beginning with `11d`'s columns in `11d`'s places, and a
+live seats: the seat's own token (40 wide) and one token per opponent (43
+wide) in turn order after it, each beginning with `11d`'s columns in `11d`'s places, and a
 board block of nine columns that begins with `11d`'s three.
 [training.md](training.md#decision-observations) and the module docstring
 of `hexset.contract9` give every column.
@@ -458,32 +461,12 @@ whole. The members must list the same options in the same order, or the
 listing raises. A position inside a decision with no plan is voted a move at a
 time. The vote reads each member's `prior` and `value`.
 
-## Opponent models
-
-Paired rollouts play every seat of a playout with the searching file's own
-policy. A `search=rollout` file may name two other files beside it for the
-other seats (`hexset.clients.conditioned`):
-
-- `opponents`: a record graph that also declares an input `condition`, one
-  float32 vector per row saying how the seat to move plays. Its move is
-  sampled from its `prior` at temperature 1.
-- `opponent_encoder`: a sequence graph, read on each other seat's moves as
-  the table makes them. It declares record fields (the record from the
-  moving seat), `action` (the move's action index) and `state`, and answers
-  `condition` and `next_state`. A seat not yet seen has a zero state and no
-  condition.
-
-The encoder reads each move in a world drawn from the searching seat's own
-view, never the table's true state. The searching file still plays its own
-seat in every playout, reads every value and scores every root. The two
-`condition` widths must agree.
-
 ## Trade gate
 
 `hexset.clients.netbot.NetworkBot` (one forward per decision), `GatedSearch`
 (MCTS) and `GatedRollouts` (paired rollouts) put the shared network trade
 gate in front of the graph: each candidate exchange is valued as the change
-in this seat's `value`, read after `gate_plies` plies (one forward at `0`).
+in this seat's `value`, one forward in this seat's own frame.
 The checkpoint's trade keys configure it, and it plays the protocol in
 [trading.md](trading.md). The trade round it answers is
 [trade rounds](guide.md#trade-rounds); its runtime is

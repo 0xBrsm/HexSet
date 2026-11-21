@@ -19,8 +19,9 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from hexset import decisions
 from hexset.actions import apply, legal_actions
-from hexset.game import Game, Phase, imagine, pending_free_roads, to_move
+from hexset.game import Game, imagine, to_move
 
 __all__ = ["Finishing", "inside", "finished", "MAX_FINISHING_MOVES"]
 
@@ -31,24 +32,31 @@ MAX_FINISHING_MOVES = 8
 
 
 def inside(game: Game) -> bool:
-    """Whether `game` stands inside a setup turn or a Road Building card."""
-    return game.phase is Phase.SETUP_ROAD or bool(pending_free_roads(game))
+    """Whether `game` stands inside a setup turn or a Road Building card
+    (`hexset.decisions.inside`; a native playout copy answers for itself)."""
+    return decisions.inside(game)
 
 
 def finished(policy, game: Game) -> Game:
     """An exact copy of `game` with the decision under way played to its end
     by `policy`'s most probable moves. `game` itself is untouched; no chance
-    is drawn, since placing a road draws none."""
-    copy = imagine(game, random.Random(0), randomize_deck=False)
+    is drawn, since placing a road draws none. A native playout copy
+    (`hexset.native.playout.NativeCopy`) is finished on a native fork."""
+    native = not isinstance(game, Game)
+    copy = game.fork() if native else imagine(game, random.Random(0), randomize_deck=False)
     for _ in range(MAX_FINISHING_MOVES):
         if not inside(copy):
             break
-        seat = to_move(copy)
-        options = tuple(legal_actions(copy))
+        seat = copy.to_move() if native else to_move(copy)
+        options = copy.legal() if native else tuple(legal_actions(copy))
         if not options:
             break
         ((prior, _),) = policy.score_rows([(copy, seat, options)])
-        apply(copy, options[int(np.argmax(prior))])
+        choice = options[int(np.argmax(prior))]
+        if native:
+            copy.apply(choice)
+        else:
+            apply(copy, choice)
     return copy
 
 

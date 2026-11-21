@@ -5,6 +5,69 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.39.0
+
+### Breaking
+
+- **Paired rollouts no longer play a mixed strategy.**
+  `hexset.rollout.mixed_strategy`, the `mix` and `anchor` arguments of
+  `PairedRollouts` and `netbot.rollouts_for`, the `rollout:` spec's `mix=`
+  and `anchor=` options, `RolloutConfig.mix` and `RolloutConfig.anchor`, and
+  `Decision.mix` are removed. A model file whose metadata sets `mix` or
+  `anchor` now fails to load, naming the key.
+
+- **A deterministic search has no salt.** The `salt` argument of
+  `PairedRollouts` and `netbot.rollouts_for`, the `rollout:` spec's `salt=`
+  option, `RolloutConfig.salt` and `Decision.salt` (with the `salt` field of
+  a decision's log line) are removed. `PairedRollouts.decision_key` hashes
+  what it hashed at salt 0, so a `det` search decides each position as
+  before. A model file whose metadata sets `salt` to anything but `0` now
+  fails to load, naming the key.
+
+- **The network trade gate reads one frame.** `TradeParams.gate_frames` and
+  `TradeParams.gate_own_frame` are removed: the gate values every position
+  in its own seat's frame, one forward, whoever is to move. A model file
+  whose metadata sets `gate_frames`, or `gate_own_frame` to anything but
+  `1`, now fails to load, naming the key.
+
+- **The network trade gate rolls no continuation.** `TradeParams.gate_plies`,
+  the `gate_plies` attribute of `DeclaredTrade` and `onnxbot.Loaded`, and the
+  loose `gate_plies` that `trading.params_of` read are removed, and
+  `TradeParams.as_meta` no longer writes `gate_plies`. A model file whose
+  metadata sets `gate_plies` to anything but `0` now fails to load, naming
+  the key.
+
+- **A vetoing trader always picks for itself.** The `picks` argument of
+  `hexset.bots.Vetoed`, the `veto_picks` argument of `arena.traded` and
+  `onnxbot.Loaded.trader_veto_pick` are removed. A model file whose
+  metadata sets `trader_veto_pick` now fails to load, naming the key.
+
+- **A model file cannot name an opponent pair.**
+  `hexset.clients.conditioned.ConditionedPolicy`, `SeatEncoder` and
+  `Opponents`, and `RolloutConfig.opponents` are removed; `SeatRouted` and
+  the `opponents` argument of `netbot.rollouts_for` stay. A model file whose
+  metadata sets `opponents` or `opponent_encoder` now fails to load, naming
+  the key.
+
+### Added
+
+- **The ranker can be called on a timer.** `--rankings-every SECONDS` (and
+  `Config.rankings_every`) calls the ranker every SECONDS with the games read
+  so far, as well as at start and after each ranked game ends, for a ranker
+  whose rankings read more than the games it is handed.
+
+### Fixed
+
+- **A searched checkpoint with `finish_decisions=1` searches with native
+  playouts.** `hexset.clients.finishing.finished` finishes a native playout
+  copy (`hexset.native.playout.NativeCopy`) on a native fork, and
+  `finishing.inside` answers through `hexset.decisions.inside`. Before,
+  reading a value inside a setup turn or Road Building card on a native copy
+  raised `AttributeError`.
+
+- **The contract docs (`docs/onnx.md`, `docs/training.md`) call the deciding
+  seat's token the seat's own token.**
+
 ## 1.38.0
 
 ### Added

@@ -258,6 +258,30 @@ def test_the_server_ranks_its_journals_at_start_and_each_game_as_it_ends(tmp_pat
     assert set(rows) == {"Ada", "b-1", "c-1", "d-1", "Bea", "Cy", "Di", "Ed"}
 
 
+def test_with_rankings_every_the_ranker_is_called_again_with_no_new_game(tmp_path):
+    import time
+
+    _write(tmp_path, "old", [_header(id="old"), _action(0), _result(0, [10, 0, 0, 0])])
+    seen: list = []
+    tables = new_tables(games_dir=str(tmp_path), ranker=_tally(seen), rankings_min_games=0, rankings_every=0.05)
+    try:
+        deadline = time.monotonic() + 5
+        while len(seen) < 3 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(seen) >= 3 and all([g["id"] for g in games] == ["old"] for games in seen)
+    finally:
+        tables.close()
+    # without it, only at start
+    seen.clear()
+    tables = new_tables(games_dir=str(tmp_path), ranker=_tally(seen), rankings_min_games=0)
+    try:
+        tables.rankings.wait()
+        time.sleep(0.2)
+        assert len(seen) == 1
+    finally:
+        tables.close()
+
+
 def test_a_failing_ranker_leaves_the_last_good_board_up(tmp_path, capsys):
     _write(tmp_path, "one", [_header(id="one"), _action(0), _result(0, [10, 0, 0, 0])])
     calls = []

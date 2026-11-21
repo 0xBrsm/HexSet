@@ -20,7 +20,7 @@ from hexset.clients._modelmeta import (
     trader_of,
 )
 from hexset.trading import UNLIMITED
-from hexset.trading._params import MAX_GATE_PLIES, MAX_TRADE_FLOOR
+from hexset.trading._params import MAX_TRADE_FLOOR
 
 
 def test_a_checkpoint_asking_for_search_gets_it_with_its_own_budget():
@@ -118,20 +118,11 @@ def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():
     """
     assert gate_config({}) == UNLIMITED
     assert gate_config({}).trade_floor == 0.0
-    assert gate_config({}).gate_plies == 0
 
 
 def test_a_checkpoint_carries_its_own_measured_floor():
     config = gate_config({"trade_floor": "0.0197"})
     assert config.trade_floor == pytest.approx(0.0197)
-
-
-def test_an_absurd_gate_plies_is_clamped_rather_than_honoured():
-    assert gate_config({"gate_plies": "10000"}).gate_plies == MAX_GATE_PLIES
-
-
-def test_an_unreadable_gate_plies_falls_back_instead_of_failing_the_load():
-    assert gate_config({"gate_plies": "not-a-number"}).gate_plies == 0
 
 
 @pytest.mark.parametrize(
@@ -193,41 +184,17 @@ def test_a_searched_file_can_ask_to_play_its_confident_roots_unsearched():
             search_config({"search": "mcts", "decisive": bad})
 
 
-def test_a_rollout_file_can_ask_for_a_mixed_strategy():
-    assert search_config({"search": "rollout", "mix": "0.02"}).rollout.mix == 0.02
-    assert search_config({"search": "rollout"}).rollout.mix == 0.0
-    assert search_config({"search": "rollout", "mix": ""}).rollout.mix == 0.0
-    assert search_config({"mix": "0.02"}).rollout is None
-    assert search_config({"search": "rollout", "mix": "0.01", "anchor": "0.5"}).rollout.anchor == 0.5
-    assert search_config({"search": "rollout", "mix": "0.01"}).rollout.anchor == 1.0
-
-
-@pytest.mark.parametrize("value", ["-0.01", "warm", "inf", "nan"])
-def test_an_unreadable_mix_fails_the_load(value):
-    """A mix changes what the seat plays: read wrong, it would play greedily."""
-    with pytest.raises(ValueError, match="mix"):
-        search_config({"search": "rollout", "mix": value})
-
-
-@pytest.mark.parametrize("value", ["-1", "flat", "inf"])
-def test_an_unreadable_anchor_fails_the_load(value):
-    with pytest.raises(ValueError, match="anchor"):
-        search_config({"search": "rollout", "mix": "0.01", "anchor": value})
-
-
 def test_a_rollout_file_can_ask_for_a_deterministic_search():
     assert search_config({"search": "rollout", "det": "1"}).rollout.det
-    sure = search_config({"search": "rollout", "det": "1", "salt": "7"}).rollout
-    assert (sure.det, sure.salt) == (True, 7)
-    off = search_config({"search": "rollout"}).rollout
-    assert (off.det, off.salt) == (False, 0)
+    assert search_config({"search": "rollout", "det": "1", "salt": "0"}).rollout.det
+    assert not search_config({"search": "rollout"}).rollout.det
     assert not search_config({"search": "rollout", "det": "0"}).rollout.det
 
 
 def test_a_rollout_file_can_ask_for_a_margin():
     assert search_config({"search": "rollout", "margin": "1.5"}).rollout.margin == 1.5
     assert search_config({"search": "rollout"}).rollout.margin == 0.0
-    assert search_config({"search": "rollout", "margin": "0", "mix": "0.01"}).rollout.margin == 0.0
+    assert search_config({"search": "rollout", "margin": "0"}).rollout.margin == 0.0
 
 
 def test_a_rollout_file_can_ask_to_stop_early_under_a_margin():
@@ -260,15 +227,25 @@ def test_an_unreadable_tie_fails_the_load(keys):
         search_config({"search": "rollout", **keys})
 
 
-@pytest.mark.parametrize("keys", [{"margin": "-1"}, {"margin": "wide"}, {"margin": "inf"},
-                                  {"margin": "1.5", "mix": "0.01"}])
+@pytest.mark.parametrize("keys", [{"margin": "-1"}, {"margin": "wide"}, {"margin": "inf"}])
 def test_an_unreadable_margin_fails_the_load(keys):
     with pytest.raises(ValueError, match="margin"):
         search_config({"search": "rollout", **keys})
 
 
-@pytest.mark.parametrize("keys", [{"det": "yes"}, {"det": "2"}, {"det": "1", "salt": "-1"},
-                                  {"det": "1", "salt": "seven"}, {"salt": "7"}, {"det": "0", "salt": "7"}])
-def test_an_unreadable_det_or_salt_fails_the_load(keys):
-    with pytest.raises(ValueError, match="det|salt"):
+@pytest.mark.parametrize("keys", [{"det": "yes"}, {"det": "2"}])
+def test_an_unreadable_det_fails_the_load(keys):
+    with pytest.raises(ValueError, match="det"):
         search_config({"search": "rollout", **keys})
+
+
+@pytest.mark.parametrize("search", ["rollout", "mcts", "none"])
+@pytest.mark.parametrize("key, value", [
+    ("mix", "0.02"), ("mix", "0"), ("anchor", "0.5"), ("salt", "7"), ("salt", "-1"),
+    ("opponents", "a.onnx"), ("opponent_encoder", "b.onnx"),
+])
+def test_a_removed_search_option_fails_the_load_by_name(search, key, value):
+    """A file asking for a mixed strategy, another salt or an opponent pair
+    would otherwise play without it: the load fails, naming the key."""
+    with pytest.raises(ValueError, match=f"`{key}`"):
+        search_config({"search": search, "det": "1", key: value})

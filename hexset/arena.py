@@ -464,7 +464,7 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
 
 
 def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, veto: bool = False,
-           veto_picks: bool = False, hold: object = None) -> Bot:
+           hold: object = None) -> Bot:
     """`bot`'s moves over `trader`'s trading (`hexset.bots.TradesBy`), the
     trader named as a lineup names it; `bot` itself where `trader` is `None`.
     The trader is seeded off `rng`'s state without drawing from it, so it
@@ -474,8 +474,7 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
     With `veto`, `bot`'s own gate vetoes the trader (`hexset.bots.Vetoed`):
     every exchange the trader would make must also clear `bot`'s gain above
     `bot`'s own floor. `bot` must trade (`max_offers` not `0`), or it would
-    veto everything. With `veto_picks` as well, the veto also chooses which
-    taker of the seat's own offer to deal with (`Vetoed` ``picks``).
+    veto everything.
 
     `hold` is the seat's own reading of the hidden cards
     (`hexset.view.HoldReading`, a checkpoint's `hold_of`): a trader that
@@ -493,7 +492,7 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, ve
     if veto:
         if not params_of(bot).trades:
             raise ValueError(f"a seat that does not trade cannot veto its trader {trader!r}")
-        gate = Vetoed(gate, bot, picks=veto_picks)
+        gate = Vetoed(gate, bot)
     return TradesBy(bot, gate)
 
 
@@ -1789,7 +1788,7 @@ def _mcts(name: str) -> Entrant:
 
 
 _ROLLOUT_FORM = (
-    "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full][:mix=<temperature>[:anchor=<exponent>]][:det=1[:salt=<n>]][:margin=<standard errors>[:stop=<standard errors>][:tie=<win chance>]][:roots=moves]]"
+    "rollout:<path>[@[<worlds>][:top=<n>][:decisive=<prior>][:horizon=<turns>][:setup=full][:det=1][:margin=<standard errors>[:stop=<standard errors>][:tie=<win chance>]][:roots=moves]]"
 )
 
 
@@ -1798,11 +1797,8 @@ def _rollout(name: str) -> Entrant:
     # every part after the path is optional (`hexset.rollout.PairedRollouts`:
     # 32 worlds, the top 3 moves, no decisive root, played to the end;
     # `setup=full` searches every opening root whatever `decisive` says;
-    # `mix=<temperature>` plays a mixed strategy over the searched candidates,
-    # `PairedRollouts.mix`, where 0 is the greedy search it is without one;
-    # `anchor=<exponent>` raises the prior it is anchored to, 1 by default;
-    # `det=1` seeds each searched decision from what the seat can see and
-    # `salt=<n>`, 0 by default, `PairedRollouts.det`; `margin=<standard errors>`
+    # `det=1` seeds each searched decision from what the seat can see,
+    # `PairedRollouts.det`; `margin=<standard errors>`
     # plays another move than the policy's own only where it clears that many
     # standard errors of the paired difference, `PairedRollouts.margin`;
     # `stop=<standard errors>` under a margin stops playing a candidate that
@@ -1822,8 +1818,8 @@ def _rollout(name: str) -> Entrant:
     if not (budget == "" or (budget.isdigit() and int(budget) >= 1)):
         raise ValueError(f"{name!r}: the worlds read {_ROLLOUT_FORM}")
     worlds = int(budget) if budget else 32
-    top, decisive, horizon, full_setup, mix, anchor = 3, None, None, False, 0.0, 1.0
-    det, salt, margin, stop, moves, tie = False, 0, 0.0, 0.0, False, TIE
+    top, decisive, horizon, full_setup = 3, None, None, False
+    det, margin, stop, moves, tie = False, 0.0, 0.0, False, TIE
     tie_given = False
     seen = set()
     for option in (part for part in options.split(":") if part):
@@ -1839,14 +1835,8 @@ def _rollout(name: str) -> Entrant:
             horizon = int(value)
         elif key == "setup" and assigned and value == "full":
             full_setup = True
-        elif key == "mix" and assigned and _temperature(value) is not None:
-            mix = _temperature(value)
-        elif key == "anchor" and assigned and _temperature(value) is not None:
-            anchor = _temperature(value)
         elif key == "det" and assigned and value in ("0", "1"):
             det = value == "1"
-        elif key == "salt" and assigned and value.isdigit():
-            salt = int(value)
         elif key == "margin" and assigned and _temperature(value) is not None:
             margin = _temperature(value)
         elif key == "stop" and assigned and _temperature(value) is not None:
@@ -1858,17 +1848,10 @@ def _rollout(name: str) -> Entrant:
         else:
             raise ValueError(
                 f"unknown rollout option: {option!r}; use top=<n of 2 or more>, "
-                "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more>, setup=full "
-                "mix=<temperature, 0 or more> with anchor=<exponent, 0 or more>, "
-                "det=<0 or 1> with salt=<whole number>, or margin=<standard errors, 0 or more> "
+                "decisive=<prior in (0, 1]>, horizon=<turns, 1 or more>, setup=full, "
+                "det=<0 or 1>, or margin=<standard errors, 0 or more> "
                 "with stop=<standard errors, 0 or more>, tie=<win chance in [0, 1)>, or roots=<whole or moves>"
             )
-    if "anchor" in seen and not mix:
-        raise ValueError(f"{name!r}: anchor shapes a mixed strategy; give it a mix=<temperature> above 0")
-    if "salt" in seen and not det:
-        raise ValueError(f"{name!r}: salt seeds a deterministic search; give it det=1")
-    if margin and mix:
-        raise ValueError(f"{name!r}: a margin and a mixed strategy do not combine; give one of margin and mix")
     if margin and worlds < 2:
         raise ValueError(f"{name!r}: a margin needs at least two worlds")
     if stop and not margin:
@@ -1882,12 +1865,8 @@ def _rollout(name: str) -> Entrant:
         label = f"{label}h{horizon}"
     if full_setup:
         label = f"{label}s"
-    if mix:
-        label = f"{label}m{_value_text(mix)}"
-    if anchor != 1.0:
-        label = f"{label}a{_value_text(anchor)}"
     if det:
-        label = f"{label}D{salt if salt else ''}"
+        label = f"{label}D"
     if margin:
         label = f"{label}M{_value_text(margin)}"
     if stop:
@@ -1905,10 +1884,7 @@ def _rollout(name: str) -> Entrant:
         + ((("decisive", decisive),) if decisive is not None else ())
         + ((("horizon", horizon),) if horizon is not None else ())
         + ((("full_setup", True),) if full_setup else ())
-        + ((("mix", mix),) if mix else ())
-        + ((("anchor", anchor),) if anchor != 1.0 else ())
         + ((("det", True),) if det else ())
-        + ((("salt", salt),) if det and salt else ())
         + ((("margin", margin),) if margin else ())
         + ((("stop", stop),) if stop else ())
         + ((("moves", True),) if moves else ())
@@ -1917,7 +1893,7 @@ def _rollout(name: str) -> Entrant:
 
 
 def _temperature(text: str) -> float | None:
-    """`text` as a finite number of 0 or more (a temperature or an exponent), or `None` where it is not one."""
+    """`text` as a finite number of 0 or more, or `None` where it is not one."""
     try:
         value = float(text)
     except ValueError:

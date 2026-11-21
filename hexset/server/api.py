@@ -678,6 +678,9 @@ class Config:
     # games are not shown.
     ranker: Callable[[list[dict]], dict] | None = None
     rankings_min_games: int = RANKINGS_MIN_GAMES
+    # Seconds between calls to the ranker besides those after each ranked game
+    # ends (`Rankings`); None calls it only then.
+    rankings_every: float | None = None
     # The bot the ranked queue seats wherever no client fills a table
     # (`ranked.py`): an entry `model_options` offers at the game type. None
     # fills nothing, so a ranked table waits for clients to fill it.
@@ -1371,7 +1374,8 @@ class Tables:
         self._close_interrupted()
         self.queue = RankedQueue(self)
         self.rankings = (
-            Rankings(self.config.ranker, journal_dir(self.config), self.config.rankings_min_games)
+            Rankings(self.config.ranker, journal_dir(self.config), self.config.rankings_min_games,
+                     every=self.config.rankings_every)
             if self.config.ranker is not None else None
         )
 

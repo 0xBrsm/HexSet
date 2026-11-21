@@ -487,158 +487,11 @@ def test_a_pool_that_cannot_load_its_policy_fails_at_once():
         RolloutPool(a_stub, workers=0)
 
 
-# --- the mixed strategy (`mix`) ----------------------------------------------------------------------------
-
-def test_the_mixed_strategy_is_the_prior_regularised_towards_the_scores():
-    from hexset.rollout import mixed_strategy
-
-    scores, prior = np.array([0.50, 0.52, 0.40]), np.array([0.7, 0.2, 0.1])
-    pi = mixed_strategy(scores, prior, 0.02)
-    expected = prior * np.exp(scores / 0.02)
-    assert np.allclose(pi, expected / expected.sum()) and np.isclose(pi.sum(), 1.0)
-    # Cold, it plays the best score; hot, the prior.
-    assert np.argmax(mixed_strategy(scores, prior, 1e-4)) == 1
-    assert mixed_strategy(scores, prior, 1e-4)[1] > 1 - 1e-12
-    assert np.allclose(mixed_strategy(scores, prior, 1e6), prior)
-    # Its expected shortfall from the best score is bounded by mix * ln(1 / prior(best)).
-    rng = np.random.default_rng(20260909)
-    for _ in range(200):
-        s, p, t = rng.random(6), rng.dirichlet(np.ones(6)), float(rng.choice([0.005, 0.02, 0.1]))
-        shortfall = float(mixed_strategy(s, p, t) @ (s.max() - s))
-        assert shortfall <= t * np.log(1 / p[np.argmax(s)]) + 1e-12
-    # A candidate the prior gives nothing is never played; a prior of nothing counts them alike.
-    assert mixed_strategy(scores, np.array([0.5, 0.0, 0.5]), 0.02)[1] == 0.0
-    assert np.allclose(mixed_strategy(np.zeros(3), np.zeros(3), 0.02), 1 / 3)
-    for bad in (0.0, -0.1):
-        with pytest.raises(ValueError, match="mix"):
-            mixed_strategy(scores, prior, bad)
-
-
-def test_the_anchor_flattens_the_prior_the_mix_is_drawn_towards():
-    from hexset.rollout import mixed_strategy
-
-    scores, prior = np.array([0.50, 0.505, 0.40]), np.array([0.98, 0.01, 0.01])
-    assert np.allclose(mixed_strategy(scores, prior, 0.02, 1.0), mixed_strategy(scores, prior, 0.02))
-    half = prior ** 0.5 * np.exp(scores / 0.02)
-    assert np.allclose(mixed_strategy(scores, prior, 0.02, 0.5), half / half.sum())
-    flat = np.exp(scores / 0.02)
-    assert np.allclose(mixed_strategy(scores, prior, 0.02, 0.0), flat / flat.sum())
-    # Flattening the anchor mixes more among the close pair.
-    assert mixed_strategy(scores, prior, 0.02, 0.0)[1] > mixed_strategy(scores, prior, 0.02, 0.5)[1] \
-        > mixed_strategy(scores, prior, 0.02)[1]
-    # The bound holds against the anchor's own distribution.
-    rng = np.random.default_rng(20260910)
-    for _ in range(200):
-        s, p, t, b = rng.random(6), rng.dirichlet(np.ones(6)), 0.02, float(rng.choice([0.0, 0.5, 1.0]))
-        q = p ** b / (p ** b).sum()
-        assert float(mixed_strategy(s, p, t, b) @ (s.max() - s)) <= t * np.log(1 / q[np.argmax(s)]) + 1e-12
-    for bad in (-0.5, float("nan")):
-        with pytest.raises(ValueError, match="anchor"):
-            mixed_strategy(scores, prior, 0.02, bad)
-        with pytest.raises(ValueError, match="anchor"):
-            PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), mix=0.02, anchor=bad)
-
-
 def logged(decision):
     """A decision as its log line reads it, less the time it took."""
     line = decision.to_json()
     line.pop("cpu_seconds")
     return line
-
-
-def mixed_decision(mix, seed: int = 9, game=None, **kwargs):
-    rng = random.Random(seed)
-    search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=6, top=3, horizon=2,
-                            marks=(2,), rng=rng, mix=mix, **kwargs)
-    return search, search.decide(a_road_or_not() if game is None else game)
-
-
-def test_mix_zero_is_the_greedy_search():
-    _, plain = mixed_decision(0.0)
-    rng = random.Random(9)
-    search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=6, top=3, horizon=2,
-                            marks=(2,), rng=rng)
-    greedy = search.decide(a_road_or_not())
-    assert logged(plain) == logged(greedy) and plain.chosen == greedy.chosen
-    assert plain.mix == () and plain.greedy is None and "mix" not in plain.to_json()
-    for bad in (-0.01, float("nan"), float("inf")):
-        with pytest.raises(ValueError, match="mix"):
-            PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), mix=bad)
-
-
-def test_a_mixed_search_plays_out_the_greedy_worlds_and_logs_its_draw():
-    """The draw comes off a stream of its own: the worlds, scores and the
-    rollouts' stream are the greedy search's, and only `chosen` may differ."""
-    greedy_search, greedy = mixed_decision(0.0)
-    import json
-    for mix in (0.01, 0.5, 100.0):
-        search, decision = mixed_decision(mix)
-        assert (decision.scores, decision.outcomes, decision.mark_values, decision.candidates) == (
-            greedy.scores, greedy.outcomes, greedy.mark_values, greedy.candidates)
-        assert search.rng.getstate() == greedy_search.rng.getstate()
-        assert decision.greedy == greedy.chosen and decision.chosen in decision.candidates
-        assert np.allclose(decision.mix, mixed_strategy_of(decision, mix)) and np.isclose(sum(decision.mix), 1)
-        flat = mixed_decision(mix, anchor=0.5)[1]
-        assert flat.scores == decision.scores and np.allclose(flat.mix, mixed_strategy_of(flat, mix, 0.5))
-        line = json.loads(json.dumps(decision.to_json()))
-        assert line["greedy"] == greedy.chosen and len(line["mix"]) == len(line["candidates"])
-        assert line["chosen"] == decision.chosen
-        # Reproducible from the seed.
-        assert logged(mixed_decision(mix)[1]) == logged(decision)
-
-
-def mixed_strategy_of(decision, mix, anchor=1.0):
-    from hexset.rollout import mixed_strategy
-
-    return mixed_strategy(decision.scores, decision.prior[list(decision.candidates)], mix, anchor)
-
-
-def test_mixed_draws_follow_their_probabilities_and_never_touch_another_searchers():
-    """Hot, the draws follow the logged probabilities; a searcher's draws
-    are its own, whatever another seat decides between them (one at a time
-    or interleaved, as a batched table runs them)."""
-    def run(seed, positions, other=None):
-        search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=2, top=3, horizon=1,
-                                marks=(), rng=random.Random(seed), mix=100.0)
-        out = []
-        for p in positions:
-            out.append(search.decide(a_road_or_not(p)))
-            if other is not None:
-                other.decide(a_road_or_not(p + 1000))
-        return out
-
-    positions = list(range(40))
-    alone = run(3, positions)
-    other = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=2, top=3, horizon=1,
-                           marks=(), rng=random.Random(4), mix=100.0)
-    assert [logged(d) for d in run(3, positions, other)] == [logged(d) for d in alone]
-    drawn = [d.candidates.index(d.chosen) for d in alone]
-    assert len(set(drawn)) == 3, "every candidate is drawn at a temperature that plays the prior"
-    assert any(d.chosen != d.greedy for d in alone)
-    # Over many decisions the first candidate's share sits near its mean probability.
-    share = np.mean([j == 0 for j in drawn])
-    assert abs(share - np.mean([d.mix[0] for d in alone])) < 0.25
-
-
-def test_a_pool_draws_as_one_process_does():
-    from hexset.rollout import RolloutPool
-
-    def drawn(pool):
-        search = PairedRollouts(a_stub(), worlds=7, top=3, horizon=3, marks=(1, 2),
-                                rng=random.Random(11), pool=pool, mix=0.05)
-        return [search.decide(a_road_or_not(seed)) for seed in range(3)]
-
-    alone = drawn(None)
-    with RolloutPool(a_stub, workers=2) as pool:
-        assert [(d.chosen, d.mix, d.scores) for d in drawn(pool)] == [(d.chosen, d.mix, d.scores) for d in alone]
-
-
-def test_a_root_decided_without_playouts_draws_nothing():
-    search = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.95)), worlds=8, decisive=0.9,
-                            rng=random.Random(1), mix=1.0)
-    state = search._draws.getstate()
-    decision = search.decide(a_road_or_not())
-    assert decision.worlds == 0 and decision.mix == () and search._draws.getstate() == state
 
 
 # --- the deterministic search (`det`) -----------------------------------------------------------------------
@@ -659,7 +512,7 @@ def test_a_deterministic_search_searches_a_visible_position_alike_on_any_searche
     first, other = det_search(1), det_search(2)
     before = first.rng.getstate()
     a, b = first.decide(a_road_or_not()), other.decide(a_road_or_not())
-    assert a.worlds == 6 and a.det_key and a.salt == 0
+    assert a.worlds == 6 and a.det_key
     assert searched(a) == searched(b) and logged(a) == logged(b)
     assert first.rng.getstate() == before
     assert first.decision_key(a_road_or_not(), 0).hex() == a.det_key
@@ -667,15 +520,21 @@ def test_a_deterministic_search_searches_a_visible_position_alike_on_any_searche
     first.decide(a_road_or_not(5))
     assert searched(first.decide(a_road_or_not())) == searched(a)
     line = logged(a)
-    assert line["det_key"] == a.det_key and line["salt"] == 0
+    assert line["det_key"] == a.det_key and "salt" not in line
 
 
-def test_the_salt_reseeds_every_decision():
-    a, b = det_search(1).decide(a_road_or_not()), det_search(1, salt=7).decide(a_road_or_not())
-    assert a.det_key != b.det_key and a.outcomes != b.outcomes and b.salt == 7
-    for bad in (-1, 1.5, True):
-        with pytest.raises(ValueError, match="salt"):
-            det_search(1, salt=bad)
+def test_the_decision_key_hashes_the_observed_digest_behind_a_fixed_prefix():
+    """The bytes a deterministic search has always seeded by: a served `det`
+    file decides each visible position as it always has."""
+    import hashlib
+
+    from hexset.game import observed_digest
+
+    game = a_road_or_not()
+    key = det_search(1).decision_key(game, 0)
+    assert key == hashlib.sha256(b"hexset.rollout.det\x1f0\x1f" + observed_digest(game, 0)).digest()
+    with pytest.raises(TypeError):
+        det_search(1, salt=0)
 
 
 def redealt(game, seat, seed):
@@ -722,13 +581,6 @@ def test_what_the_seat_can_see_moves_the_key():
     assert observed_digest(game, 0) != observed_digest(game, 1)
 
 
-def test_a_deterministic_mix_draws_alike_on_any_searcher():
-    runs = [[det_search(seed, mix=0.5).decide(a_road_or_not(p)) for p in range(12)] for seed in (1, 2)]
-    assert [logged(d) for d in runs[0]] == [logged(d) for d in runs[1]]
-    assert all(d.mix and d.det_key for d in runs[0])
-    assert len({d.candidates.index(d.chosen) for d in runs[0]}) > 1, "every draw fell on one candidate"
-
-
 def test_a_deterministic_search_draws_alike_in_another_process_and_in_a_pool():
     import json
     import os
@@ -738,17 +590,17 @@ def test_a_deterministic_search_draws_alike_in_another_process_and_in_a_pool():
 
     from hexset.rollout import RolloutPool
 
-    alone = det_search(1, mix=0.5).decide(a_road_or_not())
+    alone = det_search(1).decide(a_road_or_not())
     with RolloutPool(a_stub, workers=2) as pool:
-        pooled = PairedRollouts(a_stub(), worlds=6, top=3, horizon=2, marks=(2,), det=True, mix=0.5,
+        pooled = PairedRollouts(a_stub(), worlds=6, top=3, horizon=2, marks=(2,), det=True,
                                 rng=random.Random(9), pool=pool).decide(a_road_or_not())
         assert not pool.broken
-    assert searched(pooled) == searched(alone) and pooled.mix == alone.mix
+    assert searched(pooled) == searched(alone)
     here = Path(__file__).resolve().parent
     script = (
         "import json, random, sys; sys.path[:0] = [sys.argv[1]]\n"
         "from test_rollout import det_search, a_road_or_not, logged\n"
-        "print(json.dumps(logged(det_search(3, mix=0.5).decide(a_road_or_not()))))\n"
+        "print(json.dumps(logged(det_search(3).decide(a_road_or_not()))))\n"
     )
     env = {**os.environ, "PYTHONHASHSEED": "12345"}
     out = subprocess.run([sys.executable, "-c", script, str(here)], env=env, capture_output=True, text=True,
@@ -761,7 +613,7 @@ def test_det_off_draws_from_the_searcher_as_before():
     plain = PairedRollouts(Stub(favouring(ActionType.BUILD_ROAD, 0.6)), worlds=6, top=3, horizon=2,
                            marks=(2,), rng=rng).decide(a_road_or_not())
     off = det_search(9, det=False).decide(a_road_or_not())
-    assert searched(off) == searched(plain) and off.det_key == "" and off.salt is None
+    assert searched(off) == searched(plain) and off.det_key == ""
     assert "det_key" not in logged(off)
 
 
@@ -870,7 +722,7 @@ def test_a_margin_leaves_setup_roots_to_the_best_mean(monkeypatch):
 
 @pytest.mark.parametrize("kwargs, match", [
     ({"margin": -0.5}, "margin"), ({"margin": float("nan")}, "margin"), ({"margin": float("inf")}, "margin"),
-    ({"margin": 1.5, "mix": 0.01}, "mix"), ({"margin": 1.5, "worlds": 1}, "two worlds"),
+    ({"margin": 1.5, "worlds": 1}, "two worlds"),
 ])
 def test_a_margin_is_checked(kwargs, match):
     with pytest.raises(ValueError, match=match):

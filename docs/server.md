@@ -32,6 +32,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--contact` | none | Where to ask for a larger allowance: sent with a period-limit 429 and with an `allowance` of ten or fewer games |
 | `--ranker` | none | `MODULE:FUNCTION`, the function that makes the [rankings](#rankings); imported at start, so a name that does not import stops the server. Without it there are no rankings |
 | `--rankings-min-games` | `10` | Ranking rows that played fewer games are not shown |
+| `--rankings-every` | none | Seconds between calls to the ranker besides those after each ranked game ends, for a ranker that reads more than the games it is handed. Without it the ranker is called at start and after each ranked game ends |
 | `--ranked-bot` | none | The opponent the [ranked queue](api.md#ranked-play) seats in a table's one seat no player fills, as the opponent picker names it; it never takes two seats at a table. Without one, a ranked table waits for players to fill it |
 | `--ranked-entrant` | none | A server bot, as the opponent picker names it, that plays [ranked games](api.md#ranked-play) itself: one at a time at each game type it is offered at, ranked as `bot:<name>`. Repeat for more; a name the server does not offer, or the `--ranked-bot`, stops it at start |
 | `--chance-model` | none | The model, as the opponent picker names it, that rates a seated player's [win chance](api.md#win-chance) at every unranked table of a game type it is offered at, whether or not it sits there. A name not offered as a model file stops the server at start. Without one, a table's own model seat rates it |
@@ -170,7 +171,8 @@ def rank(games: list[dict]) -> dict:
 ```
 
 It is called on a thread of its own: once at start, and again after each
-ranked game that ends, so it never holds up play. It is handed every ranked
+ranked game that ends, so it never holds up play; with `--rankings-every
+SECONDS`, also every SECONDS, with the games read so far. It is handed every ranked
 game that ended each time, played out or timed out, oldest first by when it
 ended, and keeps nothing between calls; a changed ranker takes effect from a
 restart, over the whole history. A ranker

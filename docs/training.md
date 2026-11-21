@@ -307,7 +307,7 @@ paired rollouts search over.
 
 A checkpoint carries `policy`, `space` and `players`. How it bargains is its
 `trade_params` (a `hexset.trading.TradeParams`), or the loose `trade_floor`
-and `gate_plies`; declaring none reads `hexset.trading.UNLIMITED`. An
+and `max_offers`; declaring none reads `hexset.trading.UNLIMITED`. An
 optional `trader` names a bot that answers its trades.
 [netbot.py](../hexset/clients/netbot.py) builds bots from these fields:
 `bot_for(checkpoint)` one forward per decision, `searcher_for(checkpoint,
@@ -316,7 +316,7 @@ root=None, whole=False)` PUCT search, both with the checkpoint's own
 trade gate. `checkpoint.policy.value_rows([(game, seat), ...])` evaluates
 positions directly.
 
-`bot_for(rng=...)` seeds the gate's protocol and its sampled worlds;
+`bot_for(rng=...)` seeds the gate's protocol and its sampling stream;
 `searcher_for(rng=...)` seeds the search and a separate gate stream derived
 from it. Neither seeds sampling inside the model runtime, which the training
 application controls. The ONNX implementations are
@@ -438,39 +438,20 @@ few dozen worlds separate moves that independent playouts would not.
   outcome in each world, the value head's read of each playout at the
   mover's turn starts `MARKS` turns on, the cost, and the choice. Reading
   the marks draws nothing and changes no game.
-- `mix=<temperature>` (`rollout:...:mix=`, metadata `mix`) plays a mixed
-  strategy instead of the best mean score: the candidate is drawn with
-  probability proportional to `prior(a) * exp(score(a) / mix)`
-  (`hexset.rollout.mixed_strategy`), the policy that maximises the expected
-  score less `mix` times its KL divergence from the prior. `mix` is in the
-  scores' units, a win chance: candidates within about one `mix` of the
-  best are mixed in proportion to the prior, one trailing it by many is all
-  but never played, and the expected shortfall from the best score is at
-  most `mix * ln(1 / prior(best))`. The draws come from a stream seeded off
-  the searcher's `rng` that draws nothing else, so the worlds and scores are
-  the greedy search's and a game stays a function of its seeds.
-  `anchor=<exponent>` (metadata `anchor`) raises the prior first:
-  `prior(a) ** anchor`, so 1 anchors to the prior, 0 to every candidate
-  alike (a softmax over the scores), and the bound reads the raised prior,
-  renormalised over the candidates. The log
-  keeps each candidate's probability (`mix`) and the candidate the best
-  score would have played (`greedy`). A root decided without playouts draws
-  nothing.
 - `det=True` (`rollout:...:det=1`, metadata `det`) seeds each searched
   root from what the deciding seat can see instead of the searcher's
-  running `rng`: `decision_key` is a sha256 of `salt` (0 by default) and
+  running `rng`: `decision_key` is a sha256 of a fixed prefix and
   `hexset.game.observed_digest(game, seat)`, the canonical form of
   `observe(game, seat)` (the board, every public field, the seat's own
   hand and development cards, every other pile and the deck by size, and
   the ledger as the seat knows it; the table's turn cap, trade embargoes
-  and trade mode, which a record does not keep, are left out). The worlds, their playout seeds and the
-  `mix` draw come from streams on that key. The same visible position then
+  and trade mode, which a record does not keep, are left out). The worlds
+  and their playout seeds come from a stream on that key. The same visible position then
   searches the same worlds and plays the same move on any searcher and in
   any process, two positions that differ only in what the seat cannot see
   search alike, and a position rebuilt from a record is searched as it was.
   The searcher's own `rng` is not drawn from, so a run stays a function of
-  the seeds that dealt its games. The log keeps the key (`det_key`) and the
-  `salt`.
+  the seeds that dealt its games. The log keeps the key (`det_key`).
 - `margin=<standard errors>` (`rollout:...:margin=`, metadata `margin`)
   plays another candidate than the policy's own move only where it beats
   that move by more than `margin` standard errors. For each other candidate
@@ -479,8 +460,7 @@ few dozen worlds separate moves that independent playouts would not.
   where `m_j > margin * s_j`. The passing candidate with the best mean
   score is played (the earlier on a tie), and the own move where none
   passes. Setup roots (`SETUP_PHASES`) keep the best mean score. A margin
-  needs at least two worlds and does not combine with `mix`; 0, the
-  default, is the search without one. The log keeps the margin applied at
+  needs at least two worlds; 0, the default, is the search without one. The log keeps the margin applied at
   each root (`margin`), and where the margin held back the best mean score,
   the candidate it would have played (`greedy`).
 - `stop=<standard errors>` (`rollout:...:margin=<k>:stop=`, metadata
@@ -530,30 +510,28 @@ few dozen worlds separate moves that independent playouts would not.
   candidate on ([native.md](native.md#playout-copies)).
 
 `hexset.clients.netbot.rollouts_for(checkpoint, worlds=, top=, decisive=,
-horizon=, full_setup=, mix=, anchor=, det=, salt=, margin=, stop=, moves=, tie=)` builds one with the checkpoint's own trade gate
-(`GatedRollouts`); the arena's `rollout:` entrant and a file's
-`search=rollout` metadata do the same.
+horizon=, full_setup=, det=, margin=, stop=, moves=, tie=, opponents=)` builds
+one with the checkpoint's own trade gate (`GatedRollouts`); the arena's
+`rollout:` entrant and a file's `search=rollout` metadata do the same.
+`opponents`, a model of the other seats, plays them in every playout: its
+`playouts(policy)` is the policy the playouts play with (a
+`hexset.clients.conditioned.SeatRouted`) and its `seen` reads each move the
+table makes (`hexset.bots.watch`).
 
 ### The network trade gate
 
 `hexset.clients.netbot.NetworkBot` is the trade gate for any policy runtime,
-and `searcher_for`'s `GatedSearch` delegates to it. Its `trade_floor` and
-`gate_plies` come from the checkpoint, defaulting to `0.0` and `0`.
+and `searcher_for`'s `GatedSearch` delegates to it. Its `trade_floor` comes
+from the checkpoint, defaulting to `0.0`.
 
-At `gate_plies = 0`, every candidate is priced by the value head in one
-batched forward alongside the live position. The post-trade position is
+Every candidate is priced by the value head in one batched forward alongside
+the live position, whoever is to move. The post-trade position is
 built in the seat's own frame: its hand exactly, plus the bundle; the
 counterparty's certified cards moved by the bundle and its hand size moved
 by the bundle's total, never its true hand. The evaluating seat's row gives
 the gain and the counterparty's row the estimate of the other side's gain. A
 candidate the seat cannot cover, or one the counterparty's public hand
 cannot cover (`hexset.trading.has_room`), is answered `-1.0`.
-
-A checkpoint declaring `gate_plies = N` advances the mover's own policy
-(`act_rows`) up to `N` plies from each candidate before the value forward,
-stopping at the mover's `END_TURN`. Because the rollout acts, it runs on one
-world sampled from the seat's belief (`View.sample`), certified to cover
-every candidate, so every candidate is priced on the same draw.
 
 A gate installed separately from the action bot is a fresh `NetworkBot` per
 seat, with `bot.seat = seat` and `bot.seat_at(game)` called in the gate
@@ -686,17 +664,17 @@ table token. Each hex carries the chance its number is the next roll, and
 the table the seven's. `9d.1` appends each seat's production by resource
 (`seat_production`: the cards a roll yields it at the dice's long-run odds,
 a city twice, nothing from the robber's hex) and its bank rate by resource
-over 4. `11d` is two-seat too, with the facts grouped by what they describe: my token
-(35 wide) holds the public seat columns 9d.1 reads plus my development
-cards, those I can play and the cards I have not seen; the opponent's
+over 4. `11d` is two-seat too, with the facts grouped by what they describe: the seat's
+own token (35 wide) holds the public seat columns 9d.1 reads plus its
+development cards, those it can play and the cards it has not seen; the opponent's
 token (27 wide) holds the same public columns plus its development cards
 held and their ages; the table is a board block of the turn count, the
 next roll's chance of a seven and whether the dice have been thrown; and a
 hex reads its number one-hot over 2-6 and 8-12 (`NUMBERS_11D`). The module
 docstring of `hexset.contract9` gives every column.
 
-`11` is `11d` at a table of two to four live seats: my token, then one token
-per opponent in turn order after me, then the board block. Each token begins
+`11` is `11d` at a table of two to four live seats: the seat's own token, then
+one token per opponent in turn order after it, then the board block. Each token begins
 with `11d`'s columns in `11d`'s places, so at a table of two those columns
 hold `11d`'s bytes. An opponent's `hand` is its expected hand: the cards the
 view certifies plus the residual pool shared among the opponents in

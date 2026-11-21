@@ -154,40 +154,35 @@ def test_a_checkpoint_can_ask_for_the_fragmented_policy_by_name():
     assert TradeParams.from_meta(FRAGMENTED.as_meta()) == FRAGMENTED
 
 
-def test_an_explicit_zero_is_honoured_where_zero_is_meaningful():
-    """`gate_plies=0` is a real setting -- one forward over the exchanged
-    hand -- so it must not be mistaken for an absent key."""
-    base = replace(UNLIMITED, gate_plies=8)
-    assert TradeParams.from_meta({"gate_plies": "0"}, base=base).gate_plies == 0
-    assert TradeParams.from_meta({}, base=base).gate_plies == 8
+@pytest.mark.parametrize("meta", [
+    {"gate_plies": "8"}, {"gate_plies": "1"}, {"gate_plies": "deep"},
+    {"gate_own_frame": "0"}, {"gate_own_frame": "false"},
+    {"gate_frames": "pair"}, {"gate_frames": "all"}, {"gate_frames": "one"},
+])
+def test_a_removed_gate_option_is_refused_by_name(meta):
+    """A file asking its gate to roll plies forward, read the mover's frame,
+    or average frames would price trades otherwise than it asks: the load
+    fails, naming the key."""
+    (key,) = meta
+    with pytest.raises(ValueError, match=f"`{key}`"):
+        TradeParams.from_meta(meta)
 
 
-def test_the_own_frame_read_round_trips_and_is_on_by_default():
-    assert UNLIMITED.gate_frames == "one" and "gate_frames" not in UNLIMITED.as_meta()
-    for choice in ("pair", "all"):
-        declared = replace(UNLIMITED, gate_frames=choice)
-        assert declared.as_meta()["gate_frames"] == choice
-        assert TradeParams.from_meta(declared.as_meta()) == declared
-    assert TradeParams.from_meta({"gate_frames": "most"}).gate_frames == "one"
-    with pytest.raises(ValueError):
-        replace(UNLIMITED, gate_frames="most")
-    assert UNLIMITED.gate_own_frame
-    assert "gate_own_frame" not in UNLIMITED.as_meta()
-    mover = replace(UNLIMITED, gate_own_frame=False)
-    assert mover.as_meta()["gate_own_frame"] == "0"
-    assert TradeParams.from_meta(mover.as_meta()) == mover
-    assert TradeParams.from_meta({"gate_own_frame": "1"}, base=mover) == UNLIMITED
-    assert TradeParams.from_meta({}) == UNLIMITED
+def test_a_removed_gate_option_at_the_value_it_always_had_still_loads():
+    """Files stamp `gate_own_frame = 1` and exporters wrote `gate_plies = 0`:
+    each prices trades exactly as a file without the key."""
+    for meta in ({"gate_plies": "0"}, {"gate_own_frame": "1"}, {"gate_own_frame": "true"},
+                 {"gate_plies": ""}, {"gate_frames": ""}):
+        assert TradeParams.from_meta(meta) == UNLIMITED
+    assert not {"gate_plies", "gate_own_frame", "gate_frames"} & set(UNLIMITED.as_meta())
 
 
 def test_a_gate_written_against_the_old_attributes_still_describes_itself():
     class Old:
         trade_floor = 0.0197
-        gate_plies = 4
 
     read = params_of(Old())
     assert read.trade_floor == pytest.approx(0.0197)
-    assert read.gate_plies == 4
     assert read.max_offers is None and not read.fragment_trades
 
 

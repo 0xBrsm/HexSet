@@ -17,21 +17,20 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.actions import Action, ActionType, legal_actions
 from hexset.clients.policy import Checkpoint, Policy
-from hexset.game import Game, imagine, is_over, to_move
+from hexset.game import Game, is_over, to_move
 from hexset.mcts import Evaluation, Search, calibrate_own
 from hexset.native.playout import NativeCopy
 from hexset.rollout import TIE, PairedRollouts, RolloutPool
 from hexset.actions import options_for
 from hexset.clients._modelmeta import (
     closer_of, gate_config_of, hold_of, robber_hits_of, robber_tip_of, trader_of, trader_veto_of,
-    trader_veto_pick_of,
 )
 from hexset.robber import occupants
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
-from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
+from hexset.trading import UNLIMITED, TradeParams, TradeProtocol
 from hexset.view import HoldReading, View
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -87,12 +86,11 @@ class NetworkBot(trading.DeclaredTrade):
     players: int
     #: Everything this gate declares about how it bargains: the off switch,
     #: the clearing floor, the card caps and direction, the responder price,
-    #: the offer budget, the fragment plan and the continuation budget.
+    #: the offer budget and the fragment plan.
     trade: TradeParams = UNLIMITED
-    # Stream behind the gate's sampled worlds: read off-turn, and on every
-    # read at `gate_plies > 0`.
+    # Seeds the trade protocol's stream and the sampling stream, each off its
+    # state without drawing from it.
     rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
-    _salt: int | None = field(default=None, repr=False, compare=False)
     # Seat this bot is installed at, which the view must then agree with, or
     # `None` to answer whatever seat the view names.
     seat: int | None = None
@@ -113,9 +111,10 @@ class NetworkBot(trading.DeclaredTrade):
     #: played from the policy's own plan), else a move from `score_rows`. The
     #: draws come from a stream of the seat's own, seeded off `rng`'s state.
     temperature: float = 0.0
-    #: How the gate's sampled worlds deal the other seats' held development
-    #: cards (`View.sample`): `bot_for` sets the hold model the checkpoint
-    #: declares (`hold_shape`, `hold_scale`); `None` deals them alike.
+    #: The hold model the checkpoint declares for the other seats' held
+    #: development cards (`hold_shape`, `hold_scale`), which `bot_for` sets,
+    #: or `None`; part of the key the gate's last answer is kept under
+    #: (`View.belief_key`).
     hold: HoldReading | None = None
     _seated: Game | None = field(default=None, repr=False, compare=False)
     _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
@@ -128,7 +127,7 @@ class NetworkBot(trading.DeclaredTrade):
         # the rest with `None`, which is how the engine reads "this gate has
         # no such hook" and falls back to its own defaults.
         # Seeded from `rng`'s state rather than a draw from it, so building
-        # the protocol never disturbs the stream `_world_rng` is salted from.
+        # the protocol never disturbs `rng`.
         seed = int.from_bytes(
             hashlib.sha256(repr(self.rng.getstate()).encode()).digest()[:8], "big"
         )
@@ -142,7 +141,7 @@ class NetworkBot(trading.DeclaredTrade):
         )
 
     # Every bargaining limit -- `trade_params`, `max_offers`, `trade_floor`,
-    # `gate_plies`, the offer budget -- reads through `trade`
+    # the offer budget -- reads through `trade`
     # (`trading.DeclaredTrade`).
 
     def seat_at(self, game: Game) -> None:
@@ -359,70 +358,23 @@ class NetworkBot(trading.DeclaredTrade):
         self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> tuple[tuple[float, ...], dict[int, tuple[float, ...]]]:
         """The live position's value vector and every coverable candidate's,
-        keyed by candidate index. At `gate_plies == 0` each post-trade
-        position is read from `seat`'s own frame (`_after`), never the true
-        hand: on its own turn always, and on another seat's under
-        `gate_own_frame` (the default) with `gate_frames` `one`. Otherwise
-        worlds are sampled from `seat`'s belief and certified against negative
-        exchanges, all from one draw: a rollout *acts* on them, and on another
-        seat's turn they are read from the frames `_frames` names, which need
-        a whole hand (`_continue`). Every sampled world shows `seat`'s own
-        hand whole (`_shown`): read from another seat's frame, only what
-        `seat` cannot know is guessed."""
+        keyed by candidate index, all read from `seat`'s own frame whoever is
+        to move: the post-trade positions (`_after`) over `seat`'s own view,
+        never the true hands."""
         game = self._seated
         assert game is not None  # callers check this first
         hand = list(view.known[seat])
         coverable = self._coverable(seat, view, received, counterparties)
         if not coverable:
             return (), {}
-
-        to_act = to_move(game)
-        if self._reads_own_frame(game, seat):
-            afters = {
-                i: self._after(seat, them, hand, bundle, view)
-                for i, them, bundle in coverable
-            }
-            rows: list[tuple[Game, int]] = [(game, seat)] + [
-                (after, seat) for after in afters.values()
-            ]
-            values = self.policy.value_rows(rows)
-            afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
-            return values[0], afters_values
-
-        # `View.certify` combines repeat counterparties by per-resource max,
-        # so one world covers every candidate's bundle.
-        certified = View(
-            view.state, view.ledger, seat,
-            certify=[(them, [max(0, n) for n in bundle]) for _, them, bundle in coverable],
-        )
-        rng = self._world_rng(view, seat)
-        sampled = certified.sample(rng, self.hold)
-        # One world certifies every candidate at once, and a counterparty's
-        # asks together can exceed its hand: value only what this world covers.
-        coverable = [
-            (i, them, bundle) for i, them, bundle in coverable
-            if trading.holds(sampled, them, [max(0, n) for n in bundle])
+        afters = {
+            i: self._after(seat, them, hand, bundle, view)
+            for i, them, bundle in coverable
+        }
+        rows: list[tuple[Game, int]] = [(game, seat)] + [
+            (after, seat) for after in afters.values()
         ]
-        # `sampled` deals its own deck from this seat's belief, so the copies
-        # take it as it is: a hosted seat's deck is a count, which no shuffle
-        # may read.
-        before = imagine(game, rng, randomize_deck=False, seat=seat)
-        before.set_state(sampled)
-        _shown(before, seat)
-
-        afters: dict[int, Game] = {}
-        for i, them, bundle in coverable:
-            after = imagine(game, rng, randomize_deck=False, seat=seat)
-            exchanged = copy_state(sampled)
-            hands_before = [h[:] for h in exchanged.hands]
-            exchange(exchanged, seat, them, bundle)
-            after.set_state(exchanged)
-            after.ledger.apply_hand_diff(hands_before, exchanged.hands)
-            _shown(after, seat)
-            afters[i] = after
-
-        worlds = [before] + list(afters.values())
-        values = self._continue(to_act, seat, worlds, self.gate_plies)
+        values = self.policy.value_rows(rows)
         afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
         return values[0], afters_values
 
@@ -444,21 +396,14 @@ class NetworkBot(trading.DeclaredTrade):
             coverable.append((i, counterparties[i], bundle))
         return coverable
 
-    def _reads_own_frame(self, game: Game, seat: int) -> bool:
-        """Whether a trade at `game` is priced in `seat`'s own frame, one
-        value-head read a position (`_after`), rather than over sampled worlds."""
-        own = self.trade.gate_own_frame and self.trade.gate_frames == "one"
-        return self.gate_plies == 0 and (own or to_move(game) == seat)
-
     def gains_across(
         self, seat: int, asks: Sequence[tuple[Game, Sequence[Bundle], Sequence[int]]]
     ) -> list[list[float]]:
         """`gains_many` at several positions in one forward: for each
         `(game, received, counterparties)`, `seat`'s gain from each candidate
         as if seated at that game, `-1.0` for one it cannot cover. The same
-        rows `gains_many` reads, so the same numbers; a position it would
-        price over sampled worlds is priced on its own. Leaves the bot
-        seated where it was."""
+        rows `gains_many` reads, so the same numbers. Leaves the bot seated
+        where it was."""
         out: list[list[float]] = [[-1.0] * len(received) for _, received, _ in asks]
         if not self.trade.trades:
             return out
@@ -471,9 +416,6 @@ class NetworkBot(trading.DeclaredTrade):
                     continue
                 self.seat_at(game)
                 view = game.state(seat)
-                if not self._reads_own_frame(game, seat):
-                    out[k] = self.gains_many(view, received, counterparties)
-                    continue
                 coverable = self._coverable(seat, view, received, counterparties)
                 if not coverable:
                     continue
@@ -494,74 +436,6 @@ class NetworkBot(trading.DeclaredTrade):
             for i, row in afters.items():
                 out[k][i] = float(own(values[row])[seat] - base)
         return out
-
-    def _world_rng(self, view: View, seat: int) -> random.Random:
-        """Seeded by the information set alone, salted once from this bot's
-        `rng`, with no candidate in the key: two asks about one position agree,
-        two bots draw differently."""
-        if self._salt is None:
-            self._salt = self.rng.getrandbits(64)
-        key = (self._salt, view.perspective, tuple(view.sizes), view.belief_key(self.hold))
-        return random.Random(hash(key))
-
-    def _continue(
-        self, mover: int, seat: int, worlds: Sequence[Game], plies: int
-    ) -> list[tuple[float, ...]]:
-        """Each world's value vector after `mover`'s best play from it, `plies`
-        deep, read from the frame of the seat to move there -- the frame a
-        value head is trained in -- or from `seat`'s under `gate_own_frame`;
-        where another seat than `seat` is to move, averaged over the frames
-        `gate_frames` names (`_frames`). Values are in board-seat order. Worlds advance in
-        lockstep, one batched `act_rows` per ply, and must be belief-sampled
-        copies, never the live table's own state."""
-        live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == mover]
-        for _ in range(plies):
-            if not live:
-                break
-            rows = [(worlds[i], mover, tuple(options_for(worlds[i]))) for i in live]
-            chosen = self.policy.act_rows(rows)
-            still: list[int] = []
-            for i, action in zip(live, chosen):
-                if action.type is ActionType.END_TURN:
-                    continue
-                apply(worlds[i], action)
-                g = worlds[i]
-                if not is_over(g) and to_move(g) == mover:
-                    still.append(i)
-            live = still
-        out: list[tuple[float, ...] | None] = [None] * len(worlds)
-        pending = []
-        for i, g in enumerate(worlds):
-            if is_over(g):
-                out[i] = tuple(1.0 if s == g.won_by else 0.0 for s in range(self.players))
-            else:
-                pending.append(i)
-        if pending:
-            frames = {i: self._frames(seat, to_move(worlds[i])) for i in pending}
-            values = self.policy.value_rows(
-                [(worlds[i], f) for i in pending for f in frames[i]]
-            )
-            at = 0
-            for i in pending:
-                n = len(frames[i])
-                rows = values[at:at + n]
-                at += n
-                out[i] = tuple(sum(v[k] for v in rows) / n for k in range(self.players))
-        return out  # type: ignore[return-value]
-
-    def _frames(self, seat: int, to_act: int) -> tuple[int, ...]:
-        """The frames a position with `to_act` to move is read from for
-        `seat`: its own alone when it is to move; otherwise `gate_frames`'
-        choice -- the mover's, or `seat`'s under `gate_own_frame` (`one`),
-        both (`pair`), or every seat's (`all`)."""
-        if to_act == seat:
-            return (seat,)
-        frames = self.trade.gate_frames
-        if frames == "all":
-            return tuple(range(self.players))
-        if frames == "pair":
-            return (seat, to_act)
-        return (seat,) if self.trade.gate_own_frame else (to_act,)
 
     def _after(
         self, seat: int, them: int, hand: Sequence[int], bundle: Bundle, view: View
@@ -605,19 +479,6 @@ class NetworkBot(trading.DeclaredTrade):
         after.set_state(state)
         after.ledger = ledger
         return after
-
-
-def _shown(world: Game, seat: int) -> None:
-    """Make `seat`'s hand in `world` fully known on its ledger: every card
-    certified, none unknown. A world sampled from `seat`'s belief holds its
-    true hand, so read from another seat's frame the encoding then carries
-    all `seat` knows -- its own cards exactly -- and guesses only the rest.
-    A seat whose hand the public record tracks exactly reads the same way."""
-    ledger = world.ledger.seats[seat]
-    hand = world.state(seat).state.hands[seat]
-    ledger.known = list(hand)
-    ledger.most = list(hand)
-    ledger.unknown = 0
 
 
 @dataclass
@@ -825,8 +686,8 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
     def __init__(self, policy: Policy, gate: NetworkBot, *, opponents=None, **kwargs) -> None:
         super().__init__(policy, **kwargs)
         self._seat_gate(gate)
-        #: The model of the other seats its playouts play them by
-        #: (`hexset.clients.conditioned.Opponents`), or `None`: its own policy.
+        #: The model of the other seats its playouts play them by (`rollouts_for`'s
+        #: `opponents`), or `None`: its own policy.
         self.opponents = opponents
 
     def seen(self, game: Game, actor: int, action: Action, viewer: int) -> None:
@@ -924,15 +785,14 @@ def bot_for(
     samples its moves (`NetworkBot.temperature`).
 
     The gate is built from what the checkpoint declares about itself --
-    clearing floor, continuation budget, card caps, responder price and
-    fragment plan -- so a file that asks for the fragmented policy gets it and
-    one that asks for nothing bargains the way every checkpoint always has.
+    clearing floor, card caps, responder price and fragment plan -- so a file
+    that asks for the fragmented policy gets it and one that asks for
+    nothing bargains the way every checkpoint always has.
     `trade` replaces what the checkpoint declares -- that is how a no-trade
-    arm is built -- and `rng` seeds a `gate_plies > 0` checkpoint's sampled
-    worlds. `own_calibration` reads the seat's own chance through
+    arm is built -- and `rng` seeds the gate's streams (`NetworkBot.rng`).
+    `own_calibration` reads the seat's own chance through
     `hexset.mcts.calibrate_own` wherever the gate prices a trade. `hold`
-    replaces the hold model the checkpoint declares for the gate's sampled
-    worlds (`NetworkBot.hold`)."""
+    replaces the hold model the checkpoint declares (`NetworkBot.hold`)."""
     trade = gate_config_of(checkpoint) if trade is None else trade
     hold = hold_of(checkpoint) if hold is None else hold
     return NetworkBot(
@@ -977,8 +837,8 @@ def searcher_for(
     searches only the setup placements, `root="gumbel"` makes the halving
     root Gumbel MuZero's, and `whole` searches decisions of several moves as
     whole options (all `hexset.mcts.Search`). The other
-    seats' held development cards are dealt in those worlds, and in the
-    gate's, by the hold model the checkpoint declares (`hold_shape`,
+    seats' held development cards are dealt in those worlds by the hold
+    model the checkpoint declares (`hold_shape`,
     `hold_scale`; `hexset.holding.HoldModel`), else alike; `hold` replaces
     it. A policy that
     declares no prior to score its leaves with (`has_prior` false) is refused
@@ -1020,10 +880,7 @@ def rollouts_for(
     pool: RolloutPool | None = None,
     own_calibration: tuple[float, float] | None = None,
     opponents=None,
-    mix: float = 0.0,
-    anchor: float = 1.0,
     det: bool = False,
-    salt: int = 0,
     hold: HoldReading | None = None,
     margin: float = 0.0,
     stop: float = 0.0,
@@ -1036,13 +893,13 @@ def rollouts_for(
     sampling stream, so one seed reproduces the entrant. `pool` plays the
     worlds out in worker processes (`hexset.rollout.RolloutPool`).
     `own_calibration` reaches the gate alone (`bot_for`): the playouts read
-    the value head as it is. `opponents`
-    (`hexset.clients.conditioned.Opponents`) plays every other seat of a
-    playout in place of the checkpoint, read from the moves the table makes;
-    its `pool` must load the same pair. `mix` above 0 plays a mixed strategy
-    over the searched candidates (`hexset.rollout.PairedRollouts.mix`), anchored
-    to the prior raised to `anchor`. `det` seeds each searched decision
-    from what the seat can see and `salt` (`PairedRollouts.det`). `margin`
+    the value head as it is. `opponents`, a model of the other seats, plays
+    every other seat of a playout in place of the checkpoint: its
+    `playouts(policy)` is the policy the playouts play with (a
+    `hexset.clients.conditioned.SeatRouted`), and its `seen(game, actor,
+    action, viewer)` reads each move the table makes (`hexset.bots.watch`);
+    `pool` must play the same model. `det` seeds each searched decision
+    from what the seat can see (`PairedRollouts.det`). `margin`
     above 0 plays another candidate than the policy's own move only where it
     clears that many standard errors (`PairedRollouts.margin`); `stop` above
     0, under a margin, stops playing a candidate that trails that move by more
@@ -1050,9 +907,9 @@ def rollouts_for(
     searches every root as a single move (`PairedRollouts.moves`); `tie`, under
     a margin, decides a root whose candidates win within that chance of the
     policy's move by the point lead (`PairedRollouts.tie`). The other
-    seats' held development cards are dealt in every world, the gate's too,
-    by the hold model the checkpoint declares, else alike; `hold` replaces
-    it (`searcher_for`)."""
+    seats' held development cards are dealt in every world by the hold
+    model the checkpoint declares, else alike; `hold` replaces it
+    (`searcher_for`)."""
     gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     hold = hold_of(checkpoint) if hold is None else hold
     return GatedRollouts(
@@ -1066,10 +923,7 @@ def rollouts_for(
         rng=rng,
         pool=pool,
         opponents=opponents,
-        mix=mix,
-        anchor=anchor,
         det=det,
-        salt=salt,
         hold=hold,
         margin=margin,
         stop=stop,
@@ -1103,8 +957,7 @@ def register_entrants(loader) -> None:
         trader = own_trader(entrant, checkpoint, path)
         bot = bot_for(checkpoint, rng=rng, trade=entrant.trade,
                       temperature=float(entrant.option("temperature", 0.0) or 0.0))
-        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint), hold=hold_of(checkpoint))
 
     def spawn_mcts(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "mcts")
@@ -1117,8 +970,7 @@ def register_entrants(loader) -> None:
             top=entrant.option("top"), stages=entrant.option("stages"), root=entrant.option("root"),
             whole=bool(entrant.option("whole", False)),
         )
-        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint), hold=hold_of(checkpoint))
 
     def spawn_rollout(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "rollout")
@@ -1129,15 +981,12 @@ def register_entrants(loader) -> None:
             worlds=entrant.simulations, top=entrant.option("top"),
             decisive=entrant.option("decisive"), horizon=entrant.option("horizon"),
             full_setup=bool(entrant.option("full_setup", False)),
-            rng=rng, trade=entrant.trade, mix=float(entrant.option("mix", 0.0)),
-            anchor=float(entrant.option("anchor", 1.0)),
-            det=bool(entrant.option("det", False)), salt=int(entrant.option("salt", 0)),
+            rng=rng, trade=entrant.trade, det=bool(entrant.option("det", False)),
             margin=float(entrant.option("margin", 0.0)), stop=float(entrant.option("stop", 0.0)),
             moves=bool(entrant.option("moves", False)),
             tie=float(entrant.option("tie", TIE)),
         )
-        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint),
-                      veto_picks=trader_veto_pick_of(checkpoint), hold=hold_of(checkpoint))
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint), hold=hold_of(checkpoint))
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)

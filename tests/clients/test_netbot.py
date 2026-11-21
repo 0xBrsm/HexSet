@@ -90,7 +90,6 @@ class StubCheckpoint:
     space: ActionSpace
     players: int = PLAYERS
     trade_floor: float = UNLIMITED.trade_floor
-    gate_plies: int = UNLIMITED.gate_plies
     # The hold model the file declares (`Loaded.hold`), `None` for none.
     hold: HoldModel | None = None
     # A whole parameter set, for a checkpoint that asks to bargain by more
@@ -546,14 +545,12 @@ def test_every_coverable_candidate_reaches_the_head_in_one_forward(board, monkey
 def test_an_ask_the_counterparty_cannot_cover_is_never_valued(board, monkeypatch):
     """The offer menu asks for any cards, so it can name a seat whose public
     hand cannot hold them. There is no position after that exchange: the
-    gate prices it `-1.0` without building one, and still values the rest.
-    Asked with a rollout horizon, so the refusal comes before any rollout."""
+    gate prices it `-1.0` without building one, and still values the rest."""
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import SeatLedger
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS,
-                     trade=TradeParams(gate_plies=2))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
     state.hands[0] = [1, 1, 1, 0, 0]
@@ -578,102 +575,6 @@ def test_an_ask_the_counterparty_cannot_cover_is_never_valued(board, monkeypatch
     assert not rows, "nothing to value, so nothing reaches the head"
     gains = bot.gains_many(view, [wheat_for_wood, wheat_for_wood], [2, 1])
     assert gains[0] == -1.0 and gains[1] != -1.0
-
-
-def test_gate_plies_rolls_a_continuation_without_touching_the_live_table(board, monkeypatch):
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, trade=TradeParams(gate_plies=8))
-    game = _position_with_a_settlement_in_hand(board)
-    state = game.state(0, hidden=False)
-    state.hands[0] = [1, 1, 1, 0, 0]
-    bot.seat_at(game)
-    view = game.state(0)
-    unlocks_settlement = (0, 0, 0, 1, 0)
-
-    before_hands = [hand[:] for hand in game.state(0, hidden=False).hands]
-    before_known = [list(seat.known) for seat in game.ledger.seats]
-    before_unknown = [seat.unknown for seat in game.ledger.seats]
-    before_chance = game.chance
-
-    act_calls: list[int] = []
-    original_act = HandValuePolicy.act_rows
-
-    def counted_act(self, rows):
-        act_calls.append(len(rows))
-        return original_act(self, rows)
-
-    monkeypatch.setattr(HandValuePolicy, "act_rows", counted_act)
-
-    bot.gains_many(view, [unlocks_settlement], [1])
-    assert act_calls, "gate_plies > 0 must roll at least one ply"
-
-    after_state = game.state(0, hidden=False)
-    assert after_state.hands == before_hands
-    assert [list(seat.known) for seat in game.ledger.seats] == before_known
-    assert [seat.unknown for seat in game.ledger.seats] == before_unknown
-    assert game.chance is before_chance
-
-
-def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board, monkeypatch):
-    """The rollout ACTS on the positions it is handed -- a Knight steal resolves
-    against whatever hand that world holds -- so it must roll only on a world
-    sampled from the asking seat's belief. `View.sample` is stubbed to hand
-    back a seat-1 hand nothing like the true one.
-    """
-    from hexset.clients.netbot import NetworkBot
-    from hexset.ledger import PublicLedger, SeatLedger
-    from hexset.state import BANK_PER_RESOURCE
-
-    space = stub_checkpoint(board).space
-    bot = NetworkBot(
-        policy=HandValuePolicy(space), players=PLAYERS,
-        trade=TradeParams(gate_plies=8), rng=random.Random(7)
-    )
-    game = _position_with_a_settlement_in_hand(board)
-    true_hand_1 = [0, 0, 3, 2, 3]  # 3 ore this ledger never certified
-    state = game.state(0, hidden=False)
-    state.hands[0] = [1, 1, 1, 0, 0]  # one wheat short of a settlement
-    state.hands[1] = true_hand_1
-    state.bank[:] = [BANK_PER_RESOURCE - sum(h[r] for h in state.hands) for r in range(5)]
-    state.deck = []
-    ledger = PublicLedger.new(state.num_players)
-    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
-    ledger.seats[1].known = [0, 0, 0, 1, 1]  # names one wheat, one ore -- never the other two ore
-    ledger.seats[1].unknown = 6
-    game.ledger = ledger
-    game.phase = Phase.MAIN
-    game.current_player = 1  # seat 1, the counterparty, is the mover
-    bot.seat_at(game)
-    view = game.state(0)
-    unlocks_settlement = (0, 0, 0, 1, 0)
-
-    original_sample = View.sample
-
-    def fake_sample(self, rng, hold=None):
-        sampled = original_sample(self, rng, hold)
-        sampled.hands[1] = [9, 9, 9, 9, 9]
-        return sampled
-
-    monkeypatch.setattr(View, "sample", fake_sample)
-
-    act_rows_calls = []
-    original_act = HandValuePolicy.act_rows
-
-    def capture_act(self, rows):
-        act_rows_calls.extend(rows)
-        return original_act(self, rows)
-
-    monkeypatch.setattr(HandValuePolicy, "act_rows", capture_act)
-
-    bot.gains_many(view, [unlocks_settlement], [1])
-    assert act_rows_calls, "gate_plies > 0 must roll at least one ply"
-    for world, mover, _ in act_rows_calls:
-        assert mover == 1
-        assert world.state(1, hidden=False).hands[1] != true_hand_1
-
-    assert game.state(0, hidden=False).hands[1] == true_hand_1
 
 
 def _off_turn_position(board):
@@ -706,173 +607,9 @@ def _captured_value_rows(monkeypatch):
     return captured
 
 
-def test_on_another_seats_turn_the_gate_reads_from_the_movers_frame(board, monkeypatch):
-    """Off-turn, every position reaches the head from the seat to move's
-    frame, on a world sampled from this seat's belief rather than the true
-    hands, in one forward, and the gain is this seat's entry of the vector."""
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
-                     trade=TradeParams(gate_own_frame=False))
-    game = _off_turn_position(board)
-    true_hand_1 = list(game.state(0, hidden=False).hands[1])
-    bot.seat_at(game)
-    view = game.state(0)
-    gets_wheat = (0, 0, 0, 1, 0)
-
-    original_sample = View.sample
-
-    def fake_sample(self, rng, hold=None):
-        sampled = original_sample(self, rng, hold)
-        sampled.hands[1] = [9, 9, 9, 9, 9]
-        return sampled
-
-    monkeypatch.setattr(View, "sample", fake_sample)
-    captured = _captured_value_rows(monkeypatch)
-
-    gains = bot.gains_many(view, [gets_wheat], [1])
-    assert len(captured) == 2
-    for world, frame in captured:
-        assert frame == 1
-        assert world.state(1, hidden=False).hands[1] != true_hand_1
-    # Seat 1's frame names all of seat 0's cards, so the stub's read of seat
-    # 0 is its whole hand moved by the bundle.
-    assert gains == [pytest.approx(
-        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
-    )]
-    assert game.state(0, hidden=False).hands[1] == true_hand_1
-
-
-def test_from_the_movers_frame_the_gate_still_reads_its_own_whole_hand(board, monkeypatch):
-    """Where the public record cannot name all of this seat's cards (a steal
-    took one into `unknown`), the mover's frame still shows them all: every
-    world it reads has this seat's ledger row equal to its hand, before and
-    after the exchange, and the gain is the whole hand's."""
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
-                     trade=TradeParams(gate_own_frame=False))
-    game = _off_turn_position(board)
-    game.ledger.seats[0].known = [1, 0, 0, 0, 0]
-    game.ledger.seats[0].unknown = 2
-    bot.seat_at(game)
-    captured = _captured_value_rows(monkeypatch)
-    gets_wheat = (0, 0, 0, 1, 0)
-
-    gains = bot.gains_many(game.state(0), [gets_wheat], [1])
-    assert [frame for _, frame in captured] == [1, 1]
-    for world, _ in captured:
-        row = world.ledger.seats[0]
-        hand = list(world.state(0, hidden=False).hands[0])
-        assert row.known == hand and row.most == hand and row.unknown == 0
-    assert captured[1][0].ledger.seats[0].known == [1, 1, 1, 1, 0]
-    assert gains == [pytest.approx(
-        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
-    )]
-    assert game.ledger.seats[0].known == [1, 0, 0, 0, 0]       # the live ledger is untouched
-    assert game.ledger.seats[0].unknown == 2
-
-
-def _frame_scaled_values(monkeypatch):
-    """`HandValuePolicy.value_rows` replaced by a read that depends on the
-    frame: every entry is (frame + 1) x seat 0's card count / 100, so a gain
-    averaged over frames is that mean factor times the card change. The
-    frames asked for are recorded, row by row."""
-    frames: list[int] = []
-
-    def read(self, rows):
-        out = []
-        for world, frame in rows:
-            frames.append(frame)
-            cards = sum(world.state(0, hidden=False).hands[0])
-            out.append(tuple((frame + 1) * cards / 100 for _ in range(PLAYERS)))
-        return out
-
-    monkeypatch.setattr(HandValuePolicy, "value_rows", read)
-    return frames
-
-
-@pytest.mark.parametrize("choice, frames_asked, factor", [
-    ("one", [1, 1], 2.0),
-    ("pair", [0, 1, 0, 1], 1.5),
-    ("all", [0, 1, 2, 3, 0, 1, 2, 3], 2.5),
-])
-def test_gate_frames_averages_this_seats_entry_over_the_frames_off_turn(board, monkeypatch, choice, frames_asked, factor):
-    """On seat 1's turn, `gate_frames` reads the before and after world from
-    the mover's frame (`one`), this seat's and the mover's (`pair`) or every
-    seat's (`all`), in one forward, and the gain is the mean over them."""
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    frames = _frame_scaled_values(monkeypatch)
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
-                     trade=TradeParams(gate_own_frame=False, gate_frames=choice))
-    game = _off_turn_position(board)
-    bot.seat_at(game)
-    gains = bot.gains_many(game.state(0), [(0, 0, 0, 1, 0)], [1])
-    assert frames == frames_asked
-    assert gains == [pytest.approx(factor * 1 / 100)]
-
-
-def test_gate_frames_reads_this_seats_own_turn_from_its_own_frame_alone(board, monkeypatch):
-    """A position this seat is to move in has one right frame, its own:
-    `gate_frames` leaves it there."""
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    frames = _frame_scaled_values(monkeypatch)
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, trade=TradeParams(gate_frames="all"))
-    game = _off_turn_position(board)
-    game.current_player = 0
-    bot.seat_at(game)
-    bot.gains_many(game.state(0), [(0, 0, 0, 1, 0)], [1])
-    assert frames == [0, 0]
-
-
-def test_an_off_turn_read_imagines_this_seats_own_rows_and_no_other_seats(board, monkeypatch):
-    """What another seat saw stolen stays out of every world this seat values
-    -- the mover's frame reads the table's rows there -- and what this seat
-    saw goes in."""
-    from hexset.clients.netbot import NetworkBot
-
-    space = stub_checkpoint(board).space
-    captured = _captured_value_rows(monkeypatch)
-    gets_wheat = (0, 0, 0, 1, 0)
-
-    def read(mover_saw: bool):
-        game = _off_turn_position(board)
-        ledger = game.ledger
-        ledger.private = [None] * PLAYERS
-        mine = ledger.knowledge(0)
-        mine.seats[1].known = [0, 0, 1, 1, 1]
-        mine.seats[1].unknown = 5
-        ledger.private[0] = mine
-        if mover_saw:
-            theirs = ledger.knowledge(1)
-            theirs.seats[2].known = list(game.state(0, hidden=False).hands[2])
-            theirs.seats[2].unknown = 0
-            ledger.private[1] = theirs
-        bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7),
-                         trade=TradeParams(gate_own_frame=False))
-        bot.seat_at(game)
-        captured.clear()
-        gains = bot.gains_many(game.state(0), [gets_wheat], [1])
-        assert captured and all(frame == 1 for _, frame in captured)
-        for world, _ in captured:
-            assert world.ledger.for_seat(1) is world.ledger
-        # The world before the exchange; after it, seat 1's wheat has moved.
-        assert captured[0][0].ledger.for_seat(0).seats[1].known == [0, 0, 1, 1, 1]
-        return gains, [world.ledger.seats for world, _ in captured]
-
-    assert read(True) == read(False)
-
-
-def test_gate_own_frame_reads_off_turn_from_this_seats_frame(board, monkeypatch):
-    """`gate_own_frame` keeps the one-forward read from this seat's own frame
-    on every turn, over `_after`'s copy of the live view, with no world
-    sampled; on its own turn the gate reads that way regardless."""
+def test_the_gate_reads_off_turn_from_this_seats_own_frame(board, monkeypatch):
+    """The gate reads from this seat's own frame on every turn, one forward
+    over `_after`'s copy of the live view, with no world sampled."""
     from hexset.clients.netbot import NetworkBot
 
     space = stub_checkpoint(board).space
@@ -884,8 +621,7 @@ def test_gate_own_frame_reads_off_turn_from_this_seats_frame(board, monkeypatch)
     monkeypatch.setattr(View, "sample", no_sample)
     gets_wheat = (0, 0, 0, 1, 0)
 
-    own = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS,
-                     trade=TradeParams(gate_own_frame=True))
+    own = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = _off_turn_position(board)
     own.seat_at(game)
     own.gains_many(game.state(0), [gets_wheat], [1])
@@ -983,10 +719,10 @@ def test_a_policy_duels_through_compete_batched(board, monkeypatch):
     assert set(priced) <= set(installed)
 
 
-def test_plain_onnx_web_spawn_matches_arena_seeded_trade_worlds(board, monkeypatch):
-    """`spawn` used to drop its `rng` on the branch that builds a plain
-    checkpoint, so the web path sampled unseeded worlds while the arena path,
-    which builds through `bot_for`, sampled seeded ones on the same seed."""
+def test_plain_onnx_web_spawn_matches_arena_seeded_streams(board, monkeypatch):
+    """`spawn` keeps its `rng` on the branch that builds a plain checkpoint:
+    the web path's seat draws as the arena path's, which builds through
+    `bot_for`, does on the same seed."""
     # `hexset.clients.onnxbot` imports onnxruntime at module scope.
     pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
     from types import SimpleNamespace
@@ -1003,12 +739,9 @@ def test_plain_onnx_web_spawn_matches_arena_seeded_trade_worlds(board, monkeypat
     web = onnxbot.spawn("stub.onnx", board, rng=random.Random(41))
     other_seed = onnxbot.spawn("stub.onnx", board, rng=random.Random(42))
 
-    game = seated(arena, board)
-    seat = to_move(game)
-    view = game.state(seat)
-    expected = [arena._world_rng(view, seat).random() for _ in range(5)]
-    assert [web._world_rng(view, seat).random() for _ in range(5)] == expected
-    assert [other_seed._world_rng(view, seat).random() for _ in range(5)] != expected
+    expected = [arena._draws.random() for _ in range(5)]
+    assert [web._draws.random() for _ in range(5)] == expected
+    assert [other_seed._draws.random() for _ in range(5)] != expected
 
 
 
@@ -1065,48 +798,10 @@ def test_a_rollout_file_spawns_as_the_arenas_rollout_entrant_of_its_settings(
     assert searched, "no decision was played out"
 
 
-def test_a_rollout_file_that_declares_a_mix_spawns_as_the_mixed_rollout_entrant(
-    board, monkeypatch, arena_registry
-):
-    """Metadata `mix` and the spec's `mix=` build the same mixed searcher:
-    the same draws on the same seed, each logged with its probabilities."""
-    pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
-    from types import SimpleNamespace
-
-    from hexset.arena import entrant_from_name, spawn
-    from hexset.clients import onnxbot
-    from hexset.clients._modelmeta import RolloutConfig, SearchConfig
-
-    checkpoint = stub_checkpoint(board)
-    loaded = SimpleNamespace(**vars(checkpoint), search=SearchConfig(
-        rollout=RolloutConfig(worlds=2, top=3, horizon=1, mix=0.5, anchor=0.5)))
-    monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
-    register_entrants(lambda path, topology: checkpoint)
-
-    served = onnxbot.spawn("stub.onnx", board, rng=random.Random(5))
-    entrant = spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=3:horizon=1:mix=0.5:anchor=0.5"), board,
-                    random.Random(5))
-    assert served.mix == entrant.mix == 0.5 and served.anchor == entrant.anchor == 0.5
-    game = start(board, PLAYERS, random.Random(2))
-    walk = random.Random(2)
-    chosen = 0
-    while chosen < 20:
-        if to_move(game) == 0:
-            move = served.choose(game)
-            assert entrant.choose(game) == move
-            chosen += 1
-            apply(game, move)
-        else:
-            step_randomly(game, walk)
-    searched = [d for d in served.decision_log if d.worlds]
-    assert searched and all(len(d.mix) == len(d.candidates) for d in searched)
-    assert [d.chosen for d in searched] == [d.chosen for d in entrant.decision_log if d.worlds]
-
-
 def test_a_deterministic_rollout_file_plays_alike_on_any_seed(board, monkeypatch, arena_registry):
     """Metadata `det`: two seats spawned on different seeds, and the spec's
     `det=1`, search each position on the same worlds and play the same
-    moves; the decision log keeps the key and the salt."""
+    moves; the decision log keeps the key."""
     pytest.importorskip("onnxruntime", reason="the ONNX runtime is not installed")
     from types import SimpleNamespace
 
@@ -1116,14 +811,14 @@ def test_a_deterministic_rollout_file_plays_alike_on_any_seed(board, monkeypatch
 
     checkpoint = stub_checkpoint(board)
     loaded = SimpleNamespace(**vars(checkpoint), search=SearchConfig(
-        rollout=RolloutConfig(worlds=2, top=3, horizon=1, mix=0.5, det=True, salt=3)))
+        rollout=RolloutConfig(worlds=2, top=3, horizon=1, det=True)))
     monkeypatch.setattr(onnxbot, "load", lambda *args, **kwargs: loaded)
     register_entrants(lambda path, topology: checkpoint)
 
     seats = [onnxbot.spawn("stub.onnx", board, rng=random.Random(seed)) for seed in (5, 6)]
-    seats.append(spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=3:horizon=1:mix=0.5:det=1:salt=3"), board,
+    seats.append(spawn(entrant_from_name("rollout:/tmp/x.onnx@2:top=3:horizon=1:det=1"), board,
                        random.Random(7)))
-    assert all(seat.det and seat.salt == 3 for seat in seats)
+    assert all(seat.det for seat in seats)
     game = start(board, PLAYERS, random.Random(2))
     walk = random.Random(2)
     chosen = 0
@@ -1137,7 +832,7 @@ def test_a_deterministic_rollout_file_plays_alike_on_any_seed(board, monkeypatch
             step_randomly(game, walk)
     logs = [[(d.chosen, d.scores, d.det_key) for d in seat.decision_log if d.worlds] for seat in seats]
     assert logs[0] and logs[0] == logs[1] == logs[2]
-    assert all(d.det_key and d.salt == 3 for d in seats[0].decision_log if d.worlds)
+    assert all(d.det_key for d in seats[0].decision_log if d.worlds)
 
 
 # --- own_calibration in the gate: gains on the calibrated scale -------------------------------------------

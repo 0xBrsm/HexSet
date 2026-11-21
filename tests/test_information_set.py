@@ -145,7 +145,6 @@ class StubCheckpoint:
     space: ActionSpace
     players: int = PLAYERS
     trade_floor: float = UNLIMITED.trade_floor
-    gate_plies: int = UNLIMITED.gate_plies
     trade_params: TradeParams | None = None
 
 

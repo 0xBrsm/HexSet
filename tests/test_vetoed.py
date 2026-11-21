@@ -173,39 +173,15 @@ class First(Proposer):
                      if r.kind != RESPONSE_PASS and r.seat != 3), None)
 
 
-def test_a_picking_veto_takes_the_taker_its_own_value_gains_most_from():
+def test_the_proposer_picks_among_the_answers_the_veto_leaves():
     view = a_game().state(0)
     answers = [Response(s, RESPONSE_ACCEPT, GOOD) for s in (1, 2, 3)]
-    veto = BySeat({1: 0.01, 2: 0.05, 3: 0.09})
-    assert Vetoed(First(), veto).pick(view, answers) == 0, "the trader's own pick"
-    assert Vetoed(First(), veto, picks=True).pick(view, answers) == 1, \
-        "seat 2: the veto's best of what the trader takes (it never takes seat 3)"
+    assert Vetoed(First(), BySeat({1: 0.01, 2: 0.05, 3: 0.09})).pick(view, answers) == 0
+    assert Vetoed(First(), BySeat({1: -0.02, 2: 0.05, 3: 0.09})).pick(view, answers) == 1
 
 
-def test_a_picking_veto_never_takes_what_it_does_not_clear_or_the_trader_would_not():
-    view = a_game().state(0)
-    answers = [Response(1, RESPONSE_ACCEPT, GOOD), Response(3, RESPONSE_ACCEPT, GOOD)]
-    assert Vetoed(First(), BySeat({1: -0.02, 3: 0.09}), picks=True).pick(view, answers) is None
-
-
-def test_a_picking_veto_leaves_a_tie_to_the_trader():
-    view = a_game().state(0)
-    answers = [Response(2, RESPONSE_ACCEPT, GOOD), Response(1, RESPONSE_ACCEPT, GOOD)]
-    assert Vetoed(First(), BySeat({1: 0.03, 2: 0.03}), picks=True).pick(view, answers) == 0
-
-
-def test_traded_with_veto_picks_seats_a_picking_veto():
-    game = a_game()
-    mover = ScarcityTrader(random.Random(1))
-    seat = traded(mover, TRADER, game._state.board, random.Random(2), veto=True, veto_picks=True)
-    assert seat.trader.picks is True
-    assert traded(mover, TRADER, game._state.board, random.Random(2), veto=True).trader.picks is False
-
-
-@pytest.mark.parametrize("value,expected", [("gain", True), ("GAIN", True), ("trader", False),
-                                            ("", False), (None, False), ("1", False)])
-def test_the_pick_metadata_key_names_who_picks(value, expected):
-    from hexset.clients._modelmeta import trader_veto_pick_config
-
-    meta = {} if value is None else {"trader_veto_pick": value}
-    assert trader_veto_pick_config(meta) is expected
+@pytest.mark.parametrize("value", ["gain", "trader", "1"])
+def test_a_file_setting_the_removed_pick_key_is_refused_by_name(value):
+    with pytest.raises(ValueError, match="`trader_veto_pick`"):
+        trader_veto_config({"trader_veto": "1", "trader_veto_pick": value})
+    assert trader_veto_config({"trader_veto": "1", "trader_veto_pick": ""}) is True

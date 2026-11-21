@@ -618,6 +618,11 @@ def main(argv: list[str] | None = None) -> None:
              f"(default: {Config.rankings_min_games}).",
     )
     parser.add_argument(
+        "--rankings-every", type=float, default=None, metavar="SECONDS",
+        help="Call the ranker every SECONDS as well as after each ranked game ends, for a ranker "
+             "that reads more than the games it is handed (default: only after a game ends).",
+    )
+    parser.add_argument(
         "--menu-tab", action="append", default=[], metavar="LABEL=URL",
         help="A tab the game page's menu shows beside its own, opening URL inside the menu. "
              "Repeat for more. Default: none.",
@@ -663,6 +668,7 @@ def main(argv: list[str] | None = None) -> None:
         contact=args.contact,
         ranker=load_ranker(args.ranker) if args.ranker else None,
         rankings_min_games=args.rankings_min_games,
+        rankings_every=args.rankings_every,
         ranked_bot=args.ranked_bot,
         ranked_entrants=entrants,
         chance_model=args.chance_model,

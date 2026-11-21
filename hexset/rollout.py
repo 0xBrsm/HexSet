@@ -49,21 +49,12 @@ discard): each candidate is the whole decision, applied in every world
 before the playout, and the one chosen is played a move at a time, its
 later parts answering the asks inside it with no search of their own.
 
-**A mixed strategy.** Under `mix`, a searched root plays a candidate drawn
-from the policy's prior regularised towards the search's values
-(`mixed_strategy`) instead of the best-scoring one: candidates the search
-scores about alike are mixed by the prior, and one that clearly plays out
-better is played nearly always. The draws come from a stream of the
-searcher's own, seeded off its `rng`, so the worlds, the scores and every
-other draw are the greedy search's.
-
-**A deterministic search.** Under `det`, a searched root draws its worlds,
-their playout seeds and its mixed strategy's draw from a stream seeded by
-what the deciding seat can see (`hexset.game.observed_digest`) and a fixed
-`salt`, not from the searcher's running `rng`: the same visible position
-always searches the same worlds and plays the same move, in any process,
-on any fresh searcher, and a position rebuilt from a record searches as it
-was searched.
+**A deterministic search.** Under `det`, a searched root draws its worlds
+and their playout seeds from a stream seeded by what the deciding seat can
+see (`hexset.game.observed_digest`), not from the searcher's running `rng`:
+the same visible position always searches the same worlds and plays the
+same move, in any process, on any fresh searcher, and a position rebuilt
+from a record searches as it was searched.
 
 **A margin.** Under `margin`, a searched root outside the setup phases
 plays another candidate than the policy's own move only where it beats that
@@ -120,7 +111,7 @@ from .view import HoldReading
 __all__ = [
     "MARKS", "SETUP_PHASES", "STEP_LIMIT", "STOP_CHECKS", "TIE", "Decision", "Lanes", "PairedRollouts", "RolloutPool", "RolloutBatch",
     "SharedPools",
-    "mixed_strategy", "paired_copy", "play_lanes",
+    "paired_copy", "play_lanes",
 ]
 
 #: The most decisions a playout makes before it is scored where it
@@ -143,6 +134,10 @@ TIE = 0.005
 
 #: The opening's phases, which `PairedRollouts(full_setup=True)` always searches.
 SETUP_PHASES = (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
+
+#: What `PairedRollouts.decision_key` hashes ahead of the deciding seat's
+#: observed digest.
+_DET_PREFIX = b"hexset.rollout.det\x1f0\x1f"
 
 
 @dataclass(frozen=True)
@@ -177,13 +172,7 @@ class Decision:
     time the decision took.
 
     Under a deterministic search (`PairedRollouts.det`), `det_key` is the
-    hex digest the decision's stream was seeded by and `salt` the salt in it;
-    `""` and `None` otherwise.
-
-    Under a mixed strategy (`PairedRollouts.mix`), `mix` is each candidate's
-    probability (`mixed_strategy`, in `candidates` order), `chosen` the
-    candidate drawn from it and `greedy` the one the best mean score would
-    have played; both are empty (`()`, `None`) for a greedy decision.
+    hex digest the decision's stream was seeded by; `""` otherwise.
 
     Under a margin (`PairedRollouts.margin`), `margin` is the margin applied
     at the root (0 where none was: a setup root, or a root decided alone),
@@ -225,10 +214,8 @@ class Decision:
     mark_row_steps: tuple[int, ...] = ()
     truncated: int = 0
     cpu_seconds: float = 0.0
-    mix: tuple[float, ...] = ()
     greedy: int | None = None
     det_key: str = ""
-    salt: int | None = None
     margin: float = 0.0
     stop: float = 0.0
     played: tuple[int, ...] = ()
@@ -272,10 +259,8 @@ class Decision:
             steps=self.steps, truncated=self.truncated,
             row_steps=self.row_steps, mark_row_steps=list(self.mark_row_steps),
         )
-        if self.mix:
-            out.update(mix=[round(float(x), 6) for x in self.mix], greedy=self.greedy)
         if self.det_key:
-            out.update(det_key=self.det_key, salt=self.salt)
+            out["det_key"] = self.det_key
         if self.margin:
             out["margin"] = self.margin
             if self.greedy is not None:
@@ -353,43 +338,6 @@ def _outcome(x: float) -> float | int | None:
     return int(x) if x in (0.0, 1.0) else round(float(x), 3)
 
 
-def mixed_strategy(scores: Sequence[float], prior: Sequence[float], mix: float,
-                   anchor: float = 1.0) -> np.ndarray:
-    """The candidates' probabilities under a mixed strategy: the policy's
-    `prior` over the candidates, raised to `anchor` and regularised towards
-    `scores` (each one's mean outcome for the mover, a win chance) at
-    temperature `mix`, in the scores' units::
-
-        pi(a)  proportional to  prior(a) ** anchor * exp(scores(a) / mix)
-
-    the policy that maximises the expected score less `mix` times its KL
-    divergence from `q`, the prior raised to `anchor` and renormalised over
-    the candidates. Its expected shortfall from the best score is at most
-    `mix * ln(1 / q(best))`, by the scores themselves: a candidate trailing
-    the best by many `mix` is all but never played, and candidates within
-    about one `mix` of it are mixed in proportion to `q`. As `mix` falls to 0
-    it plays the best score (`q` breaking a tie); as it grows it plays `q`.
-    `anchor` 1 anchors to the prior itself, 0 to every candidate alike (a
-    softmax over the scores), between them to a flattened prior. A
-    candidate the prior gives nothing is never played at an `anchor` above
-    0; a prior that gives every candidate nothing counts them alike."""
-    if not mix > 0:
-        raise ValueError(f"mix is a temperature above 0, not {mix!r}")
-    if not (math.isfinite(anchor) and anchor >= 0.0):
-        raise ValueError(f"anchor is an exponent of 0 or more, not {anchor!r}")
-    scores = np.asarray(scores, dtype=np.float64)
-    prior = np.asarray(prior, dtype=np.float64)
-    if prior.shape != scores.shape or not scores.size:
-        raise ValueError("a score and a prior for each candidate")
-    if not (prior > 0).any() or anchor == 0.0:
-        prior = np.ones_like(prior)
-    with np.errstate(divide="ignore"):
-        logits = anchor * np.log(np.clip(prior, 0.0, None)) + (scores - scores.max()) / mix
-    logits -= logits.max()
-    weights = np.exp(logits)
-    return weights / weights.sum()
-
-
 def paired_copy(world: Game, seed: int, seat: int) -> Game:
     """A copy of `world` that draws its chance off `seed`, split: two copies
     on one seed roll the same n-th roll and take the same n-th steal, and
@@ -400,7 +348,7 @@ def paired_copy(world: Game, seed: int, seat: int) -> Game:
     dice = copy._state.dice
     copy.chance = Live(rng, split=True) if dice is None else Balanced.from_deck(rng, dice, split=True)
     # A policy that samples its moves keys its draws by this, so the copies
-    # of one world draw alike (`hexset.clients.conditioned.ConditionedPolicy`).
+    # of one world draw alike.
     copy.paired_seed = seed
     return copy
 
@@ -447,20 +395,13 @@ class PairedRollouts:
     mover's own frame whoever is to move there, so the mover's own cards in
     that world stay known to the read. The candidate with the highest mean
     score over the worlds is played, the earlier candidate on a tie (so the
-    policy's own move first). Under `mix`, a temperature above 0 in the
-    scores' units (win chance), the candidate is drawn instead from
-    `mixed_strategy` over the candidates' scores and their prior raised to
-    `anchor` (1, the prior itself, by default), from a
-    stream seeded off `rng`'s state that draws nothing else: the worlds, and
-    so the scores, are the greedy search's, and a game stays a function of
-    the seeds it was dealt. A root decided without playouts draws nothing.
+    policy's own move first). A root decided without playouts draws nothing.
 
-    Under `det`, a searched root takes its worlds, their seeds and its mixed
-    draw from a stream of its own, seeded by `decision_key`: what the mover
-    can see of the position (`hexset.game.observed_digest`) and `salt`. It
-    draws nothing from `rng`, so the same visible position searches the same
-    worlds and plays the same move on any searcher, in any process, and a
-    run stays a function of the seeds that dealt its games.
+    Under `det`, a searched root takes its worlds and their seeds from a
+    stream of its own, seeded by `decision_key`: what the mover can see of
+    the position (`hexset.game.observed_digest`). It draws nothing from
+    `rng`, so the same visible position searches the same worlds and plays
+    the same move on any searcher, in any process, and a run stays a function of the seeds that dealt its games.
 
     Under `margin`, a number of standard errors above 0, a searched root
     outside `SETUP_PHASES` compares each other candidate j with the policy's
@@ -469,8 +410,7 @@ class PairedRollouts:
     error `s_j = std(d_j, ddof=1) / sqrt(worlds)`. A candidate passes where
     `m_j > margin * s_j`; the passing candidate with the highest mean score
     is played (the earlier on a tie), and where none passes, the policy's
-    own move. A margin needs at least two worlds and does not combine with
-    `mix`. At 0, the default, the best mean score is played as above.
+    own move. A margin needs at least two worlds. At 0, the default, the best mean score is played as above.
 
     Under `stop`, a number of standard errors above 0 that needs a margin,
     a root the margin applies to plays its worlds in stages: at each count
@@ -524,10 +464,7 @@ class PairedRollouts:
         hold: HoldReading | None = None,
         rng: random.Random | None = None,
         pool: "RolloutPool | None" = None,
-        mix: float = 0.0,
-        anchor: float = 1.0,
         det: bool = False,
-        salt: int = 0,
         margin: float = 0.0,
         stop: float = 0.0,
         moves: bool = False,
@@ -544,19 +481,9 @@ class PairedRollouts:
         marks = tuple(int(m) for m in marks)
         if any(m < 1 for m in marks) or list(marks) != sorted(set(marks)):
             raise ValueError(f"marks are distinct increasing turns, 1 or more, not {marks!r}")
-        mix = float(mix)
-        if not (math.isfinite(mix) and mix >= 0.0):
-            raise ValueError(f"mix is a temperature of 0 or more, not {mix!r}")
-        anchor = float(anchor)
-        if not (math.isfinite(anchor) and anchor >= 0.0):
-            raise ValueError(f"anchor is an exponent of 0 or more, not {anchor!r}")
-        if isinstance(salt, bool) or not isinstance(salt, int) or salt < 0:
-            raise ValueError(f"salt is a whole number of 0 or more, not {salt!r}")
         margin = float(margin)
         if not (math.isfinite(margin) and margin >= 0.0):
             raise ValueError(f"margin is a number of standard errors of 0 or more, not {margin!r}")
-        if margin > 0.0 and mix > 0.0:
-            raise ValueError("a margin and a mixed strategy do not combine: set one of margin and mix")
         if margin > 0.0 and worlds < 2:
             raise ValueError(f"a margin needs at least two worlds for a standard error, not {worlds!r}")
         stop = float(stop)
@@ -577,19 +504,11 @@ class PairedRollouts:
         self.hold = hold
         self.rng = rng or random.Random()
         self.pool = pool
-        self.mix = mix
-        self.anchor = anchor
         self.det = bool(det)
-        self.salt = salt
         self.margin = margin
         self.stop = stop
         self.moves = bool(moves)
         self.tie = tie
-        # The mixed strategy's stream: off `rng`'s state, salted, so a draw never
-        # moves the worlds and the worlds never move a draw.
-        self._draws = random.Random(
-            hashlib.sha256((repr(self.rng.getstate()) + ":mix").encode()).digest()
-        ) if mix else None
         self.truncated_rollouts = 0
         self.last_truncated_rollouts = 0
         self.decision_log: list[Decision] = []
@@ -612,11 +531,9 @@ class PairedRollouts:
 
     def decision_key(self, game: Game, seat: int) -> bytes:
         """The seed of `seat`'s decision at `game` under `det`: a sha256 of
-        `salt` and `hexset.game.observed_digest(game, seat)`, so of what the
-        seat can see and nothing it cannot."""
-        return hashlib.sha256(
-            b"hexset.rollout.det\x1f" + str(self.salt).encode() + b"\x1f" + observed_digest(game, seat)
-        ).digest()
+        `hexset.game.observed_digest(game, seat)` behind a fixed prefix, so of
+        what the seat can see and nothing it cannot."""
+        return hashlib.sha256(_DET_PREFIX + observed_digest(game, seat)).digest()
 
     def decide(self, game: Game) -> Decision:
         if is_over(game):
@@ -661,19 +578,17 @@ class PairedRollouts:
     def _search(self, game: Game, seat: int, options: tuple, prior: np.ndarray, value: tuple,
                 candidates: tuple[int, ...], context: dict, began: float, *, whole: bool) -> Decision:
         """`candidates` of `options` played out in shared worlds, the best
-        mean score chosen (the earlier candidate on a tie) or, under `mix`,
-        one drawn from `mixed_strategy`, or, under `margin` outside the setup
-        phases, the best of those clearing the margin over the policy's own
-        move (candidate 0), and logged."""
+        mean score chosen (the earlier candidate on a tie) or, under `margin`
+        outside the setup phases, the best of those clearing the margin over
+        the policy's own move (candidate 0), and logged."""
         # Worlds and seeds are drawn here, in order, whoever plays them out:
         # a pool's decision is the one this process would have made alone.
-        draws, key = self._draws, ""
+        key = ""
         if not self.det:
             tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
         else:
             seed = self.decision_key(game, seat)
             key = seed.hex()
-            draws = random.Random(hashlib.sha256(seed + b"\x1fmix").digest())
             # `world` draws from `rng`: the decision's stream stands in for it,
             # and the searcher's own is put back untouched.
             running, self.rng = self.rng, random.Random(seed)
@@ -698,12 +613,7 @@ class PairedRollouts:
             scores = table.mean(axis=0)
             leads = None if lanes.leads is None else lanes.leads.reshape(self.worlds, len(candidates))
         best = max(range(len(candidates)), key=lambda j: (scores[j], -j))
-        mixed: tuple[float, ...] = ()
         picked = best
-        if self.mix:
-            probabilities = mixed_strategy(scores, prior[list(candidates)], self.mix, self.anchor)
-            mixed = tuple(float(x) for x in probabilities)
-            picked = self._draw(probabilities, draws)
         if margin:
             # The policy's own move, and the candidates still in play at the last world.
             alive = [0] + [j for j in range(1, len(candidates)) if not played or played[j] == self.worlds]
@@ -732,8 +642,8 @@ class PairedRollouts:
             steps=self._steps, truncated=self.last_truncated_rollouts,
             row_steps=self._row_steps, mark_row_steps=self._mark_row_steps,
             cpu_seconds=time.process_time() - began,
-            mix=mixed, greedy=candidates[best] if mixed or held_back else None,
-            det_key=key, salt=self.salt if key else None, margin=margin,
+            greedy=candidates[best] if held_back else None,
+            det_key=key, margin=margin,
             stop=stop, played=tuple(played), tie=tie, tied=tied,
             leads=() if not tie or leads is None else tuple(tuple(float(x) for x in row) for row in leads),
         )
@@ -800,18 +710,6 @@ class PairedRollouts:
         self.truncated_rollouts += truncated
         self._steps, self._row_steps, self._mark_row_steps = steps, row_steps, tuple(mark_row_steps)
         return table, after, reads, played, leads
-
-    def _draw(self, probabilities: np.ndarray, draws: random.Random) -> int:
-        """An index drawn from `probabilities` off `draws` (this searcher's own
-        stream, or under `det` the decision's): one uniform a draw, never
-        landing on a candidate of probability 0."""
-        point = draws.random()
-        running = 0.0
-        for index, p in enumerate(probabilities):
-            running += float(p)
-            if point < running:
-                return index
-        return max(i for i, p in enumerate(probabilities) if p > 0)
 
     def _alone(self, options: tuple, prior: np.ndarray, value: tuple, index: int, context: dict,
                began: float, *, whole: bool = False) -> Decision:

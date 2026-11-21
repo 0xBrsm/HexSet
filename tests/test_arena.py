@@ -93,18 +93,9 @@ def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
     assert full.option("full_setup") is None
     opening = entrant_from_name("rollout:/tmp/x.onnx@32:top=6:decisive=0.97:horizon=8:setup=full")
     assert opening.name == "rollout32t6d0.97h8s" and opening.option("full_setup") is True
-    mixed = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:setup=full:mix=0.02")
-    assert mixed.name == "rollout64t6h8sm0.02" and mixed.option("mix") == 0.02
-    assert pickle.loads(pickle.dumps(mixed)) == mixed and opening.option("mix") is None
-    assert entrant_from_name("rollout:/tmp/x.onnx@32:top=6:decisive=0.97:horizon=8:setup=full:mix=0") == opening
-    flat = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:setup=full:mix=0.01:anchor=0.5")
-    assert flat.name == "rollout64t6h8sm0.01a0.5" and (flat.option("mix"), flat.option("anchor")) == (0.01, 0.5)
-    assert mixed.option("anchor") is None
-    assert entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:setup=full:mix=0.02:anchor=1") == mixed
-    sure = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:setup=full:mix=0.01:anchor=0.5:det=1:salt=7")
-    assert sure.name == "rollout64t6h8sm0.01a0.5D7" and (sure.option("det"), sure.option("salt")) == (True, 7)
     plain_det = entrant_from_name("rollout:/tmp/x.onnx@64:det=1")
-    assert plain_det.name == "rollout64t3D" and plain_det.option("salt") is None
+    assert plain_det.name == "rollout64t3D" and plain_det.option("det") is True
+    assert pickle.loads(pickle.dumps(plain_det)) == plain_det
     assert entrant_from_name("rollout:/tmp/x.onnx@64:det=0") == entrant_from_name("rollout:/tmp/x.onnx@64")
     held = entrant_from_name("rollout:/tmp/x.onnx@64:top=6:horizon=8:det=1:margin=1.5")
     assert held.name == "rollout64t6h8DM1.5" and held.option("margin") == 1.5
@@ -119,10 +110,9 @@ def test_a_rollout_entrant_names_its_worlds_candidates_and_horizon():
     untied = entrant_from_name("rollout:/tmp/x.onnx@64:margin=1.5:tie=0")
     assert untied.name == "rollout64t3M1.5T0" and untied.option("tie") == 0.0
     for bad in ("@0", "@:top=1", "@:decisive=2", "@:horizon=0", "@:top=2:top=3", "@:depth=3",
-                "@:setup=half", "@:setup", "@:mix=-0.1", "@:mix=hot", "@:mix=inf", "@:mix",
-                "@:anchor=0.5", "@:mix=0:anchor=0.5", "@:mix=0.01:anchor=-1", "@:mix=0.01:anchor=flat",
-                "@:det=2", "@:det", "@:salt=3", "@:det=0:salt=3", "@:det=1:salt=-3", "@:det=1:salt=x",
-                "@:margin=-1", "@:margin=wide", "@:margin", "@:mix=0.01:margin=1.5", "@1:margin=1.5",
+                "@:setup=half", "@:setup", "@:mix=0.02", "@:mix=0", "@:anchor=0.5",
+                "@:det=2", "@:det", "@:det=1:salt=0", "@:det=1:salt=7",
+                "@:margin=-1", "@:margin=wide", "@:margin", "@1:margin=1.5",
                 "@:stop=1", "@:margin=1.5:stop=-1", "@:margin=1.5:stop=soon",
                 "@:tie=0.005", "@:margin=1.5:tie=-0.1", "@:margin=1.5:tie=1", "@:margin=1.5:tie=close"):
         with pytest.raises(ValueError):

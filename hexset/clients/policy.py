@@ -73,12 +73,12 @@ class Checkpoint(Protocol):
     How the checkpoint bargains is read by name when present, structurally
     rather than by inheritance: `trade_params` (a whole
     `hexset.trading.TradeParams` -- card caps and direction, clearing floor,
-    responder price, offer budget, fragment plan and continuation budget)
-    or, for a loader that carries only the two loose attributes, `trade_floor`
-    and `gate_plies`. Declaring none of them reads `hexset.trading.UNLIMITED`,
-    which is no limits of its own: no card caps -- the table's is then the only
-    bound -- a floor at zero, nothing charged for a response, no broadcast
-    budget asked for, no planning.
+    responder price, offer budget and fragment plan) or, for a loader that
+    carries only loose attributes, `trade_floor` and `max_offers`. Declaring
+    none of them reads `hexset.trading.UNLIMITED`, which is no limits of its
+    own: no card caps -- the table's is then the only bound -- a floor at
+    zero, nothing charged for a response, no broadcast budget asked for, no
+    planning.
 
     A checkpoint may also name a `trader`: a bot, as a lineup names it, that
     answers every trade for it while the checkpoint plays every move

@@ -449,14 +449,6 @@ class DeclaredTrade:
         retune(self, trade_floor=value)
 
     @property
-    def gate_plies(self) -> int:
-        return self.trade.gate_plies
-
-    @gate_plies.setter
-    def gate_plies(self, value: int) -> None:
-        retune(self, gate_plies=value)
-
-    @property
     def responder_card_risk(self) -> float:
         return self.trade.responder_card_risk
 

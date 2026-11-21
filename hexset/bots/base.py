@@ -107,20 +107,17 @@ class Vetoed:
     veto refuses; every other name is the proposer's.
 
     The veto never adds or changes an exchange: it only removes ones the
-    proposer would make. Nor does it choose one, unless ``picks``: then of
-    the answers to this seat's own offer that the proposer would take, each
-    on its own, and the veto clears, the pick is the one the veto gains most
-    from (the proposer's own pick among equals). Seat it with
+    proposer would make, and never chooses one: the proposer picks among the
+    answers the veto leaves. Seat it with
     ``TradesBy(mover, Vetoed(trader, mover))`` (`hexset.arena.traded` with
     ``veto=True``) for a mover that vetoes its own trader.
     """
 
-    __slots__ = ("proposer", "veto", "picks")
+    __slots__ = ("proposer", "veto")
 
-    def __init__(self, proposer: object, veto: object, picks: bool = False) -> None:
+    def __init__(self, proposer: object, veto: object) -> None:
         object.__setattr__(self, "proposer", proposer)
         object.__setattr__(self, "veto", veto)
-        object.__setattr__(self, "picks", picks)
 
     def __getattr__(self, name: str):
         return getattr(object.__getattribute__(self, "proposer"), name)
@@ -132,7 +129,7 @@ class Vetoed:
         delattr(self.proposer, name)
 
     def __reduce__(self):
-        return (Vetoed, (self.proposer, self.veto, self.picks))
+        return (Vetoed, (self.proposer, self.veto))
 
     def seat_at(self, game: Game) -> None:
         seat_at(self.proposer, game)
@@ -177,19 +174,7 @@ class Vetoed:
         ok = {i: clears_floor(g, self.veto, view) for i, g in gains.items()}
         passed = [Response(r.seat, RESPONSE_PASS, None) for r in responses]
         thinned = [r if ok.get(i, True) else passed[i] for i, r in enumerate(responses)]
-        if not self.picks:
-            return self.proposer.pick(view, thinned)
-        # Each answer the veto clears, put to the proposer alone: those it
-        # would take are the field, ranked by the veto's own gain.
-        field = [i for i in live if ok[i]
-                 and self.proposer.pick(view, [thinned[i]]) == 0]
-        if not field:
-            return None
-        best = max(gains[i] for i in field)
-        top = [i for i in field if gains[i] == best]
-        if len(top) == 1:
-            return top[0]
-        return self.proposer.pick(view, [r if i in top else passed[i] for i, r in enumerate(responses)])
+        return self.proposer.pick(view, thinned)
 
     def gains_many(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[float]:
         own = valued_many(self.proposer, view, list(received), list(counterparties))
@@ -335,8 +320,8 @@ def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> N
     one, walked as `seat_at` walks it (a `TradesBy`'s mover and its trader):
     `actor`'s `action` at `game`, before it
     is applied, as seen from `viewer`'s seat. What a bot that models the
-    other seats from their moves (`hexset.clients.conditioned.Opponents`)
-    learns from; other bots see nothing."""
+    other seats from their moves (`hexset.clients.netbot.rollouts_for`'s
+    `opponents`) learns from; other bots see nothing."""
     if isinstance(bot, Closes):
         watch(bot.mover, game, actor, action, viewer)
         return

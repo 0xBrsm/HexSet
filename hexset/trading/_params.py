@@ -46,10 +46,6 @@ ENUMERATION_CARDS = 3
 MAX_TRADE_FLOOR = 1.0
 MAX_CARD_RISK = 1.0
 MAX_OFFERS = 8
-MAX_GATE_PLIES = 16
-
-# `TradeParams.gate_frames`: the frames an off-turn position is valued from.
-GATE_FRAMES = ("one", "pair", "all")
 
 # A target is split into at most two exact fragments:
 # `fragments.fragment_partitions` enumerates two-way splits only, so this is
@@ -107,30 +103,6 @@ class TradeParams:
     #: always a single card, so at `2` a fragment is `1:1`, `1:2` or `2:1`.
     #: Read only under `fragment_trades`.
     fragment_cards: int | None = None
-    #: The trade gate's continuation budget: plies rolled forward over the
-    #: exchanged hand before it is valued, `0` meaning one forward. Read by
-    #: `hexset.clients.netbot`; a bot that searches sets its own depth.
-    gate_plies: int = 0
-    #: Value every position from this seat's own frame, whoever is to move:
-    #: the only frame that carries everything the seat knows, its dev cards
-    #: by kind on the own-seat inputs. Off, a position where another seat is
-    #: to move is valued from that seat's frame on a world sampled from this
-    #: seat's belief, with this seat's own hand shown whole, and this seat's
-    #: entry of the value vector read; that frame has no input for another
-    #: seat's dev cards, so it drops this seat's. Read by
-    #: `hexset.clients.netbot`.
-    gate_own_frame: bool = True
-    #: On another seat's turn, the frames a position is valued from, this
-    #: seat's entry of each vector averaged: `one`, the single frame above
-    #: (the mover's, or this seat's under `gate_own_frame`); `pair`, this
-    #: seat's and the mover's; `all`, every seat's. Each frame is a noisy
-    #: read of the same position -- the head reads a seat's cards through
-    #: different inputs in its own frame and in another's -- so the mean
-    #: keeps what each sees. Every frame reads the same world sampled from
-    #: this seat's belief, this seat's own hand shown whole. A position this
-    #: seat is to move in is read from its own frame alone. Read by
-    #: `hexset.clients.netbot`.
-    gate_frames: str = "one"
     #: Put first the offers that fit what their counterparty has shown it
     #: wants and will give up (`hexset.trading.fit`, off the public ledger),
     #: and counter an offer the same way; among the rest, and wherever nobody
@@ -169,14 +141,10 @@ class TradeParams:
             raise ValueError(
                 f"fragment_threshold is negative: {self.fragment_threshold}"
             )
-        if self.gate_frames not in GATE_FRAMES:
-            raise ValueError(f"gate_frames is one of {GATE_FRAMES}: {self.gate_frames!r}")
         if not 1 <= self.max_fragments <= MAX_FRAGMENTS:
             raise ValueError(
                 f"max_fragments must be 1 or {MAX_FRAGMENTS}: {self.max_fragments}"
             )
-        if self.gate_plies < 0:
-            raise ValueError(f"gate_plies must be non-negative: {self.gate_plies}")
         # A fragment cannot be wider than what this gate will move at all: a
         # plan whose pieces it would itself refuse never reaches the table.
         # Only a declared `fragment_cards` is checked; an undeclared one is
@@ -242,8 +210,13 @@ class TradeParams:
         unreadable or absurd one takes `base` (`UNLIMITED` by default) rather
         than failing the load. A checkpoint that declares no cap therefore has
         none -- it is bound by the cards it holds and by nothing else.
-        Unrecognised keys are ignored without complaint.
+        Unrecognised keys are ignored without complaint, except the keys of
+        removed gate options (`REMOVED_GATE_KEYS`): a `gate_plies` other than
+        `0`, a `gate_own_frame` other than `1`, or any `gate_frames` raises
+        `ValueError` naming the key, since the gate would otherwise price
+        trades differently from what the file asks.
         """
+        _refuse_removed(meta)
         on = UNLIMITED if base is None else base
         return cls(
             max_offers=_int(meta.get("max_offers"), on.max_offers, MAX_OFFERS, floor=0),
@@ -259,9 +232,6 @@ class TradeParams:
             ),
             max_fragments=_int(meta.get("max_fragments"), on.max_fragments, MAX_FRAGMENTS),
             fragment_cards=_int(meta.get("fragment_cards"), on.fragment_cards),
-            gate_plies=_int(meta.get("gate_plies"), on.gate_plies, MAX_GATE_PLIES, floor=0),
-            gate_own_frame=_bool(meta.get("gate_own_frame"), on.gate_own_frame),
-            gate_frames=_choice(meta.get("gate_frames"), on.gate_frames, GATE_FRAMES),
             fit_offers=_bool(meta.get("fit_offers"), on.fit_offers),
             open_asks=_bool(meta.get("open_asks"), on.open_asks),
         )
@@ -278,7 +248,6 @@ class TradeParams:
             "fragment_trades": "1" if self.fragment_trades else "0",
             "fragment_threshold": repr(self.fragment_threshold),
             "max_fragments": str(self.max_fragments),
-            "gate_plies": str(self.gate_plies),
             "fit_offers": "1" if self.fit_offers else "0",
         }
         for name in ("max_offers", "max_give_cards", "fragment_cards"):
@@ -289,10 +258,6 @@ class TradeParams:
             out["trade_floor_relative"] = "1"
         if not self.open_asks:
             out["open_asks"] = "0"
-        if not self.gate_own_frame:
-            out["gate_own_frame"] = "0"
-        if self.gate_frames != "one":
-            out["gate_frames"] = self.gate_frames
         return out
 
 
@@ -300,8 +265,8 @@ def params_of(gate: object, default: "TradeParams | None" = None) -> "TradeParam
     """The parameters `gate` carries, read by name rather than by inheritance.
 
     A gate exposing `trade_params` answers with its own; anything else is read
-    at `default` (`UNLIMITED`) after adopting whatever loose `trade_floor`,
-    `gate_plies` and offer budget -- `max_offers`, else `trade_offer_budget`,
+    at `default` (`UNLIMITED`) after adopting whatever loose `trade_floor`
+    and offer budget -- `max_offers`, else `trade_offer_budget`,
     `-1` there for no limit -- it does carry. That is how a plain gate
     describes itself, and how `retune(gate, max_offers=...)` on one reaches
     every driver.
@@ -311,7 +276,6 @@ def params_of(gate: object, default: "TradeParams | None" = None) -> "TradeParam
         return got
     base = UNLIMITED if default is None else default
     floor = getattr(gate, "trade_floor", None)
-    plies = getattr(gate, "gate_plies", None)
     offers = base.max_offers
     loose = getattr(gate, "max_offers", None)
     if loose is None:
@@ -322,8 +286,29 @@ def params_of(gate: object, default: "TradeParams | None" = None) -> "TradeParam
         base,
         max_offers=offers,
         trade_floor=base.trade_floor if floor is None else float(floor),
-        gate_plies=base.gate_plies if plies is None else int(plies),
     )
+
+
+#: Metadata keys of gate options that no longer exist, each with the one
+#: value that still loads (`None`: none does). Each value it accepts prices
+#: trades exactly as a file without the key.
+REMOVED_GATE_KEYS: dict[str, tuple[str, ...] | None] = {
+    "gate_plies": ("0",),
+    "gate_own_frame": ("1", "true", "yes", "on"),
+    "gate_frames": None,
+}
+
+
+def _refuse_removed(meta: dict[str, str]) -> None:
+    """Raise `ValueError` where `meta` sets a removed gate option to anything
+    but the value it always had (`REMOVED_GATE_KEYS`)."""
+    for key, kept in REMOVED_GATE_KEYS.items():
+        text = str(meta.get(key) or "").strip().lower()
+        if text and (kept is None or text not in kept):
+            allowed = "remove the key" if kept is None else f"remove the key or set it to {kept[0]}"
+            raise ValueError(
+                f"metadata `{key}` = {meta[key]!r} sets a removed trade gate option; {allowed}"
+            )
 
 
 def _int(
@@ -364,12 +349,6 @@ def _bool(value: object, default: bool) -> bool:
     if text in ("0", "false", "no", "off"):
         return False
     return default
-
-
-def _choice(value: object, default: str, choices: tuple[str, ...]) -> str:
-    """One metadata word from `choices`; anything else takes the default."""
-    text = str(value).strip().lower() if value is not None else ""
-    return text if text in choices else default
 
 
 #: No limits of its own: no card caps, a floor at zero, nothing charged for a

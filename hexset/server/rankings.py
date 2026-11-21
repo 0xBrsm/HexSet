@@ -11,7 +11,8 @@ casual one never reaches the ranker.
 
 `rank(games: list[dict]) -> dict`, called on a thread of its own: once when
 the server starts, over every ranked game in the journal directory, and
-again after each one that ends. `games` is every ranked game that ended,
+again after each one that ends; with `--rankings-every SECONDS`, also every
+SECONDS, for a ranker that reads more than the games it is handed. `games` is every ranked game that ended,
 played out or timed out, oldest first by when it ended, each as
 `finished_game` reads it; what a timeout is worth is the ranker's to say. The ranker gets
 its own copy and keeps no state between calls, so a change to it takes
@@ -91,6 +92,9 @@ _SCALARS = (str, int, float, bool, type(None))
 
 # The queue item that stops the worker.
 _STOP = object()
+
+# The queue item that ranks again with no new game (`Rankings(every=...)`).
+_TICK = object()
 
 
 def load_ranker(spec: str) -> Ranker:
@@ -423,7 +427,8 @@ class Rankings:
     ranker is on one worker thread, so a game finishing never waits on
     either; `view` is the board as it stands."""
 
-    def __init__(self, ranker: Ranker, directory: str | None, min_games: int = MIN_GAMES) -> None:
+    def __init__(self, ranker: Ranker, directory: str | None, min_games: int = MIN_GAMES,
+                 every: float | None = None) -> None:
         self._ranker = ranker
         self._directory = directory
         self._min_games = min_games
@@ -438,6 +443,16 @@ class Rankings:
         self._queue.put(None)
         self._thread = threading.Thread(target=self._work, name="rankings", daemon=True)
         self._thread.start()
+        # With `every`, the ranker is called every that many seconds as well,
+        # with the games read so far, so a ranker reading more than the games
+        # it is handed stays current between games.
+        self._stopping = threading.Event()
+        if every:
+            threading.Thread(target=self._tick, args=(float(every),), name="rankings-every", daemon=True).start()
+
+    def _tick(self, every: float) -> None:
+        while not self._stopping.wait(every):
+            self._queue.put(_TICK)
 
     def ended(self, path: Path) -> None:
         """A game just wrote its ending to `path` (`_journal.Journal.on_end`):
@@ -468,6 +483,7 @@ class Rankings:
 
     def close(self) -> None:
         """Stop the worker once what it already holds is done."""
+        self._stopping.set()
         self._queue.put(_STOP)
         self._thread.join(timeout=5)
 
@@ -478,7 +494,9 @@ class Rankings:
             try:
                 if item is _STOP:
                     return
-                if isinstance(item, tuple) and item[0] == "renamed":
+                if item is _TICK:
+                    dirty = True
+                elif isinstance(item, tuple) and item[0] == "renamed":
                     restyled = _rename(self._profiles, *item[1:]) or restyled
                 elif isinstance(item, tuple):
                     restyled = _note(self._profiles, item[1], item[2]) or restyled

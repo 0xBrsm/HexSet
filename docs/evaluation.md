@@ -240,10 +240,8 @@ each rollout candidate's outcome in each world), the option chosen, the
 turn, phase, seat and public points, and the CPU time spent. A rollout
 decision also keeps the value head's read of each playout at later turns
 (`hexset.rollout.MARKS`), so fewer worlds, fewer candidates or a shorter
-horizon can be scored on the same playouts afterwards. Under a mixed
-strategy (`mix`) it keeps each candidate's probability and the candidate the
-best score would have played, beside the one drawn. Under a deterministic
-search (`det`) it keeps the decision's key and salt, so the decision can be
+horizon can be scored on the same playouts afterwards. Under a deterministic
+search (`det`) it keeps the decision's key, so the decision can be
 searched again from a rebuilt position. Under a margin (`margin`) it keeps
 the margin applied at the root and, where the margin held back the best
 score, the candidate that score would have played. Under early stopping

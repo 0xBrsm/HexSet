@@ -131,6 +131,37 @@ def test_a_contract_either_side_of_the_served_ones_is_refused_by_name(contract, 
     assert f"contract={contract!r}" in str(caught.value)
 
 
+def _stamped(tmp_path, name, extra):
+    """`STUB7` with `extra` added to its metadata, saved as `name`."""
+    onnx = pytest.importorskip("onnx")
+    model = onnx.load(str(STUB7))
+    for key, value in extra.items():
+        entry = model.metadata_props.add()
+        entry.key, entry.value = key, value
+    path = tmp_path / name
+    onnx.save(model, str(path))
+    return path
+
+
+@pytest.mark.parametrize("key, value", [
+    ("mix", "0.02"), ("anchor", "0.5"), ("salt", "7"),
+    ("gate_frames", "pair"), ("gate_own_frame", "0"), ("gate_plies", "8"),
+    ("trader_veto_pick", "gain"), ("opponents", "a.onnx"), ("opponent_encoder", "b.onnx"),
+])
+def test_a_file_setting_a_removed_option_fails_to_load_naming_it(key, value, tmp_path):
+    """Played without the option, the file would decide otherwise than it
+    asks: the load is refused, naming the key."""
+    path = _stamped(tmp_path, f"removed-{key}.onnx", {key: value})
+    with pytest.raises(ValueError, match=f"`{key}`"):
+        load(str(path), _board().topology)
+
+
+def test_a_removed_option_at_the_value_it_always_had_still_loads(tmp_path):
+    path = _stamped(tmp_path, "kept.onnx", {"gate_own_frame": "1", "gate_plies": "0", "salt": "0"})
+    loaded = load(str(path), _board().topology)
+    assert loaded.gate == load(str(STUB7), _board().topology).gate
+
+
 def test_a_file_declaring_no_contract_is_refused_as_declaring_none():
     """Not as `contract='1'`: the file declares nothing, and a message
     naming a contract it never wrote sends the reader looking for the key."""

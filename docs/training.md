@@ -650,7 +650,7 @@ seat for a network that reads every seat the same way: each seat as a token
 (the perspective first, the others in turn order), the board as hexes and
 vertices, a building's or road's owner as a pointer to its seat's token.
 `flatten` lays it out as one float32 row (`layout`), and `observation_row`
-does both. Five contracts are served (`contract9.CONTRACTS`):
+does both. Six contracts are served (`contract9.CONTRACTS`):
 
 | Contract | Seats | Seat token | Table | Hex |
 | --- | --- | --- | --- | --- |
@@ -659,6 +659,7 @@ does both. Five contracts are served (`contract9.CONTRACTS`):
 | `9d` | 2 | 22 | 20 | 8 |
 | `9d.1` | 2 | 32 | 20 | 8 |
 | `11d` | 2 | 35 and 27 | 3 | 17 |
+| `11` | 2 to 4 | 40, then 43 per opponent | 9 | 17 |
 
 `hexset.contract9.encode9(game, seat, contract="9.1")` and
 `layout(players, hexes, vertices, edges, contract="9.1")` provide 40-feature
@@ -693,6 +694,20 @@ held and their ages; the table is a board block of the turn count, the
 next roll's chance of a seven and whether the dice have been thrown; and a
 hex reads its number one-hot over 2-6 and 8-12 (`NUMBERS_11D`). The module
 docstring of `hexset.contract9` gives every column.
+
+`11` is `11d` at a table of two to four live seats: my token, then one token
+per opponent in turn order after me, then the board block. Each token begins
+with `11d`'s columns in `11d`'s places, so at a table of two those columns
+hold `11d`'s bytes. An opponent's `hand` is its expected hand: the cards the
+view certifies plus the residual pool shared among the opponents in
+proportion to the cards each holds uncertified (at two seats, the exact
+hand). Every token then adds the seat's place in play order from the seat
+that opened, one-hot over four, and whether it is on turn; an opponent's
+adds its certified hand, the most it may hold by resource and its card
+count (`MY_COLUMNS_11`, `OTHER_COLUMNS_11`). The board block adds the bank
+by resource and the development deck's size (`BOARD_COLUMNS_11`). Contract
+11 counts the live seats (`hexset.encoding.seat_frame`) and refuses a
+retired seat as the perspective.
 
 A two-seat network sits at a duel dealt four seats with two retired. It
 reads the table over the live seats alone (`hexset.encoding.SeatFrame`,

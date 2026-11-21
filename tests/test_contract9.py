@@ -684,3 +684,119 @@ def test_11d_reads_no_constant_column():
     assert not [name for name, cols in M.items() if (np.ptp(mine[:, cols], axis=0) == 0).any()]
     assert not [name for name, cols in O.items() if (np.ptp(other[:, cols], axis=0) == 0).any()]
     assert not [name for name, col in H2.items() if (np.ptp(h[:, col], axis=0) == 0).any()]
+
+
+# --- contract 11: 11d at two to four live seats -------------------------------
+
+
+def test_11_is_my_token_then_each_opponents_and_the_board_block():
+    """11 holds my token (40), then one per opponent (43 each) in turn order
+    after me, end to end, and the board block (9); each token begins with
+    11d's columns in 11d's places, and the hexes and vertices are 11d's."""
+    from hexset.contract9 import (
+        BOARD_COLUMNS_11 as B, BOARD_COLUMNS_11D as B2, MY_COLUMNS_11 as M, MY_COLUMNS_11D as M2,
+        OTHER_COLUMNS_11 as O, OTHER_COLUMNS_11D as O2,
+    )
+
+    assert contract9.features("11") == (40 + 3 * 43, 9) and contract9.features("11", 2) == (83, 9)
+    assert hex_features("11") == 17
+    for name, cols in M2.items():
+        assert M[name] == cols, name
+    for name, cols in O2.items():
+        assert O[name] == cols, name
+    for name, cols in B2.items():
+        assert B[name] == cols, name
+    for players in (2, 3, 4):
+        lay = layout(players, 19, 54, 72, "11")
+        assert lay.shapes["seats"] == (40 + (players - 1) * 43,) and lay.shapes["table"] == (9,)
+        assert lay.shapes["reach"] == (players, 54)
+    with pytest.raises(ValueError):
+        contract9.features("11", 5)
+    for game in [*games(4), *duel_positions(count=2, steps=60)]:
+        n = game._state.num_players
+        lay = layout(n, 19, 54, 72, "11")
+        for p in range(n):
+            o = encode9(game, p, "11")
+            flat = flatten(o)
+            assert flat.shape == (lay.width,)
+            for name, piece in lay.slices.items():
+                np.testing.assert_array_equal(flat[piece].reshape(lay.shapes[name]), getattr(o, name))
+
+
+def test_11_holds_11ds_bytes_at_a_table_of_two():
+    """At a table of two, and at one dealt four with two retired, every 11d
+    column of 11's tokens and board block, the hexes, vertices and pointers
+    hold 11d's bytes: an a10 net reads 11 as it reads 11d."""
+    seen = 0
+    for game in [*duel_positions(count=3, steps=300), *retired_duel_positions(count=2, steps=300)]:
+        live = [s for s in range(game._state.num_players) if s not in game.locked]
+        for p in live:
+            two, eleven = encode9(game, p, "11d"), encode9(game, p, "11")
+            assert eleven.seats.shape == (83,)
+            assert eleven.seats[:35].tobytes() == two.seats[:35].tobytes()
+            assert eleven.seats[40:67].tobytes() == two.seats[35:].tobytes()
+            assert eleven.table[:3].tobytes() == two.table.tobytes()
+            for name in ("hexes", "vertices", "vertex_owner", "road_owner", "reach"):
+                assert getattr(eleven, name).tobytes() == getattr(two, name).tobytes(), name
+            seen += 1
+    assert seen > 100
+
+
+def test_11_reads_each_opponents_hand_as_the_view_bounds_it():
+    """At four seats an opponent's `hand` is its expected hand: within its
+    certified and greatest bounds, the three summing per resource to the
+    opponents' exact total (19 less the bank and my hand) wherever the view's
+    pool is the uncertified cards; `hand_held` its size, `place` one-hot by
+    play order from the opener, one token on turn, and the bank and deck."""
+    from hexset.contract9 import BOARD_COLUMNS_11 as B, MY_COLUMNS_11 as M, OTHER_COLUMNS_11 as O
+    from hexset.encoding import to_frame
+
+    checked = 0
+    for game in games(12):
+        state = game._state
+        for p in range(4):
+            o = encode9(game, p, "11")
+            view = View.from_game(game, p)
+            rows = to_frame(range(4), p)
+            tokens = [o.seats[:40]] + [o.seats[40 + 43 * i:83 + 43 * i] for i in range(3)]
+            places = [int(np.argmax(t[(M if i == 0 else O)["place"]])) for i, t in enumerate(tokens)]
+            assert places == [(s - game.first) % 4 for s in rows]
+            assert sum(t[(M if i == 0 else O)["on_turn"]][0] for i, t in enumerate(tokens)) == 1.0
+            assert tokens[[*rows].index(game.current_player)][(M if rows[0] == game.current_player else O)["on_turn"]][0] == 1.0
+            hands = np.stack([t[O["hand"]] for t in tokens[1:]]) * 10
+            least = np.stack([t[O["hand_least"]] for t in tokens[1:]]) * 10
+            most = np.stack([t[O["hand_most"]] for t in tokens[1:]]) * 10
+            assert (least <= hands + 1e-4).all() and (hands <= most + 1e-4).all() or any(view.bounded[s] for s in rows[1:])
+            np.testing.assert_allclose([t[O["hand_held"]][0] * 10 for t in tokens[1:]], [view.sizes[s] for s in rows[1:]],
+                                       atol=1e-5)
+            np.testing.assert_allclose(o.table[B["bank"]] * 10, state.bank, atol=1e-5)
+            assert abs(o.table[B["deck"]][0] * 10 - len(state.deck)) < 1e-4
+            pool_is_uncertified = sum(view.pool) == sum(view.unknown[s] for s in rows[1:])
+            if pool_is_uncertified and sum(view.pool):
+                total = [19 - state.bank[r] - state.hands[p][r] for r in range(5)]
+                np.testing.assert_allclose(hands.sum(0), total, atol=1e-4)
+                checked += 1
+    assert checked > 10
+
+
+def test_11_reads_no_constant_column_at_four_seats():
+    """Every column 11 adds to 11d takes more than one value across random
+    four-seat games (`test_11d_reads_no_constant_column` covers 11d's)."""
+    from hexset.contract9 import (
+        BOARD_COLUMNS_11 as B, BOARD_COLUMNS_11D as B2, MY_COLUMNS_11 as M, MY_COLUMNS_11D as M2,
+        OTHER_COLUMNS_11 as O, OTHER_COLUMNS_11D as O2,
+    )
+
+    mine, other, tables = [], [], []
+    for seed in range(40):
+        game = a_game(seed, 80 + 30 * seed)
+        for p in range(4):
+            o = encode9(game, p, "11")
+            mine.append(o.seats[:40])
+            other.extend(o.seats[40 + 43 * i:83 + 43 * i] for i in range(3))
+            tables.append(o.table)
+    m, x, t = np.stack(mine), np.stack(other), np.stack(tables)
+    added = [(M, M2, m), (O, O2, x), (B, B2, t)]
+    assert {*M} - {*M2} and {*O} - {*O2} and {*B} - {*B2}
+    assert not [name for cols, old, a in added for name in {*cols} - {*old} if (np.ptp(a[:, cols[name]], axis=0) == 0).any()]
+    assert np.ptp(x[:, O["hand"]], axis=0).all()

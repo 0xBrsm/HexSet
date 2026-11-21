@@ -98,6 +98,8 @@ def recv_frame(sock: socket.socket) -> Any:
 
 
 def parse_address(address: str) -> tuple[str, int]:
+    """`address` as `(host, port)`: `HOST:PORT`, or `:PORT` or a bare port for
+    `127.0.0.1`."""
     host, _, port = address.rpartition(":")
     return host or "127.0.0.1", int(port)
 

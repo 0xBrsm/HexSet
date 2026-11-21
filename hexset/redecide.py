@@ -44,6 +44,19 @@ from .decisions import option_json
 from .arena import RUNTIME_HELP, entrant_from_name, load_runtime, searchers, spawn
 from .game import Game, to_move
 
+__all__ = [
+    "Arm",
+    "action_json",
+    "logged_move",
+    "decision_seed",
+    "searcher_of",
+    "hold_meta",
+    "matched",
+    "redecide_game",
+    "run",
+    "arm_holds",
+    "main",
+]
 
 @dataclass(frozen=True)
 class Arm:
@@ -256,6 +269,9 @@ def arm_holds(arms: Sequence[Arm], runtime: Sequence[str], board) -> dict[str, d
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """`python -m hexset.redecide`: decide a journal's searched decisions
+    again with each arm, appending each game's decision rows and tally to
+    the output."""
     ap = argparse.ArgumentParser(prog="python -m hexset.redecide", description=__doc__.splitlines()[0])
     ap.add_argument("journal", help="a journal whose games carry their search logs")
     ap.add_argument("out", help="the rows, one JSON line each; an existing file is resumed")

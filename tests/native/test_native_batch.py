@@ -234,6 +234,18 @@ class NativeBatchProtocols(unittest.TestCase):
             self.assertNotEqual(len(expected), len(nine))
             self.assertEqual(request.observation.tobytes(), expected.tobytes())
 
+    def test_contract_11_requests_read_as_python_at_two_and_four_seats(self):
+        for players in (2, 4):
+            games = [position(players), position(players)]
+            self.assertTrue(supported(games[0], "11"))
+            group = batch(games, contract="11")
+            for request, game in zip(group.requests(), games):
+                expected = contract9.flatten(contract9.encode9(game, request.seat, "11"))
+                self.assertEqual(request.observation.tobytes(), expected.tobytes())
+        retired = position(4)
+        retired.locked = frozenset({1})
+        self.assertFalse(supported(retired, "11"))
+
     def test_preflight_fallback_before_native_import(self):
         game = position(2)
         self.assertTrue(supported(game, "9d"))

@@ -5,6 +5,27 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.38.0
+
+### Added
+
+- **Observation contract 11: contract 11d at two to four live seats.**
+  `contract9.encode9(game, seat, "11")` writes my token (40 wide), one token
+  per opponent (43 wide) in turn order after me and a nine-column board
+  block. Each token begins with 11d's columns in 11d's places, so at a table
+  of two they hold 11d's bytes; an opponent's `hand` is its expected hand,
+  and the added columns give each seat's place in play order and whether it
+  is on turn, an opponent's certified and greatest hand and card count, and
+  the bank and development deck's size. `features("11", players)` and
+  `layout` size it by the live seats. The native core encodes it byte for
+  byte, in batched requests and playout copies, and ONNX decision graphs
+  may declare it (`RECORD_CONTRACTS`).
+
+### Fixed
+
+- **`hexset.redecide` lists its public names in `__all__`, and
+  `hexset.redecide.main` and `hexset.remote.parse_address` have docstrings.**
+
 ## 1.37.0
 
 ### Breaking

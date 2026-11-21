@@ -79,6 +79,22 @@ over 12, then the next roll's odds and the robber (17 wide,
 board block (`MY_COLUMNS_11D`, `OTHER_COLUMNS_11D`). 11d removes and changes
 columns of 9d.1, so it takes a new major number.
 
+**Contract 11** is 11d at a table of two to four live seats: my token, then
+one token per opponent in turn order after me, end to end, and the board
+block. Each token starts with 11d's columns in 11d's places, so at a table
+of two those columns hold 11d's bytes. An opponent's `hand` there is its
+expected hand: the cards the view certifies plus the residual pool shared
+out among the opponents in proportion to the cards each holds uncertified,
+which at two seats is the opponent's exact hand. Four-seat columns follow
+11d's: on every token the seat's place in play order from the seat that
+opened (one-hot over four) and whether it is on turn; on an opponent's token
+its certified hand by resource, the most it may hold by resource and the
+cards it holds (`MY_COLUMNS_11`, `OTHER_COLUMNS_11`); on the board block the
+bank by resource and the development deck's size (`BOARD_COLUMNS_11`).
+The opponents' combined hand is exact, 19 of each resource less the bank and
+my hand. Hexes and vertices are 11d's. My token is 40 wide, an opponent's
+43, the board block 9.
+
 """
 
 from __future__ import annotations
@@ -117,6 +133,9 @@ __all__ = [
     "HEX_COLUMNS_11D",
     "BOARD_COLUMNS_11D",
     "NUMBERS_11D",
+    "MY_COLUMNS_11",
+    "OTHER_COLUMNS_11",
+    "BOARD_COLUMNS_11",
     "DUEL_CONTRACTS",
     "seat_production",
     "TABLE_COLUMNS_9D",
@@ -138,9 +157,13 @@ __all__ = [
 ]
 
 CONTRACT = "9"
-CONTRACTS = ("9", "9.1", "9d", "9d.1", "11d")
+CONTRACTS = ("9", "9.1", "9d", "9d.1", "11d", "11")
 # The two-seat contracts (`seat_frame`: a table of two, or more with all but two retired).
 DUEL_CONTRACTS = ("9d", "9d.1", "11d")
+# 11d and 11: the same token layout, hex and board, 11 at two to four live seats.
+_ELEVEN = ("11d", "11")
+# The most seats a table deals: `place` is one-hot over them.
+_MAX_SEATS = 4
 
 # One unit, one scale (module docstring).
 CARD_SCALE = 10.0
@@ -279,12 +302,37 @@ _BOARD_BLOCKS_11D: tuple[tuple[str, int], ...] = (
 )
 BOARD_COLUMNS_11D = _columns(_BOARD_BLOCKS_11D)
 BOARD_FEATURES_11D = sum(width for _, width in _BOARD_BLOCKS_11D)
+# 11 (module docstring): 11d's columns in 11d's places, the four-seat ones after.
+_PLACE_BLOCKS_11: tuple[tuple[str, int], ...] = (
+    ("place", _MAX_SEATS),  # place in play order from the seat that opened, one-hot
+    ("on_turn", 1),
+)
+_MY_BLOCKS_11: tuple[tuple[str, int], ...] = (*_MY_BLOCKS_11D, *_PLACE_BLOCKS_11)
+_OTHER_BLOCKS_11: tuple[tuple[str, int], ...] = (
+    *_OTHER_BLOCKS_11D,     # `hand` the expected hand
+    ("hand_least", NUM_RESOURCES),  # certified
+    ("hand_most", NUM_RESOURCES),   # the most it may hold
+    ("hand_held", 1),
+    *_PLACE_BLOCKS_11,
+)
+_BOARD_BLOCKS_11: tuple[tuple[str, int], ...] = (
+    *_BOARD_BLOCKS_11D,
+    ("bank", NUM_RESOURCES),
+    ("deck", 1),            # development cards left to buy
+)
+MY_COLUMNS_11 = _columns(_MY_BLOCKS_11)
+OTHER_COLUMNS_11 = _columns(_OTHER_BLOCKS_11)
+BOARD_COLUMNS_11 = _columns(_BOARD_BLOCKS_11)
+MY_FEATURES_11 = sum(width for _, width in _MY_BLOCKS_11)
+OTHER_FEATURES_11 = sum(width for _, width in _OTHER_BLOCKS_11)
+BOARD_FEATURES_11 = sum(width for _, width in _BOARD_BLOCKS_11)
 
 
-def features(contract: str = CONTRACT) -> tuple[int, int]:
+def features(contract: str = CONTRACT, players: int = _MAX_SEATS) -> tuple[int, int]:
     """Seat and table widths for an observation contract; old columns stay put.
     11d's two seat tokens differ in width: its seat width is both end to
-    end, mine then the opponent's, and its table is the board block."""
+    end, mine then the opponent's, and its table is the board block. 11's
+    seat width is my token and `players - 1` opponents' end to end."""
     if contract not in CONTRACTS:
         raise ValueError(f"unknown observation contract {contract!r}: {CONTRACTS}")
     if contract == "9":
@@ -295,6 +343,10 @@ def features(contract: str = CONTRACT) -> tuple[int, int]:
         return SEAT_FEATURES_9D1, TABLE_FEATURES_9D
     if contract == "11d":
         return MY_FEATURES_11D + OTHER_FEATURES_11D, BOARD_FEATURES_11D
+    if contract == "11":
+        if not 2 <= players <= _MAX_SEATS:
+            raise ValueError(f"contract 11 seats two to {_MAX_SEATS}, not {players}")
+        return MY_FEATURES_11 + (players - 1) * OTHER_FEATURES_11, BOARD_FEATURES_11
     return SEAT_FEATURES_9D, TABLE_FEATURES_9D
 
 
@@ -316,16 +368,17 @@ VERTEX_FEATURES = 1 + NUM_RESOURCES + 1
 assert SEAT_FEATURES == 39 and TABLE_FEATURES == 20
 assert SEAT_FEATURES_9D == 22 and TABLE_FEATURES_9D == 20
 assert MY_FEATURES_11D == 35 and OTHER_FEATURES_11D == 27 and BOARD_FEATURES_11D == 3
+assert MY_FEATURES_11 == 40 and OTHER_FEATURES_11 == 43 and BOARD_FEATURES_11 == 9
 
 
 def hex_features(contract: str = CONTRACT) -> int:
     """A hex token's width: `HEX_FEATURES` (terrain, pips, the robber); 9.1
     appends the number; 9d reads terrain, the number, the next roll's odds
     and the robber (`HEX_COLUMNS_9D`), and 11d its number one-hot in place of
-    the number over 12 (`HEX_COLUMNS_11D`)."""
+    the number over 12 (`HEX_COLUMNS_11D`), as 11 does."""
     if contract not in CONTRACTS:
         raise ValueError(f"unknown observation contract {contract!r}: {CONTRACTS}")
-    if contract == "11d":
+    if contract in _ELEVEN:
         return NUM_RESOURCES + len(NUMBERS_11D) + 2
     return HEX_FEATURES if contract == "9" else HEX_FEATURES + 1
 
@@ -335,8 +388,8 @@ class Observation9:
     """One position from one seat (`encode9`). Float arrays are float32;
     `vertex_owner` and `road_owner` are int64 row pointers, `-1` for none."""
 
-    seats: np.ndarray          # (players, SEAT_FEATURES), the perspective first; 11d's two tokens end to end
-    table: np.ndarray          # (TABLE_FEATURES,); 11d's the board block
+    seats: np.ndarray          # (players, SEAT_FEATURES), the perspective first; 11d's and 11's tokens end to end
+    table: np.ndarray          # (TABLE_FEATURES,); 11d's and 11's the board block
     hexes: np.ndarray          # (hexes, HEX_FEATURES)
     vertices: np.ndarray       # (vertices, VERTEX_FEATURES)
     vertex_owner: np.ndarray   # (vertices,) the building's owner's row
@@ -363,9 +416,9 @@ def layout(players: int, num_hexes: int, num_vertices: int, num_edges: int, cont
     """The flat layout for a board of this size seating `players`."""
     if contract in DUEL_CONTRACTS and players != 2:
         raise ValueError(f"contract {contract} is the two-seat observation; this table seats {players}")
-    seat_width, table_width = features(contract)
+    seat_width, table_width = features(contract, players) if contract == "11" else features(contract)
     shapes = {
-        "seats": (seat_width,) if contract == "11d" else (players, seat_width),
+        "seats": (seat_width,) if contract in _ELEVEN else (players, seat_width),
         "table": (table_width,),
         "hexes": (num_hexes, hex_features(contract)),
         "vertices": (num_vertices, VERTEX_FEATURES),
@@ -574,15 +627,7 @@ def _encode9d(game: Game, perspective: int, contract: str = "9d") -> Observation
     hands = {perspective: list(view.known[perspective]),
              opponent: [k + p for k, p in zip(view.known[opponent], view.pool)]}
 
-    dealt = state.num_players
-    settlements, cities, building = [0] * dealt, [0] * dealt, [0] * dealt
-    for owner, kind in zip(state.vertex_owner, state.vertex_building):
-        if owner >= 0:
-            building[owner] += kind
-            if kind == _SETTLEMENT:
-                settlements[owner] += 1
-            elif kind == _CITY:
-                cities[owner] += 1
+    settlements, cities, building = _buildings(state)
 
     if contract == "11d":
         return _encode11d(game, perspective, rows, hands, settlements, cities, building, roads, knights, unseen)
@@ -646,14 +691,27 @@ def _encode11d(game: Game, perspective: int, rows: Sequence[int], hands: dict[in
     """Contract 11d from `_encode9d`'s reads of the position: my token, then
     the opponent's, end to end, and the board block. Each column is computed as 9d
     and 9d.1 compute it, so a column both contracts read holds the same bytes."""
+    tokens, table, rest = _eleven(game, rows, hands, settlements, cities, building, roads, knights, unseen,
+                                  MY_FEATURES_11D, OTHER_FEATURES_11D, BOARD_FEATURES_11D)
+    return Observation9(np.concatenate(tokens), table, *rest)
+
+
+def _eleven(game: Game, rows: Sequence[int], hands: dict, settlements: list[int], cities: list[int],
+            building: list[int], roads, knights, unseen: Sequence[int], my_width: int, other_width: int,
+            board_width: int) -> tuple[list[np.ndarray], np.ndarray, tuple]:
+    """11d's columns, shared by 11d and 11: a token per row (`rows[0]` mine,
+    the rest opponents') of the given widths with 11d's columns filled, the
+    board block of `board_width` with 11d's, and the hexes, vertices and
+    pointers."""
     state = game._state
     board = state.board
     awards = (state.longest_road_holder, state.largest_army_holder)
     mover = game.current_player
     odds = next_roll_odds(game)
     tokens = []
-    for i, (s, c) in enumerate(zip(rows, (MY_COLUMNS_11D, OTHER_COLUMNS_11D))):
-        token = np.zeros(MY_FEATURES_11D if i == 0 else OTHER_FEATURES_11D, dtype=np.float32)
+    for i, s in enumerate(rows):
+        c = MY_COLUMNS_11D if i == 0 else OTHER_COLUMNS_11D
+        token = np.zeros(my_width if i == 0 else other_width, dtype=np.float32)
         points = building[s] + (LONGEST_ROAD_VP if awards[0] == s else 0) + (LARGEST_ARMY_VP if awards[1] == s else 0)
         token[c["hand"]] = np.asarray(hands[s], dtype=np.float32) / CARD_SCALE
         token[c["points"]] = points / state.rules.winning_points
@@ -687,11 +745,73 @@ def _encode11d(game: Game, perspective: int, rows: Sequence[int], hands: dict[in
     vertices = template.vertices.copy()
     vertices[:, -1] = np.asarray(state.vertex_building, dtype=np.float32) / POINT_SCALE
     vertex_owner, road_owner, reach = _pointers(state, rows, state.num_players)
-    table = np.zeros(BOARD_FEATURES_11D, dtype=np.float32)
+    table = np.zeros(board_width, dtype=np.float32)
     table[BOARD_COLUMNS_11D["turn"]] = game.turns / TURN_SCALE
     table[BOARD_COLUMNS_11D["seven"]] = odds.get(7, 0.0)
     table[BOARD_COLUMNS_11D["rolled"]] = float(rolled(game))
-    return Observation9(np.concatenate(tokens), table, hexes, vertices, vertex_owner, road_owner, reach)
+    return tokens, table, (hexes, vertices, vertex_owner, road_owner, reach)
+
+
+def _buildings(state: GameState) -> tuple[list[int], list[int], list[int]]:
+    """Per dealt seat: settlements, cities, and building points
+    (`vertex_building` is 1 a settlement, 2 a city: its points)."""
+    dealt = state.num_players
+    settlements, cities, building = [0] * dealt, [0] * dealt, [0] * dealt
+    for owner, kind in zip(state.vertex_owner, state.vertex_building):
+        if owner >= 0:
+            building[owner] += kind
+            if kind == _SETTLEMENT:
+                settlements[owner] += 1
+            elif kind == _CITY:
+                cities[owner] += 1
+    return settlements, cities, building
+
+
+def _encode11(game: Game, perspective: int) -> Observation9:
+    """`game` as `perspective` may know it, in contract 11 (module
+    docstring): the live seats from the perspective in turn order, a table
+    dealt two seats counting both."""
+    state = game._state
+    dealt = state.num_players
+    if not 0 <= perspective < dealt:
+        raise ValueError(f"no such player: {perspective}")
+    live = sum(1 for s in range(dealt) if dealt == 2 or s not in game.locked)
+    if not 2 <= live <= _MAX_SEATS:
+        raise ValueError(f"contract 11 seats two to {_MAX_SEATS} live seats; this table has {live}")
+    try:
+        rows = seat_frame(game, perspective, live).seats
+    except ValueError as e:
+        raise ValueError(f"contract 11: {e}") from None
+    view = View.from_game(game, perspective)
+    unseen = view.unseen_dev_cards()
+    roads = roads_to_take_all(state)
+    knights = knights_needed_all(state, perspective, unseen[DevCard.KNIGHT])
+    # The expected hand: certified cards plus the residual pool shared out in
+    # proportion to the cards each opponent holds uncertified; with one
+    # opponent, the pool is its (`_encode9d`).
+    others = rows[1:]
+    hidden = sum(view.unknown[s] for s in others)
+    hands: dict[int, list] = {perspective: list(view.known[perspective])}
+    for s in others:
+        share = view.unknown[s] / hidden if hidden else 1.0 / len(others)
+        hands[s] = [k + p * share for k, p in zip(view.known[s], view.pool)]
+    settlements, cities, building = _buildings(state)
+    tokens, table, rest = _eleven(game, rows, hands, settlements, cities, building, roads, knights, unseen,
+                                  MY_FEATURES_11, OTHER_FEATURES_11, BOARD_FEATURES_11)
+    mover = game.current_player
+    for i, (s, token) in enumerate(zip(rows, tokens)):
+        c = MY_COLUMNS_11 if i == 0 else OTHER_COLUMNS_11
+        token[c["place"].start + (s - game.first) % dealt] = 1.0
+        token[c["on_turn"]] = float(s == mover)
+        if i:
+            least = view.known[s]
+            token[c["hand_least"]] = np.asarray(least, dtype=np.float32) / CARD_SCALE
+            token[c["hand_most"]] = np.asarray([k + r for k, r in zip(least, view.room[s])],
+                                               dtype=np.float32) / CARD_SCALE
+            token[c["hand_held"]] = view.sizes[s] / CARD_SCALE
+    table[BOARD_COLUMNS_11["bank"]] = np.asarray(state.bank, dtype=np.float32) / CARD_SCALE
+    table[BOARD_COLUMNS_11["deck"]] = len(state.deck) / CARD_SCALE
+    return Observation9(np.concatenate(tokens), table, *rest)
 
 
 def observation_row(game: Game, perspective: int, contract: str = CONTRACT) -> np.ndarray:
@@ -704,9 +824,12 @@ def observation_row(game: Game, perspective: int, contract: str = CONTRACT) -> n
 
 
 def encode9(game: Game, perspective: int, contract: str = CONTRACT) -> Observation9:
-    """`game` as `perspective` may know it, in contract 9 (9.1, or 9d, 9d.1 and 11d at two live seats)."""
+    """`game` as `perspective` may know it, in contract 9 (9.1, or 9d, 9d.1 and 11d at two live seats, or 11
+    at two to four)."""
     if contract in DUEL_CONTRACTS:
         return _encode9d(game, perspective, contract)
+    if contract == "11":
+        return _encode11(game, perspective)
     seat_width, table_width = features(contract)
     state = game._state
     players = state.num_players

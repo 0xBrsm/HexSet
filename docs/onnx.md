@@ -8,7 +8,7 @@ loader serves nine (`hexset.server.constants.RECORD_CONTRACTS`):
 | Contract | Graph | Run by |
 | --- | --- | --- |
 | `6`, `7`, `8`, `8.1` | A **record graph**: the record of one position in, one action out ([record inputs](#record-inputs)) | `onnxbot.V2Policy` |
-| `9`, `9.1`, `9d`, `9d.1`, `11d` | A **decision graph**: the contract-9 observation and the decision's arrays in, a whole decision out ([decision graphs](#decision-graphs-contract-9)) | `onnxbot.DecisionPolicy` |
+| `9`, `9.1`, `9d`, `9d.1`, `11d`, `11` | A **decision graph**: the contract-9 observation and the decision's arrays in, a whole decision out ([decision graphs](#decision-graphs-contract-9)) | `onnxbot.DecisionPolicy` |
 
 A file with no `contract` key, or any other value, is refused at load, naming
 the contracts this server serves. Changing the value alone does not make a
@@ -28,7 +28,7 @@ ONNX `metadata_props` values are strings. Unknown keys are ignored.
 
 | Key | Meaning | Default or validation |
 | --- | --- | --- |
-| `contract` | The graph's shape (table above) | Required: one of the nine |
+| `contract` | The graph's shape (table above) | Required: one of the ten |
 | `players` | Seat count the graph was trained for | Required integer. A decision graph of contract `9d`, `9d.1` or `11d` must say `2`. See [seat counts](#seat-counts) |
 | `num_hexes` | Board hex count | Required integer |
 | `num_vertices` | Board vertex count | Required integer |
@@ -395,6 +395,7 @@ and per-seat reach. On the standard board:
 | `9d` | 2 | 22 | 20 | 8 | 828 |
 | `9d.1` | 2 | 32 | 20 | 8 | 848 |
 | `11d` | 2 | 35 and 27 | 3 | 17 | 1000 |
+| `11` | 2 to 4 | 40, then 43 per opponent | 9 | 17 | 1027 at two seats, 1221 at four |
 
 `9.1` appends a live-seat flag to each seat token, and the table's rules and
 next-roll odds to the table token. `9d` is the two-seat observation, defined
@@ -403,7 +404,10 @@ hidden. `9d.1` appends each seat's production and bank rates to its token.
 `11d` is also two-seat: my token (35 wide) and the opponent's (27 wide)
 have widths of their own, the table is a board block of three columns (the
 turn count, the next roll's chance of a seven, whether the dice have been
-thrown), and a hex reads its number one-hot.
+thrown), and a hex reads its number one-hot. `11` is `11d` at two to four
+live seats: my token (40 wide) and one token per opponent (43 wide) in turn
+order after me, each beginning with `11d`'s columns in `11d`'s places, and a
+board block of nine columns that begins with `11d`'s three.
 [training.md](training.md#decision-observations) and the module docstring
 of `hexset.contract9` give every column.
 

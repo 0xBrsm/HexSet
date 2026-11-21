@@ -239,10 +239,18 @@ inline std::array<double,5> encoded_production(const ArenaState& state,int seat)
 constexpr std::size_t kMine11d=35,kOther11d=27,kBoard11d=3;
 // Contract 11d's hex: terrain 5, the number one-hot over 2-6 and 8-12 (none for the desert), odds, robber.
 constexpr std::size_t kHex11d=17;
+// Contract 11 (contract9._encode11): 11d's columns in 11d's places, then my place in play order (4) and on turn
+// (1); an opponent's certified hand (5), greatest hand (5), cards held (1), place (4) and on turn (1); the board
+// block's bank (5) and the development deck's size (1). My token, then each opponent's in turn order after me.
+constexpr std::size_t kMine11=40,kOther11=43,kBoard11=9;
+inline bool eleven_contract(const std::string& contract) {return contract=="11d" || contract=="11";}
+inline bool known_contract(const std::string& contract) {
+    return contract=="9" || contract=="9.1" || contract=="11" || duel_contract(contract);
+}
 inline int number_slot11d(Int token) {return token>=2 && token<=6 ? static_cast<int>(token)-2 : token>=8 && token<=12 ? static_cast<int>(token)-3 : -1;}
 
 inline std::size_t encoded9_width(const ArenaState& state,const std::string& contract="9") {
-    if (contract!="9" && contract!="9.1" && !duel_contract(contract)) throw std::invalid_argument("unknown native observation contract");
+    if (!known_contract(contract)) throw std::invalid_argument("unknown native observation contract");
     const auto& fixed=encoding_template(state);
     std::size_t p=fixed.players;
     if (duel_contract(contract)) {
@@ -250,26 +258,34 @@ inline std::size_t encoded9_width(const ArenaState& state,const std::string& con
         if (duel_live(state)!=2) throw std::invalid_argument("contract 9d requires two live seats");
         p=2;
     }
+    if (contract=="11") {
+        p=duel_live(state);
+        if (p<2) throw std::invalid_argument("contract 11 requires two to four live seats");
+    }
     auto sw=contract=="9d.1" ? 32 : contract=="9d" ? 22 : contract=="9.1" ? 40 : 39;
-    std::size_t tw=contract=="11d" ? kBoard11d : contract=="9.1" ? 35 : 20,hw=contract=="11d" ? kHex11d : contract=="9" ? 7 : 8;
-    std::size_t seats=contract=="11d" ? kMine11d+kOther11d : p*sw;
+    std::size_t tw=contract=="11" ? kBoard11 : contract=="11d" ? kBoard11d : contract=="9.1" ? 35 : 20,
+                hw=eleven_contract(contract) ? kHex11d : contract=="9" ? 7 : 8;
+    std::size_t seats=contract=="11" ? kMine11+(p-1)*kOther11 : contract=="11d" ? kMine11d+kOther11d : p*sw;
     return seats+tw+fixed.hexes*hw+fixed.vertices*8+fixed.edges+p*fixed.vertices;
 }
 
 inline void encode9_into(const ArenaState& state,int perspective,const std::string& contract,
                          float* result,std::size_t width) {
-    if (contract!="9" && contract!="9.1" && !duel_contract(contract)) throw std::invalid_argument("unknown native observation contract");
+    if (!known_contract(contract)) throw std::invalid_argument("unknown native observation contract");
     state.knowledge.check_seat(perspective);const auto& fixed=encoding_template(state);
-    bool duel=duel_contract(contract),rules=contract=="9.1",economy=contract=="9d.1",two=contract=="11d";
+    bool duel=duel_contract(contract),rules=contract=="9.1",economy=contract=="9d.1",c11=contract=="11",
+         two=eleven_contract(contract);
     if (duel && duel_live(state)!=2) throw std::invalid_argument("contract 9d requires two live seats");
+    if (c11 && duel_live(state)<2) throw std::invalid_argument("contract 11 requires two to four live seats");
     // Row i is board seat frame.seats[i]: every dealt seat from the perspective,
     // or under a two-seat contract the two live seats, a retired seat having no row.
     const std::size_t dealt=fixed.players,h=fixed.hexes,v=fixed.vertices,e=fixed.edges;
-    const SeatFrame frame=seat_frame(state,perspective,duel ? 2 : dealt);
+    const SeatFrame frame=seat_frame(state,perspective,duel ? 2 : c11 ? duel_live(state) : dealt);
     const std::size_t p=frame.size;
-    std::size_t sw=duel ? (economy ? 32 : 22) : (rules ? 40 : 39),tw=two ? kBoard11d : (rules ? 35 : 20),
+    std::size_t sw=duel ? (economy ? 32 : 22) : (rules ? 40 : 39),tw=c11 ? kBoard11 : two ? kBoard11d : (rules ? 35 : 20),
                 hw=two ? kHex11d : contract=="9" ? 7 : 8;
-    std::size_t table=two ? kMine11d+kOther11d : p*sw,hexes=table+tw,vertices=hexes+h*hw,owner=vertices+v*7,edge=owner+v,
+    std::size_t mine_w=c11 ? kMine11 : kMine11d,other_w=c11 ? kOther11 : kOther11d;
+    std::size_t table=two ? mine_w+(p-1)*other_w : p*sw,hexes=table+tw,vertices=hexes+h*hw,owner=vertices+v*7,edge=owner+v,
                 reach=edge+e;
     if (width!=reach+p*v) throw std::invalid_argument("native observation destination width differs");
     std::fill_n(result,width,0.0f);
@@ -281,15 +297,27 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
     const auto& fresh=state.get(Block::new_dev_cards);const auto& quota=state.get(Block::discard_quota);
     constexpr std::array<int,4> playable{0,2,3,4};
     std::array<double,11> odds{};
-    if (duel || rules) odds=encoding_roll_odds(state,duel);
+    if (duel || rules || c11) odds=encoding_roll_odds(state,duel || c11);
+    // Contract 11's expected hand: each opponent's share of the residual pool, in proportion to the cards it holds
+    // uncertified (contract9._encode11); with one opponent, all of it.
+    std::array<double,4> share{};
+    if (c11) {
+        Int hidden=0;for (std::size_t row=1;row<p;++row) hidden+=view.unknown[frame.seats[row]];
+        for (std::size_t row=1;row<p;++row)
+            share[row]=hidden ? static_cast<double>(view.unknown[frame.seats[row]])/static_cast<double>(hidden)
+                              : 1.0/static_cast<double>(p-1);
+    }
     for (std::size_t row=0;row<p;++row) {
-        int seat=frame.seats[row];auto* out=result+row*(two ? kMine11d : sw);
+        int seat=frame.seats[row];auto* out=result+(two ? (row ? mine_w+(row-1)*other_w : 0) : row*sw);
         Int old=public_pile_size(state,Block::dev_cards,seat),bought=public_pile_size(state,Block::new_dev_cards,seat);
         Int held=plus(old,bought);bool played=game[CardPlayedColumn] && seat==game[ActorColumn];
         auto ages=encoded_ages(state,seat,held);const auto& pieces=state.piece_counts[seat];
         if (two) {
             // contract9._encode11d: the public columns, then mine or the opponent's own.
-            for (int r=0;r<5;++r) out[r]=count_scale(view.known[seat][r]+(seat==perspective ? 0 : view.pool[r]));
+            for (int r=0;r<5;++r)
+                out[r]=c11 && seat!=perspective
+                    ? static_cast<float>(static_cast<double>(view.known[seat][r])+static_cast<double>(view.pool[r])*share[row])/10.0f
+                    : count_scale(view.known[seat][r]+(seat==perspective ? 0 : view.pool[r]));
             out[5]=direct_scale(public_points(state,seat),static_cast<double>(state.get(Block::rules)[0]));
             out[6]=award_close(roads[seat]);out[7]=award_close(knights[seat]);
             out[8]=direct_scale(5-pieces[0],10.0);out[9]=direct_scale(4-pieces[1],10.0);out[10]=direct_scale(15-pieces[2],10.0);
@@ -301,6 +329,17 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
                 for (int card=0;card<5;++card) out[30+card]=count_scale(unseen[card]);
             } else {
                 out[21]=direct_scale(held,10.0);std::copy(ages.begin(),ages.end(),out+22);
+            }
+            if (c11) {
+                std::size_t at=row ? 38 : 35;
+                if (row) {
+                    for (int r=0;r<5;++r) {
+                        out[27+r]=count_scale(view.known[seat][r]);out[32+r]=count_scale(view.known[seat][r]+view.room[seat][r]);
+                    }
+                    out[37]=direct_scale(view.sizes[seat],10.0);
+                }
+                out[at+static_cast<std::size_t>((seat-game[FirstColumn]+static_cast<Int>(dealt))%static_cast<Int>(dealt))]=1.0f;
+                out[at+4]=seat==game[ActorColumn];
             }
         } else if (duel) {
             out[0]=seat==game[FirstColumn];out[1]=seat==game[ActorColumn];out[2]=seat==perspective;
@@ -342,6 +381,10 @@ inline void encode9_into(const ArenaState& state,int perspective,const std::stri
     auto* out=result+table;
     if (two) {
         out[0]=direct_scale(game[TurnsColumn],100.0);out[1]=static_cast<float>(odds[5]);out[2]=encoding_rolled(state);
+        if (c11) {
+            for (int r=0;r<5;++r) out[3+r]=count_scale(state.get(Block::bank)[r]);
+            out[8]=direct_scale(static_cast<Int>(state.get(Block::deck).size()),10.0);
+        }
     } else if (duel) {
         for (int card=0;card<5;++card) out[card]=count_scale(plus(mature[perspective*5+card],fresh[perspective*5+card]));
         bool played=game[CardPlayedColumn] && perspective==game[ActorColumn];

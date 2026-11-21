@@ -18,7 +18,8 @@ A copy is native only where `copyable` says the position and the policy's
 contract are supported; otherwise a playout keeps its Python copy. A
 two-seat policy (contract 9d, 9d.1 or 11d) is held natively at a two-seat
 table and at one dealt more seats with all but two retired, where it counts the live seats
-alone (`hexset.encoding.seat_frame`). Setting the environment variable
+alone (`hexset.encoding.seat_frame`); a contract-11 policy counts the live
+seats, two to four. Setting the environment variable
 `HEXSET_NATIVE_PLAYOUTS=0` keeps every copy the Python engine's, to compare the
 two engines on the same games; native copies are the default.
 """
@@ -38,7 +39,7 @@ from .state import NativeState, available
 __all__ = ["NativeCopy", "copyable", "held"]
 
 #: The contracts the native engine encodes (`hexset.native.supported`).
-_CONTRACTS = ("9", "9.1", "9d", "9d.1", "11d")
+_CONTRACTS = ("9", "9.1", "9d", "9d.1", "11d", "11")
 #: The two-seat contracts, read at a table's two live seats.
 _DUEL = ("9d", "9d.1", "11d")
 #: Set to "0" to keep every playout copy the Python engine's (module docstring).
@@ -76,6 +77,8 @@ def copyable(game: Game, contract: str | None, space: ActionSpace) -> bool:
     dealt = game._state.num_players
     if contract in _DUEL:
         return space.num_players == 2 and dealt - len(game.locked) == 2
+    if contract == "11":
+        return space.num_players == (dealt if dealt == 2 else dealt - len(game.locked))
     return space.num_players == dealt
 
 

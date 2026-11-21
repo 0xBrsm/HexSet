@@ -23,6 +23,11 @@ from hexset.state import Building
 
 class NativeEncoding(unittest.TestCase):
     def assert_row(self, game, native, seat, contract):
+        if contract == "11" and seat in game.locked and game._state.num_players != 2:
+            # Contract 11 counts the live seats: a retired seat has no row, and both engines refuse it.
+            with self.assertRaises(ValueError): contract9.encode9(game, seat, contract)
+            with self.assertRaises(ValueError): encode9(native, seat, contract)
+            return
         expected = contract9.flatten(contract9.encode9(game, seat, contract))
         actual = encode9(native, seat, contract)
         self.assertEqual(actual.dtype, np.float32)

@@ -882,8 +882,8 @@ def hit_robber(game: Game, options: Sequence[Action]) -> tuple[Action, ...]:
     options = tuple(options)
     if not options or options[0].type is not ActionType.MOVE_ROBBER:
         return options
-    state = game._state  # the board's buildings: public to every seat
     mover = to_move(game)
+    state = game.state(mover).state  # only the board's buildings are read: public to every seat
     on = {h: occupants(state, h) for h in {o.a for o in options}}
     clean = tuple(o for o in options if mover not in on[o.a] and any(p != mover for p in on[o.a]))
     return clean or options

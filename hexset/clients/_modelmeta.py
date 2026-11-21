@@ -293,12 +293,12 @@ def search_config(meta: dict[str, str]) -> SearchConfig:
 
     `search = mcts` reads `simulations`, `wave` and `decisive`; `search =
     rollout` reads `worlds`, `top`, `decisive`, `horizon`, `setup`, `mix`,
-    `anchor`, `det`, `salt`, `margin`, `stop`, `tie` and the `opponents`/`opponent_encoder` pair. Every
+    `anchor`, `det`, `salt`, `margin`, `stop`, `tie`, `roots` and the `opponents`/`opponent_encoder` pair. Every
     file reads `own_calibration` (`SearchConfig.own_calibration` says where
     it applies). Budgets (`simulations`, `wave`, `worlds`, `top`) are bounded
     and an unreadable one takes its default; a setting that changes what the
     seat does (`decisive`, `horizon`, `setup`, `mix`, `anchor`, `det`, `salt`,
-    `margin`, `stop`, `tie`, `own_calibration`) fails the
+    `margin`, `stop`, `tie`, `roots`, `own_calibration`) fails the
     load when it does not read. Any other `search` is no search."""
     method = meta.get("search", "none")
     calibration = _calibration(meta.get("own_calibration"))

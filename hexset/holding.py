@@ -24,8 +24,8 @@ shown the table (`hexset.ledger.PublicLedger.show`): each untyped card of a
 resource the seat has asked for (its ledger `want`) counts `asked` times as
 much as another when the hidden cards are dealt, and each of a resource it
 has offered away (`waste`) `offered` times as much (`HoldModel.shown`). Both
-are 1.0 unless a checkpoint declares them (`hold_asked`, `hold_offered`), and
-then every untyped card is dealt alike. The cards a seat offers or gives are
+are 1.0, which deals every untyped card alike, unless a checkpoint declares
+them (`hold_asked`, `hold_offered`). The cards a seat offers or gives are
 not read here: the ledger certifies them as held (`View.known`), a bound
 every deal keeps.
 

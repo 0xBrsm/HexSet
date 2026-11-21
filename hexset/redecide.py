@@ -12,9 +12,10 @@ arms that read the position alike decide it alike. An arm named twice with
 different seeds measures how often the search's own randomness changes a
 move.
 
-Plays no game. Writes one fsynced JSON line per game as it finishes: the
+Plays no game. Appends each game's rows as it finishes, fsynced: the
 decisions it re-decided (`kind` "decision") and then the game's tally
-(`kind` "game"); a rerun skips the games already tallied.
+(`kind` "game"), after a "header" row in a new file; a rerun skips the games
+already tallied.
 
     python -m hexset.redecide <journal.jsonl> <out.jsonl> \\
         --arm A=<lineup name> --arm B=<lineup name> [--arm-seed A2=<seed>] \\

@@ -418,11 +418,10 @@ class DecisionPolicy:
         return out
 
 
-#: The most rows one forward of a decision graph is asked (`DecisionPolicy`).
-#: On one CPU thread a decision costs least at batches of 16 to 32 rows and
-#: about a third more at 384, a search's step batch at its widest; the
-#: contract-9 graphs measured gave every row bit-identical outputs at batches
-#: from 16 to 384 rows, so the runs answer what one forward would.
+#: The most rows one forward of a decision graph is asked (`DecisionPolicy`):
+#: a call of more rows is cut into near-equal runs (`_in_runs`), which answer
+#: what one forward of all of them would wherever the graph is batch
+#: invariant.
 MAX_ROWS = 32
 
 

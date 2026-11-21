@@ -311,7 +311,8 @@ and `gate_plies`; declaring none reads `hexset.trading.UNLIMITED`. An
 optional `trader` names a bot that answers its trades.
 [netbot.py](../hexset/clients/netbot.py) builds bots from these fields:
 `bot_for(checkpoint)` one forward per decision, `searcher_for(checkpoint,
-simulations=128, wave=16, k=1)` PUCT search, both with the checkpoint's own
+simulations=128, wave=16, k=1, decisive=None, top=None, stages=None,
+root=None, whole=False)` PUCT search, both with the checkpoint's own
 trade gate. `checkpoint.policy.value_rows([(game, seat), ...])` evaluates
 positions directly.
 
@@ -383,6 +384,20 @@ budget at the root's own value, as a root with one legal move is
 position and appends a `hexset.mcts.Decision` to `decision_log`: the
 options, prior, root value, visits and mean values, the choice, whether it
 searched, and the CPU time spent; `choose` is `decide`'s most-visited move.
+
+`Search(top=n)` (`mcts:<path>@128:top=<n>`) searches the root by sequential
+halving over its `n` highest-prior moves. The budget is split into
+`ceil(log2(n))` rounds, each move still in gets the same number of descents
+in a round, and the lower-mean half is dropped after it; PUCT selects below
+the root. The most-visited move is played, the higher mean on a tie.
+`root="gumbel"` (`:root=gumbel`, one world) draws the candidates and keeps
+the survivors by Gumbel noise plus log prior plus a scaled mean.
+`stages="setup"` (`:stages=setup`) searches only the setup placements
+(`SETUP_PHASES`) and plays every other root by its prior's top move.
+`whole=True` (`:whole=1`) searches a node that opens a decision of several
+moves over the evaluator's whole options (`LeafEvaluator.lists_options`,
+else a `ValueError`), each edge applying the whole decision, and `choose`
+plays the chosen option a move at a time.
 
 ### Searching by paired rollouts
 
@@ -473,8 +488,8 @@ few dozen worlds separate moves that independent playouts would not.
   candidate that trails the policy's own move by more than `stop` standard
   errors at a check: at each world count of `STOP_CHECKS` (8, 16, 24, 32,
   48, 64, 96, 128, 192) below `worlds`, candidate `j` is dropped where
-  `m_j < -stop * s_j` over the worlds played so far (where `s_j` is 0,
-  unless `m_j > 0`), and the root stops once
+  `m_j < -stop * s_j` over the worlds played so far, or, where `s_j` is 0,
+  where `m_j` is not above 0; the root stops once
   no other candidate is left. The candidates still in play at the last
   world are judged by the margin over every world. The worlds are those the
   full search draws, in the same order, so a candidate that plays every
@@ -515,7 +530,7 @@ few dozen worlds separate moves that independent playouts would not.
   candidate on ([native.md](native.md#playout-copies)).
 
 `hexset.clients.netbot.rollouts_for(checkpoint, worlds=, top=, decisive=,
-horizon=, full_setup=, mix=, anchor=, det=, salt=, margin=, stop=, tie=)` builds one with the checkpoint's own trade gate
+horizon=, full_setup=, mix=, anchor=, det=, salt=, margin=, stop=, moves=, tie=)` builds one with the checkpoint's own trade gate
 (`GatedRollouts`); the arena's `rollout:` entrant and a file's
 `search=rollout` metadata do the same.
 

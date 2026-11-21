@@ -5,6 +5,27 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.37.0
+
+### Breaking
+
+- **The friendly robber also shields the mover.** With
+  `Rules.friendly_robber` on, the robber may not take a hex with a building
+  of any seat at two public points or fewer, the seat moving it included, so
+  a mover at two points may not put the robber on its own hexes. The native
+  engine plays the same rule. `hexset.robber.shielded(state)`,
+  `friendly_hexes(state)` and `allowed_targets(state, host)` drop their
+  `thief` argument: the rule no longer depends on who moves.
+
+### Fixed
+
+- **The docs name every argument of the MCTS and rollout builders.**
+  `docs/training.md` describes MCTS's `top`, `root`, `stages` and `whole`
+  and lists `searcher_for`'s and `rollouts_for`'s arguments, `docs/guide.md`
+  lists `mcts:`'s `whole=1`, and `docs/evaluation.md` lists `redecide`'s
+  `--workers`, `--seed` and header row. `docs/api.md` and `docs/onnx.md`
+  state when a seat carries `label`, the reclaim probe and the feed's `any`.
+
 ## 1.36.0
 
 ### Breaking

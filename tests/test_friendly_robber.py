@@ -89,6 +89,27 @@ def test_the_shield_lifts_once_the_seat_is_visibly_ahead():
     assert state.robber == min(theirs)
 
 
+def test_a_mover_at_two_public_points_may_not_take_its_own_hexes():
+    """The shield covers the seat moving the robber too: at two points it may
+    not put the robber on its own hexes, even with every rival ahead."""
+    game = a_duel()
+    game.phase = Phase.ROBBER
+    state = game._state
+    mover = game.current_player
+    rival = 1 - mover
+    promote(game, rival, FRIENDLY_ROBBER_POINTS + 1)
+    assert public_victory_points(state, mover) <= FRIENDLY_ROBBER_POINTS
+
+    mine = {h for h in range(state.board.num_hexes) if mover in occupants(state, h)}
+    assert mine, "the fixture must seat the mover somewhere"
+    assert not (robber_hexes(game) & mine)
+    with pytest.raises(ValueError, match="does not allow"):
+        move_robber_to(game, min(mine - {state.robber}))
+
+    promote(game, mover, FRIENDLY_ROBBER_POINTS + 1)
+    assert robber_hexes(game) & mine
+
+
 def test_a_victory_point_card_does_not_lift_the_shield():
     """The shield is a public read: a hidden VP card wins games but does not
     expose its holder to the robber."""
@@ -107,7 +128,7 @@ def test_standard_rules_keep_the_rulebook_robber():
     game.phase = Phase.ROBBER
     state = game._state
     assert len(robber_hexes(game)) == state.board.num_hexes - 1
-    assert allowed_targets(state, 0, None) is None
+    assert allowed_targets(state, None) is None
 
 
 def test_a_host_rule_still_wins_over_the_game_type():

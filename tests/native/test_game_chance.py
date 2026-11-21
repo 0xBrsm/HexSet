@@ -111,7 +111,7 @@ class NativeChanceActions(unittest.TestCase):
         game._state.rules = dataclasses.replace(game._state.rules, friendly_robber=True)
         # Opponent VP cards do not lift the public shield.
         game._state.dev_cards[1][1] = 10
-        allowed = R.allowed_targets(game._state, 0, None)
+        allowed = R.allowed_targets(game._state, None)
         targets = [h for h in range(game._state.board.num_hexes) if R.may_stand(game._state, h)
                    and (allowed is None or h in allowed)]
         for target in targets:

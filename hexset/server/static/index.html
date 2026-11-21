@@ -2616,8 +2616,7 @@ function drawBoard() {
   // Ports: a marker in the same colour as its resource's actual hex tile
   // (white for 3:1), a ship icon, the ratio alone (the colour already says
   // which resource), and a pier plus a matching-coloured mark on each of the
-  // two vertices it serves — position near the coast was not enough to tell
-  // which corners could actually use it.
+  // two vertices it serves.
   for (const p of board.ports) {
     const pos = portLabelPos(p);
     const terrain = p.resource ? RESOURCE_TERRAIN[p.resource] : null;
@@ -4786,8 +4785,7 @@ function renderBoardDynamic() {
     if (actions[0].type === "BUILD_CITY") {
       // 22 to mirror the settlement circle's own target-vs-actual relationship
       // (r=11 highlight around a rendered r=12 piece) — the actual city is
-      // 24x24 (see buildingPiece); this was stuck at
-      // the pre-enlargement 16 until that piece grew and this didn't follow.
+      // 24x24 (see buildingPiece).
       const side = coarsePointer ? 26 : 22;
       target = el("rect", {
         x: v.x - side / 2, y: v.y - side / 2, width: side, height: side,

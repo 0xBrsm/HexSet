@@ -31,8 +31,8 @@ KEY_HEADER = "X-HexSet-Key"
 # in the rankings (`rankings.Rankings.seen`).
 PROFILE_FIELDS = ("name", "version", "owner", "url", "description")
 
-# Each profile field's longest, in characters: a name, version or owner
-# longer is cut, a url or description longer is refused. A `description` is
+# Each profile field's longest, in characters: a name, version, owner or
+# label longer is cut, a url or description longer is refused. A `description` is
 # one sentence: what the client is.
 PROFILE_LENGTHS = {"name": 40, "version": 40, "owner": 40, "url": 200, "description": 100, "label": 40}
 

@@ -554,7 +554,7 @@ def targeted(game: "Game", seat: int, ask: Ask, promised: Sequence[int], model: 
         return seat == ask.to
     st = game.state(seat).state
     mover, taken = ask.mover, {s: ask.kind for s in promised}
-    hexes = model.hexes(st, mover, allowed_targets(st, mover, game.robber_allowed), taken)
+    hexes = model.hexes(st, mover, allowed_targets(st, game.robber_allowed), taken)
     if ask.kind == NO_BLOCK:
         hit = {h: occupants(st, h) for h in hexes}
     else:
@@ -588,7 +588,7 @@ def promise_value(game: "Game", seat: int, gate: object, ask: Ask, promised: Seq
     view = game.state(seat)
     state, mover = view.state, ask.mover
     others = {s: ask.kind for s in promised}
-    allowed = allowed_targets(game._state, mover, game.robber_allowed)
+    allowed = allowed_targets(game._state, game.robber_allowed)
     hand = list(state.hands[seat])
     received = []
     for r in range(NUM_RESOURCES):
@@ -1274,7 +1274,7 @@ class ValueDealer:
                      {}, {}, {}, {}, {}, {}, {}, None)
         self._beliefs(view, plan, [s for s in range(game.num_players) if s not in game.locked])
         model = robber_model(self.params.model)
-        allowed = allowed_targets(state, mover, game.robber_allowed)
+        allowed = allowed_targets(state, game.robber_allowed)
         taken = {s: kind for s in promised if s != seat}
         silent = self._move_chances(game, model, state, mover, toward(state, ask, seat, allowed), taken, options)
         sure = self._move_chances(game, model, state, mover, allowed, {**taken, seat: kind}, options)

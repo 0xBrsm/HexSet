@@ -37,7 +37,7 @@ inline std::vector<Int> robber_targets(const ArenaState& state,int thief) {
     if (supplied || !state.get(Block::rules)[2]) return legal;
     std::vector<Int> protected_seats,allowed;
     for (int seat=0;seat<static_cast<int>(state.knowledge.common.size());++seat)
-        if (seat!=thief && public_points(state,seat)<=2) protected_seats.push_back(seat);
+        if (public_points(state,seat)<=2) protected_seats.push_back(seat);
     if (protected_seats.empty()) return legal;
     for (Int h:legal) {
         bool safe=true;

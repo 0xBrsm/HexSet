@@ -876,7 +876,7 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     state = game._state
     thief = game.current_player
     check_target(state, target)
-    allowed = allowed_targets(state, thief, game.robber_allowed)
+    allowed = allowed_targets(state, game.robber_allowed)
     allowed, spared = keep_promises(state, thief, allowed, dict(game.robber_promised))
     if allowed is not None and target not in allowed:
         raise ValueError(f"the table does not allow the robber on hex {target}")

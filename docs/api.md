@@ -47,7 +47,7 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 | --- | --- |
 | 400 | Malformed body or field (a seat that is not an integer, a name that is not a string, a bad `client`), an illegal or out-of-turn action, an unknown model, a bot that will not load |
 | 401 | A seat route without a token |
-| 403 | An unknown token; a reclaim secret that matches no seat |
+| 403 | An unknown token; a reclaim secret that matches no seat (without `probe`) |
 | 404 | An unknown game code or route |
 | 409 | A stale `version`; `GET /api/chance` at a ranked table; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move or at a table with fixed seats; the last seat leaving; a trade-round conflict (below) |
 | 429 | `POST /api/games` from an address over its new-game limits, or `POST /api/ranked` from one at its unfinished-games limit (below) |
@@ -75,7 +75,7 @@ fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POS
 | --- | --- |
 | `code`, `seat`, `version` | Game code, this seat, the table's change counter |
 | `phase`, `current_player`, `to_move` | Engine phase, the seat whose turn it is, the seat expected to act (`null` while `waiting_for` or `trade_wait` is non-empty) |
-| `seats` | `{seat, kind, name}` per seat; `kind` is `empty`, `bot` or `player`. A bot seat whose profile gives a `label` also carries it as `label`, the name the page shows |
+| `seats` | `{seat, kind, name}` per seat; `kind` is `empty`, `bot` or `player`. A bot seat whose profile gives a `label` that differs from its name also carries it as `label`, the name the page shows |
 | `waiting_for` | Empty, unclosed seats holding up setup |
 | `claimed_seats`, `locked`, `started` | Occupied seats, closed or retired seats, whether the first move is made |
 | `game_type`, `board_mode`, `seats_fixed`, `fixed_seats` | The game type and board mode the table was dealt with (`board_mode` is `null` for a board no mode dealt); whether the type is played at one seat count only (duel), and the seats its deal closed for good. A table's other seats can be closed before the first move, down to one person practising alone |
@@ -112,7 +112,8 @@ to cards gained by resource), `build` (`piece`, `at` a vertex or edge,
 Monopoly's `resource` and `taken`, seat to cards; Year Of Plenty's
 `resources`), `robber` (`hex`, `victim`, `stole`, `card`), `bank` (`gave`,
 `got`), `discard` (`card`), `end`, `round` (a trade round's step: `step`,
-`seat`, `bundle`) and `trade`. An entry may carry `trades`, the exchanges
+`seat`, `bundle`, and an offer's `any` cards where it asks for any) and
+`trade`. An entry may carry `trades`, the exchanges
 cleared with it. A bought, stolen or discarded `card` is `null` except to the
 seat that holds it (and the thief, for a steal); a discard round still open is
 left out until every seat has discarded. An undo rewrites the game's actions

@@ -98,6 +98,25 @@ class NativeLegality(unittest.TestCase):
                 game._state.rules = dataclasses.replace(game._state.rules, friendly_robber=True)
                 self.assert_decision(game)
 
+    def test_friendly_robber_shields_a_mover_at_two_points(self):
+        """Seat 0 at one public point, seat 1 at more than two with a city
+        on the other hex: the robber may not take seat 0's hex."""
+        game = position(2)
+        state = game._state
+        game.phase = Phase.ROBBER
+        state.longest_road_holder = S.NO_OWNER
+        topology = state.board.topology
+        state.vertex_owner[0], state.vertex_building[0] = S.NO_OWNER, S.Building.NONE
+        ours = next(v for v in topology.hex_vertices[0] if v not in topology.hex_vertices[1])
+        state.vertex_owner[ours], state.vertex_building[ours] = 0, S.Building.SETTLEMENT
+        theirs = next(v for v in topology.hex_vertices[1] if v not in topology.hex_vertices[0])
+        state.vertex_owner[theirs], state.vertex_building[theirs] = 1, S.Building.CITY
+        self.assertLessEqual(V.public_victory_points(state, 0), 2)
+        self.assertGreater(V.public_victory_points(state, 1), 2)
+        targets = {a.a for a in A.legal_actions(game) if a.type is A.ActionType.MOVE_ROBBER}
+        self.assertEqual(targets, {1})
+        self.assert_decision(game)
+
     def test_compound_road_pairs_preserve_order_on_loops_and_blockers(self):
         for players in (2, 4):
             for blocked in (False, True):

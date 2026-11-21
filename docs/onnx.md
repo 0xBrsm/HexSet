@@ -48,7 +48,7 @@ engine's board indexing.
 | `version` | The model's version, shown with it and journalled with each game it plays | Free text |
 | `commit` | The code commit it was built and served from | Free text; kept as model information |
 | `owner`, `url`, `description` | Shown with it in the model list and on its rankings row | Optional; a value a client's profile would refuse leaves the field out |
-| `label` | The name the server shows for it: on the page, in the log, in the model list and on its rankings row. Clients still ask for it by `name` | Optional: shown as `name`. Up to 40 characters |
+| `label` | The name the server shows for it: on the page, in the log, in the model list and on its rankings row. Clients still ask for it by `name` | Absent: shown by its `name`. Cut to 40 characters |
 
 ### How it plays
 

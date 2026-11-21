@@ -52,14 +52,14 @@ def victims(state: GameState, hex_index: int, thief: int) -> tuple[int, ...]:
     )
 
 
-def shielded(state: GameState, thief: int) -> frozenset[int]:
-    """Seats a friendly-robber table protects from `thief`: every other seat
-    whose public points are at or below `FRIENDLY_ROBBER_POINTS`. The thief is
-    never shielded from itself -- its own hexes stay available."""
+def shielded(state: GameState) -> frozenset[int]:
+    """Seats a friendly-robber table protects: every seat whose public points
+    are at or below `FRIENDLY_ROBBER_POINTS`, the robber's mover included, so
+    a mover at two points may not put the robber on its own hexes either."""
     return frozenset(
         p
         for p in range(state.num_players)
-        if p != thief and public_victory_points(state, p) <= FRIENDLY_ROBBER_POINTS
+        if public_victory_points(state, p) <= FRIENDLY_ROBBER_POINTS
     )
 
 
@@ -69,11 +69,12 @@ def may_stand(state: GameState, hex_index: int) -> bool:
     return hex_index != state.robber and state.board.terrain[hex_index] is not Terrain.SEA
 
 
-def friendly_hexes(state: GameState, thief: int) -> frozenset[int] | None:
-    """The hexes `thief` may take under the friendly-robber rule, or `None`
-    for "the rule restricts nothing here" -- which is also the answer when it
-    would leave no legal hex at all, since the phase still has to resolve."""
-    protect = shielded(state, thief)
+def friendly_hexes(state: GameState) -> frozenset[int] | None:
+    """The hexes the robber may take under the friendly-robber rule: none
+    with a building of a `shielded` seat. `None` means "the rule restricts
+    nothing here", which is also the answer when it would leave no legal hex
+    at all, since the phase still has to resolve."""
+    protect = shielded(state)
     if not protect:
         return None
     allowed = frozenset(
@@ -84,9 +85,7 @@ def friendly_hexes(state: GameState, thief: int) -> frozenset[int] | None:
     return allowed or None
 
 
-def allowed_targets(
-    state: GameState, thief: int, host: frozenset[int] | None
-) -> frozenset[int] | None:
+def allowed_targets(state: GameState, host: frozenset[int] | None) -> frozenset[int] | None:
     """The hexes this move may take: a host's own rule wins where it gave one
     (it is mirroring a real table and has already applied that table's rules),
     otherwise the game type's. `None` means the rulebook's "anywhere but where
@@ -94,7 +93,7 @@ def allowed_targets(
     if host is not None:
         return host
     if state.rules.friendly_robber:
-        return friendly_hexes(state, thief)
+        return friendly_hexes(state)
     return None
 
 

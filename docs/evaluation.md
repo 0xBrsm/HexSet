@@ -272,5 +272,8 @@ measures the search's own noise. `--where MODULE:FUNCTION` keeps only the
 positions where `FUNCTION(game, seat)` is true. Each game appends its
 "decision" rows (the played and logged moves and every arm's decision as
 its log writes it) and a "game" row tallying the decisions logged, matched,
-searched and kept; a rerun skips the games already tallied.
+searched and kept; a rerun skips the games already tallied. `--workers N`
+decides N games at once, and `--seed` sets the arms' default seed. A new
+output opens with a "header" row naming the journal and its sha256, the
+entrant, each arm's spec and seed, and each arm's reading of hidden cards.
 `hexset.arena.searchers(bot)` returns the searchers behind a seat.

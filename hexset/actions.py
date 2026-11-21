@@ -186,7 +186,7 @@ def space_for(game: Game) -> ActionSpace:
 def _robber_targets(game: Game, kind: ActionType) -> list[Action]:
     state = game._state
     # A host's rule for this move, else the game type's (friendly robber).
-    allowed = allowed_targets(state, game.current_player, game.robber_allowed)
+    allowed = allowed_targets(state, game.robber_allowed)
     # ... less what the mover has promised for this move (`hexset.deals`).
     allowed, spared = keep_promises(state, game.current_player, allowed, dict(game.robber_promised))
     out = []

@@ -7,7 +7,8 @@
 `discard_limit`: holding *more* than this when a seven is rolled discards half.
 `friendly_robber`: the robber may not take a hex occupied by a seat at or
 below `robber.FRIENDLY_ROBBER_POINTS` *public* points, so a seat that is
-visibly behind can be neither blocked nor robbed.
+visibly behind can be neither blocked nor robbed. The mover counts too: at
+two points it may not put the robber on its own hexes.
 `balanced_dice`: rolls come from `chance.Balanced`, a dice deck that draws
 recent sums less often and steers the sevens between the rollers, rather than
 two independent uniform dice. It also moves `seven_odds`, the chance of a

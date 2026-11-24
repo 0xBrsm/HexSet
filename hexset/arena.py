@@ -1102,6 +1102,8 @@ def compete(
     seed_bypass: str | None = None,
     registration: str | os.PathLike | None = None,
     seed_use: str = "eval",
+    serve: str | None = "auto",
+    lanes: int = 24,
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every
     seat.
@@ -1178,6 +1180,18 @@ def compete(
     are played to train or fit on names that kind of training as its
     `seed_use` and is held to the policy's training seeds for it instead.
     How the seed passed is kept on the journal's source line.
+
+    `serve` (`"cuda"` or `"cpu"`) runs every ONNX forward of the run's games,
+    in every worker, on one server on that device
+    (`hexset.clients.serving.served`), and the games as `lanes` lanes of each
+    worker (`hexset.lockstep.pool_lanes`, fewer where the games would not
+    fill every worker), so each worker sends its lanes' forwards together;
+    the journal's header names the device. The default, `"auto"`, serves on
+    CUDA where the host has a CUDA device (`hexset.clients.serving.resolve`)
+    and a seat searches with an ONNX file (`searches_onnx`), and plays
+    unserved otherwise. `None` never serves. As in `compete_lanes`, a served
+    game's forwards run in batches shared with other games, so a decision
+    that turns on the last bit of a forward can go the other way.
     """
     seats = len(entrants)
     if seats < 2:
@@ -1210,6 +1224,9 @@ def compete(
                          "it needs antithetic=True")
     if not journal:
         raise ValueError("a run keeps its games in a journal: name one")
+    if lanes < 1:
+        raise ValueError("lanes must be positive")
+    serve = _serve_device(serve, [lineup])
     jobs = {
         i: (lineup, i, seed, action_cap, pairing, trade_mode, game_type,
             turn_cap, board_mode)
@@ -1223,6 +1240,7 @@ def compete(
         # Likewise a board mode other than the default, so journals written
         # before there was a choice still resume.
         **({} if board_mode == "random" else {"board_mode": board_mode}),
+        **({} if serve is None else {"serve": serve}),
     )
     finished = _open_journal(journal, header, resume, seeds=note)
     started = time.perf_counter()
@@ -1260,6 +1278,89 @@ def compete(
 
     release()
     pending = [i for i in range(games) if i not in finished]
+    with _served(serve if pending else None):
+        if serve is None:
+            _play_pending(pending, jobs, journal, workers, start_method, worker_initializer, worker_initargs,
+                          arrive, keep, kept)
+        elif pending:
+            each = max(1, min(lanes, -(-len(pending) // workers)))
+            tasks = [(i, jobs[i], os.fspath(journal)) for i in pending]
+            for (index, _job, _path), outcome in lockstep.pool_lanes(
+                _play_compete_lane, tasks, workers=workers, lanes=each,
+                initializer=worker_initializer, initargs=worker_initargs, start_method=start_method,
+            ):
+                arrive(index, outcome)
+    elapsed = time.perf_counter() - started
+    return _tournament([entrant.name for entrant in lineup], outcomes, True, seconds=elapsed)
+
+
+def _play_compete_lane(task: tuple[int, tuple, str]) -> Outcome:
+    """One served `compete` game, played on a lane and written to the run's
+    journal as it finishes (compete's game line)."""
+    _index, job, journal = task
+    return _play_dealt(job, journal)
+
+
+def searches_onnx(lineup: Sequence[Entrant]) -> bool:
+    """Whether a seat of `lineup` searches with an ONNX file: an `mcts` or
+    `rollout` entrant whose weights are a `.onnx` file, or any other entrant
+    but `network` (one forward) whose `.onnx` file declares a search in its
+    metadata (`hexset.clients.onnxbot.spawn` plays a file's declared search)."""
+    for entrant in lineup:
+        path = entrant.weights if isinstance(entrant.weights, str) else None
+        if not path or not path.endswith(".onnx"):
+            continue
+        if entrant.kind in ("mcts", "rollout"):
+            return True
+        if entrant.kind != "network" and _declares_search(path):
+            return True
+    return False
+
+
+_declared: dict[str, bool] = {}
+
+
+def _declares_search(path: str) -> bool:
+    if path not in _declared:
+        try:
+            import onnxruntime as ort
+
+            from .clients._modelmeta import search_config
+
+            meta = ort.InferenceSession(path, providers=["CPUExecutionProvider"]).get_modelmeta()
+            _declared[path] = bool(search_config(meta.custom_metadata_map).searches)
+        except Exception:
+            _declared[path] = False
+    return _declared[path]
+
+
+def _serve_device(serve: str | None, lineups: Iterable[Sequence[Entrant]]) -> str | None:
+    """The device a run serves on (`hexset.clients.serving.resolve`), with
+    `"auto"` serving only a lineup that searches with an ONNX file."""
+    if serve is None:
+        return None
+    from .clients import serving
+
+    device = serving.resolve(serve)
+    if serve == serving.AUTO and device is not None and not any(searches_onnx(l) for l in lineups):
+        return None
+    return device
+
+
+def _served(serve: str | None):
+    """`hexset.clients.serving.served(serve)`, or nothing for `None`."""
+    if serve is None:
+        import contextlib
+
+        return contextlib.nullcontext()
+    from .clients import serving
+
+    return serving.served(serve)
+
+
+def _play_pending(pending, jobs, journal, workers, start_method, worker_initializer, worker_initargs,
+                  arrive, keep, kept) -> None:
+    """`compete`'s games still to play: in a pool of `workers`, or here."""
     if workers > 1 and pending:
         with ProcessPoolExecutor(
             max_workers=workers, mp_context=get_context(start_method),
@@ -1290,8 +1391,6 @@ def compete(
             worker_initializer(*worker_initargs)
         for index in pending:
             arrive(index, _play_dealt(jobs[index], journal))
-    elapsed = time.perf_counter() - started
-    return _tournament([entrant.name for entrant in lineup], outcomes, True, seconds=elapsed)
 
 
 def compete_lanes(
@@ -1317,6 +1416,7 @@ def compete_lanes(
     seed_bypass: str | None = None,
     registration: str | os.PathLike | None = None,
     seed_use: str = "eval",
+    serve: str | None = "auto",
 ) -> dict[object, Outcome]:
     """Play every game in `jobs`, `lanes` at a time in each of `workers`
     processes, their network forwards batched across the games in flight
@@ -1357,7 +1457,11 @@ def compete_lanes(
     ``worker_initializer(*worker_initargs)`` runs once in each worker (here,
     for `workers=1`), as for `compete`. `backend` and `pin` are
     `hexset.lockstep.pool_lanes`'s: lanes are greenlets where `greenlet` is
-    installed, else threads, pinned unless `pin=False`.
+    installed, else threads, pinned unless `pin=False`. `serve` (`"cuda"` or
+    `"cpu"`) runs every ONNX forward on one server on that device
+    (`hexset.clients.serving.served`), each worker's waiting lanes sent to it
+    together, and the journal's header names it; `"auto"`, the default, and
+    `None` are `compete`'s.
     """
     if action_cap <= 0:
         raise ValueError("action_cap must be positive")
@@ -1381,6 +1485,7 @@ def compete_lanes(
         if key in planned:
             raise ValueError(f"two jobs are keyed {key!r}")
         planned[key] = (lineup, int(seed), int(index))
+    serve = _serve_device(serve, [lineup for lineup, _, _ in planned.values()])
     notes: dict[str, dict] = {}
     for lineup, seed, _ in planned.values():
         playing = sum(1 for e in lineup if e.kind != RETIRED)
@@ -1394,6 +1499,7 @@ def compete_lanes(
         "records": True, "action_cap": action_cap, "trade_mode": trade_mode,
         "game_type": repr(game_type), "turn_cap": turn_cap,
         **({} if board_mode == "random" else {"board_mode": board_mode}),
+        **({} if serve is None else {"serve": serve}),
     }
     held = _open_lane_journal(journal, header, resume, seeds=notes)
     for key, (entrants, seed, index, _) in held.items():
@@ -1418,14 +1524,15 @@ def compete_lanes(
                game_type, turn_cap, board_mode), os.fspath(journal))
         for key, (lineup, seed, index) in planned.items() if key not in held
     ]
-    for (key, _job, _journal), outcome in lockstep.pool_lanes(
-        _play_lane_job, todo, workers=workers, lanes=lanes,
-        initializer=worker_initializer, initargs=worker_initargs, start_method=start_method,
-        backend=backend, pin=pin,
-    ):
-        outcomes[key] = outcome
-        if progress is not None:
-            progress(len(outcomes), total, key, outcome)
+    with _served(serve if todo else None):
+        for (key, _job, _journal), outcome in lockstep.pool_lanes(
+            _play_lane_job, todo, workers=workers, lanes=lanes,
+            initializer=worker_initializer, initargs=worker_initargs, start_method=start_method,
+            backend=backend, pin=pin,
+        ):
+            outcomes[key] = outcome
+            if progress is not None:
+                progress(len(outcomes), total, key, outcome)
     return outcomes
 
 
@@ -1488,13 +1595,13 @@ def _open_lane_journal(
         )
     gamelog.cut_torn_tail(path)
     found, games = read_lane_journal(path)
-    differs = sorted(k for k in set(found) | set(header) if found.get(k) != header.get(k))
+    differs = sorted(k for k in set(found) | set(header) if found.get(k) != header.get(k) and k != "serve")
     if differs:
         raise ValueError(
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
-    gamelog.append(path, _source_line(len(games), seeds))
+    gamelog.append(path, _served_note(_source_line(len(games), seeds), found, header))
     return games
 
 
@@ -1553,16 +1660,27 @@ def _open_journal(
     extended = header["games"] > found["games"]
     differs = sorted(
         k for k in set(found) | set(header)
-        if found.get(k) != header.get(k) and not (k == "games" and extended)
+        if found.get(k) != header.get(k) and not (k == "games" and extended) and k != "serve"
     )
     if differs:
         raise ValueError(
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
-    line = _source_line(len(games), seeds)
+    line = _served_note(_source_line(len(games), seeds), found, header)
     gamelog.append(path, {**line, "extended_to": header["games"]} if extended else line)
     return games
+
+
+def _served_note(line: dict, found: dict, header: dict) -> dict:
+    """A resumed run's source line, naming the device the games after it are
+    served on where it is not the header's: the route a game is played on is
+    not part of the run's identity (a served game is the unserved one up to
+    the last bit of a forward), so a run started on one host may finish on
+    another."""
+    if found.get("serve") == header.get("serve"):
+        return line
+    return {**line, "serve": header.get("serve")}
 
 
 def _source_line(games: int, seeds: dict | None = None) -> dict:
@@ -2050,7 +2168,7 @@ __all__ = [
     "MAX_ACTIONS", "board_key", "game_key", "seat_key", "deal_board", "deal_game", "deal_seats",
     "half_turn", "seat_of",
     # playing
-    "seat_bots", "compete", "compete_lanes", "Exhausted",
+    "seat_bots", "compete", "compete_lanes", "searches_onnx", "Exhausted",
     # results
     "Tournament", "Standing", "Outcome", "ClearedTrade", "Estimate", "wilson",
     "mean_interval", "pooled", "read_journal", "journal_tournament", "read_lane_journal",

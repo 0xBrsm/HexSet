@@ -226,7 +226,30 @@ forward any bot makes, its move, trade gate, veto, robber deals and search
 leaves, runs in one batch with the other lanes' waiting forwards. Where every exported graph
 seated gives the same answer at any batch size from two rows up
 (`hexset.lockstep.batch_invariant`), its games are the same at any `lanes`,
-`workers` and job order. A `LaneEnv` collector
+`workers` and job order.
+
+`serve="cuda"` (or `"cpu"`) on `compete` or `compete_lanes` runs every
+exported graph's forwards on one server process on that device
+(`hexset.clients.serving.served`), the journal's header naming it. A served
+`compete` plays its games as lanes (`lanes`, 24 by default, fewer where the
+games would not fill every worker), and every worker sends all its lanes'
+waiting forwards, decisions included, in one message. The default,
+`serve="auto"`, serves on CUDA when the host has a CUDA device onnxruntime
+can run on (`hexset.clients.serving.cuda_available`) and a seat searches with
+an ONNX file (`hexset.arena.searches_onnx`: an `mcts` or `rollout` entrant
+on a `.onnx` file, or a seat whose file declares a search), and plays
+unserved otherwise. `HEXSET_SERVE_AUTO=0` turns the automatic choice off,
+`serve=None` never serves, and a block already inside `served` is left to
+that server. The device is not part of a run's identity: a journal resumed
+on another route keeps its games and names the new device on its source
+line. The server joins
+the requests for one file into one batch (`hexset.clients.batching.join`,
+which moves candidate rows past the rows before them) and cuts each request's
+rows back out. On CUDA, TF32 is off. A served game differs from an unserved
+one only where a decision turns on the last bits of a forward, which the
+device's arithmetic and the batch can move. `served(device)` also works as a
+block around any code that loads exported graphs, for this process and every
+process it starts while the block is open. A `LaneEnv` collector
 writes each finished `Episode` as one line with
 `hexset.gym.lanes.episode_entry`.
 

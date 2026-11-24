@@ -36,6 +36,7 @@ from hexset.lockstep import forward
 from hexset.mcts import Search
 from hexset.rollout import RolloutPool, SharedPools
 from hexset.clients.onnxmeta import modes_of
+from hexset.clients import serving
 from hexset.clients.batching import coalesce, coalesce_rows
 from hexset.clients.committee import Committee, members_of, weights_of
 from hexset.clients.finishing import Finishing
@@ -298,6 +299,10 @@ class DecisionPolicy:
         inputs = feed if grouped is None else grouped.feed
         if outputs == ["value"]:
             result = {"value": forward(self.session, outputs, inputs)[0]}
+        elif getattr(self.session, "joined", None) is not None:
+            # A served session joins decision feeds with their candidate rows
+            # where it runs them (`hexset.clients.serving`).
+            result = dict(zip(outputs, forward(self.session, outputs, inputs)))
         else:
             result = dict(zip(outputs, self.session.run(outputs, inputs)))
         return result if grouped is None else {key: value[grouped.inverse] for key, value in result.items()}
@@ -540,15 +545,19 @@ DEFAULT_THREADS = 1
 
 @lru_cache(maxsize=4)
 def _load_cached(
-    path: str, topology: Topology, device: str, mtime_ns: int, threads: int | None
+    path: str, topology: Topology, device: str, mtime_ns: int, threads: int | None,
+    server: str | None = None,
 ) -> Loaded:
-    options = ort.SessionOptions()
-    if threads is not None:
-        options.intra_op_num_threads = threads
-        options.inter_op_num_threads = threads
-    session = ort.InferenceSession(
-        str(path), sess_options=options, providers=_providers_for(device)
-    )
+    if server is not None:
+        session = serving.remote_session(str(path), server)
+    else:
+        options = ort.SessionOptions()
+        if threads is not None:
+            options.intra_op_num_threads = threads
+            options.inter_op_num_threads = threads
+        session = ort.InferenceSession(
+            str(path), sess_options=options, providers=_providers_for(device)
+        )
     meta = session.get_modelmeta().custom_metadata_map
     # First, so a file of another contract is named as one rather than
     # failing on whichever key its own shape happens to lack.
@@ -664,8 +673,12 @@ def load(
     `DEFAULT_THREADS`; `threads=None` is onnxruntime's own choice, one thread
     per core. A trader the file names is not resolved here, since nothing
     here trades: `spawn` resolves it.
+
+    While a server is open for this process (`hexset.clients.serving.served`),
+    the graph runs there, on the server's device, and `device` and `threads`
+    are not used.
     """
-    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns, threads)
+    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns, threads, serving.current())
 
 
 def searcher(

@@ -170,9 +170,9 @@ def test_the_arena_spawns_capped_sessions(monkeypatch, checkpoint_v2):
     asked: list[object] = []
     real = onnxbot._load_cached
 
-    def spy(spy_path, topology, device, mtime_ns, threads):
+    def spy(spy_path, topology, device, mtime_ns, threads, server=None):
         asked.append(threads)
-        return real(spy_path, topology, device, mtime_ns, threads)
+        return real(spy_path, topology, device, mtime_ns, threads, server)
 
     spy.cache_clear = real.cache_clear  # the fixture's teardown calls it
     monkeypatch.setattr(onnxbot, "_load_cached", spy)

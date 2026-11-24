@@ -1,9 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Exact row grouping for row-invariant decision inference.
+"""Exact row grouping for row-invariant decision inference, and the joining
+of several forwards' feeds into one.
 
 Only batch ownership coordinates are normalized. Observations, masks and
 ordered compound candidates remain in the key. Groups live for one forward,
 so weights and requested outputs are constant throughout their lifetime.
+
+`join` stacks several feeds for one graph into one feed and `split` cuts the
+graph's outputs back into one list per feed. A candidate block's owner rows
+(`road_building_row`, `discard_row`) and `double_rows` are moved past the
+rows of the feeds before them; the outputs answered per candidate or per
+double-turn row (`OUTPUT_UNITS`) are cut by those counts, every other output
+by rows.
 """
 from __future__ import annotations
 
@@ -11,11 +19,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["Coalesced", "coalesce", "coalesce_rows"]
+__all__ = ["Coalesced", "Joined", "OUTPUT_UNITS", "coalesce", "coalesce_rows", "join", "split"]
 
 _ROWS = ("observation", "flat", "setup")
 _CANDIDATES = {"road_building": "road_building_row", "discard": "discard_row"}
 _KNOWN = set(_ROWS) | set(_CANDIDATES) | set(_CANDIDATES.values()) | {"double_rows"}
+#: The inputs holding row indices into their own feed.
+_OWNERS = (*_CANDIDATES.values(), "double_rows")
+#: The outputs answered once per entry of an owner input rather than once per
+#: row (`hexset.decisions.OPTION_OUTPUTS`), by the owner they follow.
+OUTPUT_UNITS = {"option_road_building": "road_building_row", "option_discard": "discard_row",
+                "option_double": "double_rows"}
 
 
 @dataclass(frozen=True)
@@ -138,3 +152,67 @@ def coalesce_rows(feed: dict[str, np.ndarray]) -> Coalesced | None:
     if len(first) == 1:
         first = np.concatenate([first, first])
     return Coalesced({name: value[first] for name, value in feed.items()}, inverse, {})
+
+
+@dataclass(frozen=True)
+class Joined:
+    """Several feeds as one (`join`). `counts` holds, per feed in order, its
+    rows (`"rows"`) and the entries of each owner input it carries."""
+
+    feed: dict[str, np.ndarray]
+    counts: tuple[dict[str, int], ...]
+
+
+def _feed_rows(feed: dict[str, np.ndarray]) -> int:
+    for name in _ROWS:
+        if name in feed:
+            return len(feed[name])
+    return len(next(iter(feed.values())))
+
+
+def join(feeds: list[dict[str, np.ndarray]]) -> Joined:
+    """`feeds`, every one for the same graph and with the same input names,
+    as one feed: each input stacked on its first axis, owner inputs moved past
+    the rows before them. A graph whose rows do not read one another answers
+    each feed's rows of the joined feed as it answers that feed alone, up to
+    the arithmetic of the batch size (`split` cuts them back)."""
+    if not feeds:
+        raise ValueError("nothing to join")
+    names = list(feeds[0])
+    if any(sorted(feed) != sorted(names) for feed in feeds):
+        raise ValueError("feeds for one graph name different inputs")
+    parts: dict[str, list[np.ndarray]] = {name: [] for name in names}
+    counts, offset = [], 0
+    for feed in feeds:
+        rows = _feed_rows(feed)
+        count = {"rows": rows}
+        for name in names:
+            value = feed[name]
+            if name in _OWNERS:
+                if len(value) and not (0 <= value.min() and value.max() < rows):
+                    raise ValueError(f"{name} names a row outside its feed")
+                count[name] = len(value)
+                value = value + offset
+            parts[name].append(value)
+        counts.append(count)
+        offset += rows
+    return Joined({name: np.concatenate(values) for name, values in parts.items()}, tuple(counts))
+
+
+def split(names: list[str], outputs: list[np.ndarray], joined: Joined) -> list[list[np.ndarray]]:
+    """The graph's `outputs` (named `names`) for `joined.feed`, cut back into
+    one list per joined feed, in `names` order: per-candidate and double-turn
+    outputs by that feed's entries (`OUTPUT_UNITS`), the rest by its rows."""
+    at = {"rows": 0, **{owner: 0 for owner in _OWNERS}}
+    out = []
+    for count in joined.counts:
+        part = []
+        for name, value in zip(names, outputs):
+            unit = OUTPUT_UNITS.get(name, "rows")
+            if unit not in count:
+                raise ValueError(f"{name} follows {unit}, which the joined feeds do not carry")
+            part.append(value[at[unit]:at[unit] + count[unit]])
+        for unit in at:
+            at[unit] += count.get(unit, 0)
+        out.append(part)
+    return out

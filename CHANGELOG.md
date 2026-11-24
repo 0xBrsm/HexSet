@@ -5,6 +5,33 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.41.0
+
+### Added
+
+- **Served forwards.** `hexset.clients.serving.served(device)` starts one
+  process that runs the exported graphs of this process and every process
+  it starts on `device` (`"cuda"` or `"cpu"`), joining the requests waiting
+  for one file into one batch; a loaded file is then a `RemoteSession`.
+  `compete` and `compete_lanes` take `serve=` to run their games' forwards
+  that way, and their journal headers name it. Their default, `"auto"`,
+  serves on CUDA where `serving.resolve` finds a CUDA device onnxruntime can
+  run on (`serving.cuda_available`) and a seat searches with an ONNX file
+  (`arena.searches_onnx`), and plays unserved otherwise;
+  `HEXSET_SERVE_AUTO=0` turns it off and `serve=None` never serves. A served
+  `compete` plays its games as `lanes` lanes of each worker (`lanes=24`,
+  fewer where the games would not fill every worker). A run resumed on
+  another route keeps its journal and names the new device on its source
+  line. Under `compete_lanes`, a
+  worker sends every lane's waiting forward, decisions included, in one
+  message, joined in that worker first. Arrays pass through memory-mapped
+  files the two processes share (in `/dev/shm` where it has room). The
+  server joins the next round and answers the last while the device runs
+  the current one, and its counters include the time spent in each.
+  `hexset.clients.batching.join` and `split` join decision feeds for one
+  graph, candidate owner rows moved past the rows before them, and cut the
+  outputs back per feed. On CUDA the server runs with TF32 off.
+
 ## 1.40.0
 
 ### Added

@@ -23,8 +23,11 @@ file's moves, its value-head trade gate and veto, robber deals, a search's
 leaves -- since every one of them goes through `forward`, and the `value`
 forwards of `hexset.clients.onnxbot.DecisionPolicy` (its trade gate and veto,
 robber deals); a forward that asks a decision runs on its own, since its
-candidate rows index its own batch. Outside a lane `forward` is
-`session.run`, so nothing else changes.
+candidate rows index its own batch. On a session served by
+`hexset.clients.serving`, every forward goes through `forward`, decisions
+included, and the waiting ones are sent to the server in one message, which
+joins them there. Outside a lane `forward` is `session.run`, so nothing else
+changes.
 
 A lane plays exactly the code it would play alone: `play` is called as it is,
 its random streams are its own, and because one lane runs at a time no two
@@ -225,12 +228,27 @@ def _fixed_batch(session: Any) -> bool:
 
 def _answer(waiting: list[_Lane]) -> None:
     """Run every waiting lane's forward, one `run` per session, and leave
-    each lane its own rows (or the error) as its reply."""
+    each lane its own rows (or the error) as its reply. Forwards on sessions
+    that carry a `joined` connection (`hexset.clients.serving.RemoteSession`)
+    are sent over it together, one message per connection, and joined where
+    they run."""
     import numpy as np
 
     groups: dict[int, list[_Lane]] = {}
+    remote: dict[int, list[_Lane]] = {}
     for lane in waiting:
-        groups.setdefault(id(lane.request[0]), []).append(lane)
+        joined = getattr(lane.request[0], "joined", None)
+        if joined is not None:
+            remote.setdefault(id(joined), []).append(lane)
+        else:
+            groups.setdefault(id(lane.request[0]), []).append(lane)
+    for group in remote.values():
+        try:
+            replies = group[0].request[0].joined.run_many([lane.request for lane in group])
+        except Exception as error:
+            replies = [error] * len(group)
+        for lane, reply in zip(group, replies):
+            lane.reply = reply
     for group in groups.values():
         session = group[0].request[0]
         if _fixed_batch(session):

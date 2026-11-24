@@ -494,7 +494,12 @@ few dozen worlds separate moves that independent playouts would not.
   at a check only while its mean lead is above the own move's. The default
   is `hexset.rollout.TIE` (0.005) wherever a margin is; `tie=0` leaves the
   lead out, and without a margin it plays no part. The log keeps the value (`tie`), the tied candidates
-  (`tied`) and each playout's lead (`leads`).
+  (`tied`) and each playout's lead (`leads`). A subclass may set some tied
+  candidates aside first (`PairedRollouts.prefer`, which also sees an exact
+  tie of the best mean score); the margin rule on the lead then runs over
+  the rest, the first of them, in prior order with the own move first,
+  standing where none passes. HexSet's network seats do this under
+  `robber_hits` (`docs/onnx.md`).
 - `pool=RolloutPool(load_policy, workers)` plays the worlds out in worker
   processes beside the searching one, each loading its own copy of the
   policy; the worlds and their seeds are still drawn in the searching

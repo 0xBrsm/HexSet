@@ -142,7 +142,8 @@ def capture_referee(game: Game):
     before creating the native object. No public View is weakened to fit it.
     """
     expected_game = (set(GAME_COLUMNS) | set(EMPTY_GAME_FIELDS) | set(LIST_FIELDS)
-                     | set(SET_FIELDS) | {"_state", "rng", "chance", "ledger", "open_deal", "embargoes"})
+                     | set(SET_FIELDS) | {"_state", "rng", "chance", "ledger", "open_deal", "embargoes",
+                                        "barred"})   # a root's refused moves: its candidates are Python's
     if {f.name for f in dataclasses.fields(game)} != expected_game:
         raise ValueError("Game schema changed; update native snapshot contract")
     expected_state = set(STATE_ARRAYS) | {"board", "num_players", "robber", "dev_ages",

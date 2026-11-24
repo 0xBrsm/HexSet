@@ -138,7 +138,12 @@ own tables:
   no answer yet. `choose` during a discard asks for this seat's next card the
   same way.
 - **The host's table rules.** `restrict_robber(hexes)` limits the robber
-  move at hand to `hexes`; `None` restores the rulebook's.
+  move at hand to `hexes`; `None` restores the rulebook's. `bar(actions)`
+  takes moves the host refused off the position at hand: `choose` then gives
+  the bot's next best, and the bar lifts with the next action
+  (`Game.barred`). A bot that chooses whole decisions gets none opened by a
+  barred move, and decides again rather than playing on a plan from before
+  the bar.
   `allow_open_offers(False)` is a host whose offers name every card on both
   sides: this seat's open ask goes up as the one-for-one it stands for
   ([trading.md](trading.md#open-offers)). `set_embargoes(pairs)` states the

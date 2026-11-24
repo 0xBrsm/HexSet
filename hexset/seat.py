@@ -307,6 +307,12 @@ class Seat:
         move only (`Game.robber_allowed`)."""
         self.game.robber_allowed = None if hexes is None else frozenset(hexes)
 
+    def bar(self, actions: Iterable[Action]) -> None:
+        """Moves the host refused at the position at hand: left out of
+        `legal_actions` until the next action (`Game.barred`), so `choose`
+        gives the bot's next best. Adds to any already barred there."""
+        self.game.barred = self.game.barred | frozenset(actions)
+
     def limit_before_roll(self, cards: Iterable[DevCard] | None) -> None:
         """The host's rule for development cards before a roll: the cards it
         takes there, or `None` for the rulebook's (any). It holds for the

@@ -193,6 +193,11 @@ class Game:
     # the move is made so it cannot outlive the prompt it answered; copied
     # by `imagine` so a search sees the same table.
     robber_allowed: frozenset[int] | None = None
+    # Moves a host refused at this position (`Seat.bar`): `legal_actions`
+    # leaves them out, so a bot asked again gives its next best. They hold
+    # for this position only: `actions.apply` clears them with the next
+    # action. Copied by `imagine` so a search's root sees the same table.
+    barred: frozenset = frozenset()
     # The promises the mover accepted for *this* robber move, as `(payer,
     # kind)` (`hexset.deals`): its legality keeps them (`deals.keep_promises`).
     # Set as the robber phase opens, cleared once the robber has moved;
@@ -448,6 +453,7 @@ def imagine(
         free_roads=game.free_roads,
         resume_phase=game.resume_phase,
         robber_allowed=game.robber_allowed,
+        barred=game.barred,
         robber_promised=game.robber_promised,
         turns=game.turns,
         won_by=game.won_by,

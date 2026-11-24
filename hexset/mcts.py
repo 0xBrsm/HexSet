@@ -1281,8 +1281,23 @@ class Search:
         return option
 
     def _pick(self, game: Game, decision: Decision) -> int:
-        """Which of `decision`'s options `choose` plays at `game`: its `chosen`."""
-        return decision.chosen
+        """Which of `decision`'s options `choose` plays at `game`: its `chosen`; where a
+        host refused moves at `game` (`Game.barred`, which a native world's root does
+        not read), the most visited option whose first move is not barred."""
+        return unbarred(game, decision, decision.chosen)
+
+
+def unbarred(game: Game, decision: Decision, picked: int) -> int:
+    """`picked`, or, where its first move is one a host refused at `game`
+    (`Game.barred`, which a native world's root does not read), the most
+    visited option whose first move is not."""
+    if not game.barred:
+        return picked
+    first = [o.parts[0] if isinstance(o, Compound) else o for o in decision.options]
+    allowed = [i for i, o in enumerate(first) if o not in game.barred]
+    if not allowed or picked in allowed:
+        return picked
+    return max(allowed, key=lambda i: (decision.visits[i], -i))
 
 
 def visit_policy(visits: np.ndarray, temperature: float = 1.0) -> np.ndarray:

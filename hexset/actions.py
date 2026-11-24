@@ -287,7 +287,15 @@ def legal_actions(game: Game, seat: int | None = None) -> list[Action]:
 
     `seat is None` asks for the engine's single actor (`hexset.game.to_move`); a
     live table passes the seat actually asking, because `Phase.DISCARD` entitles
-    several at once. A seat that may not act gets an empty list."""
+    several at once. A seat that may not act gets an empty list. Moves a host
+    refused at this position (`Game.barred`) are left out."""
+    actions = _legal_actions(game, seat)
+    if game.barred:
+        return [a for a in actions if a not in game.barred]
+    return actions
+
+
+def _legal_actions(game: Game, seat: int | None) -> list[Action]:
     state = game._state
     player = game.current_player
 
@@ -382,6 +390,8 @@ def apply(game: Game, action: Action, seat: int | None = None) -> None:
     declaring `trade_now` can still have it open."""
     kind = action.type
     was_main = game.phase is Phase.MAIN
+    if game.barred:
+        game.barred = frozenset()       # a refusal holds for the position it was made in
     if kind is ActionType.ROLL:
         roll_dice(game)
     elif kind is ActionType.END_TURN:

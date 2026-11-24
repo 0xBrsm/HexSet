@@ -20,7 +20,7 @@ import numpy as np
 from hexset.actions import Action, ActionType, legal_actions
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, is_over, to_move
-from hexset.mcts import Evaluation, Search, calibrate_own
+from hexset.mcts import Evaluation, Search, calibrate_own, unbarred
 from hexset.native.playout import NativeCopy
 from hexset.rollout import TIE, PairedRollouts, RolloutPool
 from hexset.actions import options_for
@@ -45,6 +45,7 @@ __all__ = [
     "searcher_for",
     "tip_robber",
     "hit_robber",
+    "prefer_off_own",
     "register_entrants",
     "declared_trader",
     "declared_closer",
@@ -161,7 +162,7 @@ class NetworkBot(trading.DeclaredTrade):
             # A policy that keeps plans answers `act_rows` from the game's own
             # options; the narrowed ones are scored instead (`_scored_pick`).
             ((prior, value),) = self.policy.score_rows([(game, seat, narrowed)])
-            return self._scored_pick(narrowed, prior, value, seat)
+            return self._scored_pick(game, narrowed, prior, value, seat)
         if self.temperature:
             return self._sampled_many([(self, game, seat, options)])[0]
         if self.robber_tip and options[0].type is ActionType.MOVE_ROBBER:
@@ -169,7 +170,11 @@ class NetworkBot(trading.DeclaredTrade):
             ((prior, value),) = self.policy.score_rows([(game, seat, options)])
             picked = max(range(len(options)), key=lambda i: prior[i])
             return options[tip_robber(options, prior, value, seat, picked, self.robber_tip)]
-        return self.policy.act_rows([(game, seat, options)])[0]
+        move = self.policy.act_rows([(game, seat, options)])[0]
+        if self.robber_hits and options[0].type is ActionType.MOVE_ROBBER:
+            ((prior, _),) = self.policy.score_rows([(game, seat, options)])
+            return options[_off_own_over(game, options, prior, options.index(move))]
+        return move
 
     @classmethod
     def choose_many(cls, pairs: Sequence[tuple["NetworkBot", Game]]) -> list[Action]:
@@ -186,8 +191,9 @@ class NetworkBot(trading.DeclaredTrade):
             seat = to_move(game)
             options = tuple(options_for(game))
             narrowed = hit_robber(game, options) if bot.robber_hits else options
+            robber = options[0].type is ActionType.MOVE_ROBBER
             how = ("narrowed" if len(narrowed) < len(options) else "sampled" if bot.temperature else
-                   "tipped" if bot.robber_tip and options[0].type is ActionType.MOVE_ROBBER else "top")
+                   "tipped" if bot.robber_tip and robber else "hits" if bot.robber_hits and robber else "top")
             options = narrowed
             groups.setdefault((id(bot.policy), how), []).append((i, bot, game, seat, options))
         for (_, how), members in groups.items():
@@ -198,8 +204,14 @@ class NetworkBot(trading.DeclaredTrade):
                 for (i, *_), action in zip(members, answers):
                     out[i] = action
             elif how == "narrowed":
-                for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
-                    out[i] = bot._scored_pick(options, prior, value, seat)
+                for (i, bot, game, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
+                    out[i] = bot._scored_pick(game, options, prior, value, seat)
+            elif how == "hits":
+                # `act_rows`' moves, each moved off the mover's hex only on an
+                # exact tie at the top of the prior (`_off_own_over`).
+                for (i, _, game, _, options), action, (prior, _) in zip(
+                        members, policy.act_rows(rows), policy.score_rows(rows)):
+                    out[i] = options[_off_own_over(game, options, prior, options.index(action))]
             elif how == "tipped":
                 for (i, bot, _, seat, options), (prior, value) in zip(members, policy.score_rows(rows)):
                     picked = max(range(len(options)), key=lambda k: prior[k])
@@ -209,11 +221,12 @@ class NetworkBot(trading.DeclaredTrade):
                     out[i] = action
         return out  # type: ignore[return-value]
 
-    def _scored_pick(self, options: Sequence[Action], prior, value, seat: int) -> Action:
+    def _scored_pick(self, game: Game, options: Sequence[Action], prior, value, seat: int) -> Action:
         """The move this seat plays from robber `options` it scored itself
-        (`score_rows`): the prior's best, or one drawn from it above
+        (`score_rows`): the prior's best, an exact tie at the top going to a
+        hex the seat is not on (`prefer_off_own`), or one drawn from it above
         `temperature` 0, then tipped to the leader (`robber_tip`)."""
-        picked = self._draw(prior) if self.temperature else max(range(len(options)), key=lambda i: prior[i])
+        picked = self._draw(prior) if self.temperature else _robber_pick(game, options, prior)
         if self.robber_tip:
             picked = tip_robber(options, prior, value, seat, picked, self.robber_tip)
         return options[picked]
@@ -665,18 +678,23 @@ class GatedSearch(_Gated, trading.DeclaredTrade, Search):
         robber = isinstance(first, Action) and first.type is ActionType.MOVE_ROBBER
         if self.gate.robber_hits and robber:
             # The tree's root holds every legal move: the most-visited one
-            # that hits, where any does.
+            # that hits, where any does; level on visits at the top with
+            # another that hits, one on a hex the mover is not on.
             hits = set(hit_robber(game, decision.options))
-            if decision.options[picked] not in hits:
-                picked = max((i for i, o in enumerate(decision.options) if o in hits),
-                             key=lambda i: (decision.visits[i], -i))
+            kept = [i for i, o in enumerate(decision.options) if o in hits]
+            if picked not in kept:
+                picked = max(kept, key=lambda i: (decision.visits[i], -i))
+            most = max(decision.visits[i] for i in kept)
+            if decision.visits[picked] == most:
+                level = [picked] + [i for i in kept if i != picked and decision.visits[i] == most]
+                picked = prefer_off_own(game, decision.options, level)[0]
         tip = self.gate.robber_tip
         if tip and robber:
             # The root's own prior and value: no forward beyond the search's.
             picked = tip_robber(
                 decision.options, decision.prior, decision.value, decision.seat, picked, tip
             )
-        return picked
+        return unbarred(game, decision, picked)
 
 
 class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
@@ -703,13 +721,26 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
 
     def _own(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
         """The policy's own move, as `PairedRollouts._own`; at a robber root
-        `root_options` narrowed, the prior's best of the narrowed moves: a
-        policy that keeps plans answers `act_rows` from the game's own options."""
-        if self.gate.robber_hits and options[0].type is ActionType.MOVE_ROBBER \
-                and len(options) < len(legal_actions(game)):
-            ((prior, _),) = self.policy.score_rows([(game, seat, options)])
-            return options[max(range(len(options)), key=lambda i: prior[i])]
-        return super()._own(game, seat, options)
+        `root_options` narrowed, the prior's best of the narrowed moves (a
+        policy that keeps plans answers `act_rows` from the game's own
+        options). Under `robber_hits`, an exact tie at the top of the prior
+        goes to a hex the mover is not on (`_off_own_over`)."""
+        if not (self.gate.robber_hits and options[0].type is ActionType.MOVE_ROBBER):
+            return super()._own(game, seat, options)
+        narrowed = len(options) < len(legal_actions(game))
+        move = None if narrowed else super()._own(game, seat, options)
+        ((prior, _),) = self.policy.score_rows([(game, seat, options)])
+        if move is None:
+            return options[_robber_pick(game, options, prior)]
+        return options[_off_own_over(game, options, prior, options.index(move))]
+
+    def prefer(self, game: Game, options: tuple, tied: Sequence[int]) -> tuple[int, ...]:
+        """Under `robber_hits`, of tied robber moves, those onto a hex the
+        mover is not on, where the tie holds both kinds (`prefer_off_own`);
+        otherwise `tied` whole (`PairedRollouts.prefer`)."""
+        if self.gate.robber_hits:
+            return prefer_off_own(game, options, tied)
+        return tuple(tied)
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
@@ -729,25 +760,65 @@ class GatedRollouts(_Gated, trading.DeclaredTrade, PairedRollouts):
 
 
 def hit_robber(game: Game, options: Sequence[Action]) -> tuple[Action, ...]:
-    """`options`, less every robber move onto a hex where the mover has a
-    building or no other seat has one, when some robber move lands on a hex
-    where another seat has a building and the mover has none.
+    """`options`, less every robber move onto a hex where no other seat has a
+    building (an empty hex, the desert, or a hex the mover holds alone), when
+    some robber move lands on a hex where another seat has one.
 
-    The robber is never put on the mover's own hexes by this rule: where
-    every hex another seat is on holds a building of the mover's too, or no
-    legal hex holds another seat's (a friendly robber shielding everyone,
-    say), `options` stand whole, as they do for any decision that is not a
-    robber move. Whether a seat holds cards does not matter: the robber on
-    its hex blocks its production either way. Buildings are public, so this
-    reads nothing the mover cannot see."""
+    A hex another seat shares with the mover stays. Where no legal hex holds
+    another seat's building (a friendly robber shielding everyone, say),
+    `options` stand whole, as they do for any decision that is not a robber
+    move, so the rule only ever takes moves away. Whether a seat holds cards
+    does not matter: the robber on its hex blocks its production either way.
+    Buildings are public, so this reads nothing the mover cannot see.
+
+    Among the moves that remain, a tie goes to a hex the mover is not on
+    (`prefer_off_own`)."""
     options = tuple(options)
     if not options or options[0].type is not ActionType.MOVE_ROBBER:
         return options
     mover = to_move(game)
     state = game.state(mover).state  # only the board's buildings are read: public to every seat
     on = {h: occupants(state, h) for h in {o.a for o in options}}
-    clean = tuple(o for o in options if mover not in on[o.a] and any(p != mover for p in on[o.a]))
-    return clean or options
+    hits = tuple(o for o in options if any(p != mover for p in on[o.a]))
+    return hits or options
+
+
+def prefer_off_own(game: Game, options: Sequence, tied: Sequence[int]) -> tuple[int, ...]:
+    """Of `tied`, indices into `options`, those that are robber moves onto a
+    hex with none of the mover's buildings, where `tied` holds such a move
+    and also one onto a hex the mover is on; otherwise `tied` whole. Order is
+    kept, so the first index left is the one the caller's own tie-break
+    reaches first. Options that are not robber moves are never set aside."""
+    tied = tuple(tied)
+    if len(tied) < 2:
+        return tied
+    mover = to_move(game)
+    state = game.state(mover).state  # only the board's buildings are read: public to every seat
+    off = tuple(
+        i for i in tied
+        if not (isinstance(options[i], Action) and options[i].type is ActionType.MOVE_ROBBER
+                and mover in occupants(state, options[i].a))
+    )
+    return off if off and len(off) < len(tied) else tied
+
+
+def _off_own_over(game: Game, options: Sequence[Action], prior, picked: int) -> int:
+    """`picked`, an index into robber `options`; or, where it lies on a hex
+    the mover is on and ties exactly at the top of `prior` with a move onto
+    a hex the mover is not on, the first such move (`prefer_off_own`)."""
+    top = max(float(p) for p in prior)
+    tied = [i for i in range(len(options)) if float(prior[i]) == top]
+    if picked not in tied:
+        return picked
+    kept = prefer_off_own(game, options, tied)
+    return picked if picked in kept else kept[0]
+
+
+def _robber_pick(game: Game, options: Sequence[Action], prior) -> int:
+    """The prior's best of robber `options`, the earlier on a tie, then
+    `_off_own_over`."""
+    best = max(range(len(options)), key=lambda i: prior[i])
+    return _off_own_over(game, options, prior, best)
 
 
 def tip_robber(

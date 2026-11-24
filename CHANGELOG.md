@@ -5,6 +5,34 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.40.0
+
+### Added
+
+- **Barred moves.** `Game.barred` holds moves a host refused at the
+  position at hand: `legal_actions` leaves them out, so a bot asked again
+  gives its next best, and `apply` clears them with the next action.
+  `Seat.bar(actions)` sets them on a seat's game; `imagine` copies them; an
+  MCTS search whose root is a native world plays the most visited option not
+  barred (`mcts.unbarred`). `decisions.options` and `decisions.tensors` leave
+  out a setup turn whose settlement is barred (on a double turn, from both
+  halves) and a discard whose first card is barred, and `decisions.Plans`
+  continues no plan at a position with a barred move, so a decision graph
+  asked again decides afresh among the moves left.
+
+### Fixed
+
+- **`robber_hits` keeps a hex the mover shares with another seat.**
+  `hexset.clients.netbot.hit_robber` drops a robber move only onto a hex
+  where no other seat has a building (an empty hex, the desert, or a hex
+  where the mover alone has one), where some legal hex holds another seat's
+  building; where none does, every move stays. A tie among the moves left
+  goes to a hex the mover is not on (`netbot.prefer_off_own`): one forward
+  on an exact tie of the top prior, paired rollouts among the candidates
+  their `tie` rule finds tied and on an exact tie of the best mean score
+  (through the new `PairedRollouts.prefer` hook), and MCTS on a tie of
+  visits at the top.
+
 ## 1.39.0
 
 ### Breaking

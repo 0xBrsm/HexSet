@@ -81,7 +81,8 @@ that move's by more than `margin` standard errors of their paired
 difference. Where the game is decided, every move scores alike and the lead
 decides; where it is not, the scores' error is wider than `tie` and nothing
 changes. It is on by default (`TIE`, 0.005) wherever a margin is; `tie` 0
-turns it off.
+turns it off. A subclass's `prefer` may set some of the tied candidates
+aside first; the lead then decides among the rest.
 """
 
 from __future__ import annotations
@@ -612,7 +613,8 @@ class PairedRollouts:
             played = ()
             scores = table.mean(axis=0)
             leads = None if lanes.leads is None else lanes.leads.reshape(self.worlds, len(candidates))
-        best = max(range(len(candidates)), key=lambda j: (scores[j], -j))
+        top = max(scores)
+        best = self._preferred(game, options, candidates, [j for j in range(len(candidates)) if scores[j] == top])[0]
         picked = best
         if margin:
             # The policy's own move, and the candidates still in play at the last world.
@@ -624,7 +626,10 @@ class PairedRollouts:
             # candidates that win alike with the policy's own move.
             tied = tuple(j for j in alive[1:] if _tied(table, j, margin, tie))
             if tied:
-                among = [0, *tied]
+                # A rule of the seat's may set some of the tied moves aside
+                # (`prefer`); the lead decides among the rest, the first of
+                # them standing where none clears it.
+                among = self._preferred(game, options, candidates, [0, *tied])
                 picked = among[_clearing(leads[:, among], leads[:, among].mean(axis=0), margin)]
         held_back = bool(margin) and picked != best
         decision = Decision(
@@ -725,6 +730,22 @@ class PairedRollouts:
         `robber_hits`) narrows them here, so the prior, the policy's own move
         and the candidates searched are all of the narrowed set."""
         return tuple(legal_actions(game))
+
+    def prefer(self, game: Game, options: tuple, tied: Sequence[int]) -> tuple[int, ...]:
+        """Which of `tied`, indices into the root's `options` that a decision
+        found tied, a seat's rule keeps, in order: every one here. A subclass
+        with a rule for ties (`hexset.clients.netbot`'s `robber_hits`) returns
+        a non-empty subset; the decision's own tie-break then decides among
+        those kept."""
+        return tuple(tied)
+
+    def _preferred(self, game: Game, options: tuple, candidates: tuple[int, ...],
+                   columns: Sequence[int]) -> list[int]:
+        """`prefer` over candidate `columns` (indices into `candidates`), in order."""
+        if len(columns) < 2:
+            return list(columns)
+        kept = set(self.prefer(game, options, [candidates[j] for j in columns]))
+        return [j for j in columns if candidates[j] in kept] or list(columns)
 
     def _own(self, game: Game, seat: int, options: tuple[Action, ...]) -> Action:
         """The policy's own move at the root, as it plays alone (`act_rows`):

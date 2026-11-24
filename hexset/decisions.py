@@ -150,12 +150,18 @@ def opens(game: Game, action: Action) -> CompoundKind | None:
 
 
 def _setup_pairs(game: Game) -> list[tuple[int, int]]:
-    """Every legal (settlement, road) of the setup turn at hand."""
+    """Every legal (settlement, road) of the setup turn at hand. A settlement
+    a host refused at this position (`Game.barred`) is left out, as
+    `legal_actions` leaves it out; on a double turn, from both halves, since
+    `Decision.setup` is one mask for both."""
     state = game._state
     player = game.current_player
     topology = state.board.topology
+    barred = game.barred
     out = []
     for v in range(topology.num_vertices):
+        if barred and Action(ActionType.SETUP_SETTLEMENT, v) in barred:
+            continue
         if can_place_settlement(state, player, v, connected=False):
             out.extend((v, e) for e in topology.vertex_edges[v] if state.edge_owner[e] == NO_OWNER)
     return out
@@ -173,6 +179,16 @@ def _discards(hand: Sequence[int], quota: int) -> list[tuple[int, ...]]:
         if sum(counts) == quota:
             out.append(counts)
     return out
+
+
+def _open_discards(game: Game, seat: int) -> list[tuple[int, ...]]:
+    """`seat`'s whole discards at this position (`_discards` of what it still
+    owes), less those whose first card a host refused here (`Game.barred`),
+    as `legal_actions` leaves that card out."""
+    given = _discards(game._state.hands[seat], game.discard_quota[seat])
+    if not game.barred:
+        return given
+    return [d for d in given if not set(discard_parts(d)[:1]) & game.barred]
 
 
 def discard_parts(counts: Sequence[int]) -> tuple[Action, ...]:
@@ -260,7 +276,7 @@ def options(game: Game, seat: int | None = None, *, double_turn: bool = True) ->
     if game.phase is Phase.DISCARD:
         # What the seat still owes: all of its quota, or the rest of a
         # discard it began a card at a time.
-        given = _discards(game._state.hands[seat], game.discard_quota[seat])
+        given = _open_discards(game, seat)
         return [Compound(CompoundKind.DISCARD, discard_parts(d)) for d in given]
     atomic = legal_actions(game, seat)
     if pending_free_roads(game) or game.phase is Phase.SETUP_ROAD:
@@ -441,7 +457,7 @@ def tensors(game: Game, seat: int, space: ActionSpace, *, double_turn: bool = Tr
         double = double_turn and is_double_turn(game)
     elif game.phase is Phase.DISCARD:
         hand = state.hands[seat]
-        given = _discards(hand, game.discard_quota[seat])
+        given = _open_discards(game, seat)
         discard = np.asarray([[h - d for h, d in zip(hand, g)] + list(g) for g in given],
                              dtype=np.int8).reshape(-1, 2 * NUM_RESOURCES)
     else:
@@ -708,11 +724,20 @@ class Plans:
 
         plans[key] = (weakref.ref(game, gone), seat, rest)
 
+    @staticmethod
+    def _held(plan, game: Game, seat: int, options: Sequence[Action]) -> bool:
+        """Whether `plan` is `seat`'s at `game` and its next move is among
+        `options`. Not at a position where a host refused a move
+        (`Game.barred`): the refused move was the plan's own (its first part,
+        or the next it played), so the game never took the decision the plan
+        continues, and the seat decides again."""
+        return (plan is not None and plan[0]() is game and plan[1] == seat and bool(plan[2])
+                and plan[2][0] in options and not (isinstance(game, Game) and game.barred))
+
     def planned(self, game: Game, seat: int, options: Sequence[Action]) -> bool:
         """Whether `act` would answer `seat` at `game` from a plan it holds,
         without asking `decide` or `finish`. Changes nothing."""
-        plan = self._plans.get(id(game))
-        return plan is not None and plan[0]() is game and plan[1] == seat and bool(plan[2]) and plan[2][0] in options
+        return self._held(self._plans.get(id(game)), game, seat, options)
 
     def peek(self, game: Game, seat: int) -> tuple[Action, ...]:
         """The moves left of `seat`'s plan at `game`, in order; none where it
@@ -736,7 +761,7 @@ class Plans:
     def act(self, game: Game, seat: int, options: Sequence[Action], decide, finish) -> Action:
         """`seat`'s move at `game` from `options`, its legal atomic moves."""
         plan = self._plans.pop(id(game), None)
-        if plan is not None and plan[0]() is game and plan[1] == seat and plan[2] and plan[2][0] in options:
+        if self._held(plan, game, seat, options):
             rest = plan[2][1:]
             if rest:
                 self._keep(game, seat, rest)

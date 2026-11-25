@@ -60,7 +60,7 @@ from ..actions import Action, ActionSpace, Stuck, apply, legal_actions, options_
 from ..economy import hand_size
 from ..arena import MAX_ACTIONS, ClearedTrade, deal_game, game_key, seat_key
 from ..board.board import BOARD_MODES, Board
-from ..bots.base import chooses_many, watch, watches
+from ..bots.base import chooser, chooses_many, watch, watches
 from ..game import MAX_TURNS, Game, Phase, is_over, players_owing_discards, to_move
 from ..record import Record, Tape, recording
 from .distribution import Deal
@@ -784,15 +784,17 @@ class LaneEnv:
         """`chosen` with every unanswered request played by its seat's bot:
         each bot on its own, in request order, but every bot of a class that
         chooses for many (`hexset.bots.ChoosesMany`) in one call for the class,
-        its bots in request order."""
+        its bots in request order. A wrapped seat (`hexset.bots.chooser`: a
+        `Dealing` or `TradesBy` seat) is batched by the part that chooses
+        for it."""
         out = list(chosen)
         together: dict[type, list[int]] = {}
         for i, (request, action) in enumerate(zip(requests, chosen)):
             if action is not None:
                 continue
             bot = self._bot(request)
-            if chooses_many(bot):
-                together.setdefault(type(bot), []).append(i)
+            if chooses_many(chooser(bot)):
+                together.setdefault(type(chooser(bot)), []).append(i)
                 continue
             with self._asked(request):
                 out[i] = bot.choose(request.game)
@@ -800,7 +802,7 @@ class LaneEnv:
             with ExitStack() as stack:
                 for i in share:
                     stack.enter_context(self._asked(requests[i]))
-                answers = list(kind.choose_many([(self._bot(requests[i]), requests[i].game) for i in share]))
+                answers = list(kind.choose_many([(chooser(self._bot(requests[i])), requests[i].game) for i in share]))
             if len(answers) != len(share):
                 raise ValueError(f"{kind.__name__}.choose_many answered {len(answers)} of {len(share)} bots")
             for i, action in zip(share, answers):

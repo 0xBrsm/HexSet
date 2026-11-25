@@ -114,3 +114,31 @@ def test_one_call_a_tick_each_bot_at_its_own_game():
     for call in Together.calls:
         games = [game for game, _ in call]
         assert len(games) == len(set(games))
+
+
+def wrapped(kind):
+    """`kind`'s seat over a second `kind`'s trading, under robber-deal
+    settings: the seat `hexset.arena.spawn` builds for
+    `<mover>~<trader>^<deals>`. Both halves trade alike, so the games are the
+    bare seat's."""
+    from hexset.bots import TradesBy
+    from hexset.deals import DealParams, Dealing
+
+    def make(rng):
+        return Dealing(TradesBy(kind(rng), kind(random.Random(rng.getrandbits(64)))), DealParams(), 0)
+
+    return make
+
+
+def test_a_wrapped_seat_is_batched_and_watched_as_its_mover():
+    """A `Dealing` over a `TradesBy` seat chooses as its mover: lanes batch it
+    by the mover's class, and the mover sees every move (`watch`), so the games
+    are the bare seat's."""
+    from hexset.bots import chooser, chooses_many
+
+    seat = wrapped(Together)(random.Random(0))
+    assert isinstance(chooser(seat), Together) and chooses_many(chooser(seat))
+    alone = play(Alone, 1)
+    Together.calls = []
+    assert play(wrapped(Together), 4) == alone
+    assert any(len(call) > 1 for call in Together.calls), "the wrapped seats were not asked together"

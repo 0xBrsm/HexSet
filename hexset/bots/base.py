@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Collection, Protocol, Sequence
 
 from ..actions import Action, options_for
+from ..deals import Dealing
 from ..game import Game, Phase
 from ..trading import (
     RESPONSE_ACCEPT, RESPONSE_COUNTER, RESPONSE_PASS, Bundle, Response, clears_floor, valued_many,
@@ -35,6 +36,7 @@ __all__ = [
     "Closes",
     "PlaysAgainst",
     "ChoosesMany",
+    "chooser",
     "chooses_many",
     "seat_at",
     "play_against",
@@ -295,6 +297,9 @@ def seat_at(bot: object, game: Game) -> None:
     `Handoff`, and the mover and closer of a `Closes` seat, so a gate asked
     about a trade before its first move prices it on `game`. Other bots have
     nothing to seat."""
+    if isinstance(bot, Dealing):
+        seat_at(bot.bot, game)
+        return
     if isinstance(bot, Closes):
         seat_at(bot.mover, game)
         seat_at(bot.closer, game)
@@ -322,6 +327,9 @@ def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> N
     is applied, as seen from `viewer`'s seat. What a bot that models the
     other seats from their moves (`hexset.clients.netbot.rollouts_for`'s
     `opponents`) learns from; other bots see nothing."""
+    if isinstance(bot, Dealing):
+        watch(bot.bot, game, actor, action, viewer)
+        return
     if isinstance(bot, Closes):
         watch(bot.mover, game, actor, action, viewer)
         return
@@ -343,6 +351,8 @@ def watch(bot: object, game: Game, actor: int, action: Action, viewer: int) -> N
 
 def watches(bot: object) -> bool:
     """Whether any part of `bot` has a `seen` (`watch`): a table asks no one else."""
+    if isinstance(bot, Dealing):
+        return watches(bot.bot)
     if isinstance(bot, Closes):
         return watches(bot.mover)
     if isinstance(bot, TradesBy):
@@ -373,6 +383,21 @@ class ChoosesMany(Protocol):
 def chooses_many(bot: object) -> bool:
     """Whether ``bot``'s own class has a ``choose_many`` (``ChoosesMany``)."""
     return getattr(type(bot), "choose_many", None) is not None
+
+
+def chooser(bot: object) -> object:
+    """The part of ``bot`` whose ``choose`` answers for it: through a
+    ``hexset.deals.Dealing`` seat to its bot and through a ``TradesBy`` seat
+    to its mover, each of which chooses exactly as that part does; ``bot``
+    itself otherwise. A table that batches ``ChoosesMany`` classes batches a
+    wrapped seat by this part."""
+    while True:
+        if isinstance(bot, Dealing):
+            bot = bot.bot
+        elif isinstance(bot, TradesBy):
+            bot = bot.mover
+        else:
+            return bot
 
 
 class PlaysAgainst(Protocol):

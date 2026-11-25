@@ -392,6 +392,17 @@ def _two_sided(received: object) -> bool:
     return any(n > 0 for n in received) and any(n < 0 for n in received)
 
 
+def _asks_one(received: object) -> bool:
+    """Whether `received` is one integer count per resource asking for one
+    card and giving none: an open offer, "any card for this", when a gate's
+    menu holds it (`offer`)."""
+    if not isinstance(received, (tuple, list)) or len(received) != NUM_RESOURCES:
+        return False
+    if any(isinstance(n, bool) or not isinstance(n, Integral) for n in received):
+        return False
+    return all(n >= 0 for n in received) and sum(received) == 1
+
+
 def _gives_only(received: object) -> bool:
     """Whether `received` is one integer count per resource with cards
     moving only away from its proposer: an open offer, "this for any card",
@@ -928,11 +939,12 @@ def counter_menu(gate: object, view: "View", actor: int) -> list[tuple[int, Bund
 def _well_formed(view: "View", received: object, open_offers: bool = False) -> bool:
     """Whether a gate-supplied bundle is one the actor can put to the table:
     right width, integer counts, both sides nonempty and disjoint -- or, at a
-    table that takes open offers (`open_offers`), a giving side alone (an
-    open offer, `_gives_only`) -- and the giving side covered by the actor's
-    own hand. A menu is the gate's word; this is the shape check the
-    engine's own enumeration gives for free."""
-    if not (_two_sided(received) or (open_offers and _gives_only(received))):
+    table that takes open offers (`open_offers`), a giving side alone or one
+    card asked for alone (an open offer, `_gives_only`, `_asks_one`) -- and
+    the giving side covered by the actor's own hand. A menu is the gate's
+    word; this is the shape check the engine's own enumeration gives for
+    free."""
+    if not (_two_sided(received) or (open_offers and (_gives_only(received) or _asks_one(received)))):
         return False
     hand = view.known[view.perspective]
     return all(max(-n, 0) <= int(h) for n, h in zip(received, hand))
@@ -967,11 +979,14 @@ def offer(
     for that card no more this turn (`Game.open_asks`). At a table that takes
     no open offers (`Game.open_offers` false) the one-for-one goes up as it is.
 
-    A gate may also put an open offer up itself: a bundle in its menu that
-    only gives ("this for any card") goes up as `Offer(actor, received, 1)`,
-    the answerer naming the one card it gives back, at a table that takes
-    open offers; elsewhere it is not on the menu. It counts as one offer and
-    is never folded.
+    A gate may also put an open offer up itself, at a table that takes open
+    offers (elsewhere neither is on the menu): a bundle in its menu that only
+    gives ("this for any card") goes up as `Offer(actor, received, 1)`, the
+    answerer naming the one card it gives back; a bundle that only asks for
+    one card ("any card for this") goes up as `Offer(actor, received, -1)`,
+    the answerer naming the one card it takes, and closes asks for that card
+    this turn as an open ask does (`Game.open_asks`). Each counts as one
+    offer and is never folded.
     """
     from ..game import Phase  # local: avoids a game/trading import cycle
 
@@ -1030,6 +1045,10 @@ def offer(
         already_offered.add(received)
     if _gives_only(received):
         return Offer(me, received, 1)
+    if _asks_one(received):
+        card = next(r for r, n in enumerate(received) if n > 0)
+        game.open_asks[me] = (game.turns, card, (received,))
+        return Offer(me, received, -1)
     params = params_of(gate)
     # A planned gate's menu is its plan's next fragment, which a look ahead
     # never folds, so it is not asked again for one.

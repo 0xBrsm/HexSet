@@ -5,6 +5,29 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.42.0
+
+### Added
+
+- **A gate may put up "any card for this" itself.** At a table that takes
+  open offers, a bundle in a gate's menu that only asks for one card goes up
+  as `Offer(actor, received, -1)`, the answerer naming the card it takes. It
+  counts as one offer, is never folded, and closes the gate's asks for that
+  card this turn as an open ask does (`Game.open_asks`).
+
+- **`hexset.bots.chooser`**: the part of a seat whose `choose` answers for
+  it, through `Dealing` to its bot and through `TradesBy` to its mover.
+  `hexset.gym.lanes.LaneEnv` batches a wrapped seat by that part, so a
+  `ChoosesMany` mover with its own trader or deal settings is still asked in
+  one call a tick with the other seats of its class.
+
+### Fixed
+
+- **A seat that makes robber deals sees the table.** `hexset.bots.watch`,
+  `watches` and `seat_at` walk a `hexset.deals.Dealing` seat to the bot it
+  wraps, so a mover that reads every move (`seen`) or seats a gate keeps doing
+  so under a `^<deal spec>`.
+
 ## 1.41.0
 
 ### Added

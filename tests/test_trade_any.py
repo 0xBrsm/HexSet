@@ -342,6 +342,26 @@ def test_a_giving_side_the_hand_does_not_cover_is_not_on_the_menu():
     assert made is None
 
 
+ASK_ORE = (0, 0, 0, 0, 1)
+
+
+def test_a_menus_one_card_ask_alone_goes_up_as_any_card_for_this_counting_as_one_offer():
+    """A bundle that only asks for one card is an open offer the gate puts up
+    itself: `Offer(actor, received, -1)`, one offer, never folded, and the
+    gate's asks for that card are closed for the turn as an open ask closes
+    them; at a table taking no open offers it is off the menu."""
+    from hexset.trading import offer_slots
+    game, offered = _asking(), set()
+    gates = [_Lister((ASK_ORE, WOOD_ORE, WOOD_WHEAT)), None, None, None]
+    made = offer(game, gates, offered, slots_left=3)
+    assert made == Offer(0, ASK_ORE, any=-1) and offer_slots(game, made) == 1 and ASK_ORE in offered
+    following = offer(game, gates, offered, slots_left=2)
+    assert following == Offer(0, WOOD_WHEAT)                    # the ore ask is closed for the turn
+    game = _asking()
+    game.open_offers = False
+    assert offer(game, [_Lister((ASK_ORE, WOOD_ORE)), None, None, None], set(), slots_left=1) == Offer(0, WOOD_ORE)
+
+
 def test_this_for_any_card_executes_the_counter_naming_the_card_given_back():
     game = _game((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     state = game.state(0, hidden=False)

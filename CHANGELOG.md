@@ -5,6 +5,148 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.43.0
+
+### Breaking
+
+- **A model file shows clients only its name, version and label.** `GET
+  /api/models` and the rankings no longer serve the `commit`, `owner`, `url`
+  or `description` a model file declares (`api.SERVED_PROFILE_KEYS`); a
+  preset's registered profile is served as before. The page's bot cards show
+  a description only where one is served.
+
+### Added
+
+- **A runtime can supply a guide for a page seat: `hexset.guides`,
+  `--guide-model`, `POST /api/guide`, `POST /api/hint` and `POST
+  /api/flag`.** HexSet includes no guide. A runtime registers the module
+  that provides one (`hexset.guides.register_guide`; `hexset.guides` lists
+  the functions it defines). With one registered and `--guide-model` naming
+  the model it reads with, a page seat at an unranked duel can turn it on,
+  ask it for a hint and flag one of its cards for review; without one, no
+  table offers a guide and the page's requests to these routes answer 409.
+  The view's `guide`
+  carries what the guide returns: its hint, a note on each move the seat
+  plays and the seat's win chance. The journal keeps each use and each note,
+  and a table reopened from its journal keeps its notes
+  ([api.md](docs/api.md#guide)).
+
+- **`POST /api/takeback`: a page seat takes the game back to just before its
+  last move**, however far back and whoever moved since, at a table that
+  offers a guide. Where the moves taken back include a roll, a card drawn or
+  a steal, the chance is drawn afresh from there: the journal's `reseed` line,
+  applied by every replay (`GameSession.restore`'s `reseeds`,
+  `_journal.reseeds`), and `hexset.chance.Live.reseed`.
+  `GameSession.transplant` takes a replayed position as a live session's own.
+
+- **Play from here: `POST /api/playfrom`.** A page seat at an unranked table
+  that offers a guide opens a new table playing its game on from any past
+  position, finished game or not: the same board and seats, the guide on,
+  the moves before kept as the new game's history and the chance drawn
+  afresh from there. On the page, at a past position, the board's undo
+  asks to play on from there and does so once confirmed; the seat's piece
+  supply and corner buttons show there as in play. The new table's views carry `branch`, the game and round it
+  came from; the page says "New game from round N" on arrival, and its
+  History lists it as a practice game from that round.
+  `hexset.server._journal.branched` writes the new game's journal
+  ([api.md](docs/api.md#guide)).
+
+- **Replay a step at a time: `?step=N` and `GET /api/table/<code>/timeline`.**
+  The replay view reads the position after any number of steps, and the
+  timeline gives each step's round, actor and action type, and for a seat
+  its guide's chance after each step and its graded moves. The page's
+  replay bar is a strip of the game that a tap or drag moves through, with
+  the round beside it, which returns to the game; a swipe across the board or an arrow key
+  steps one move, and a row of the guide's review opens the position before
+  that move ([api.md](docs/api.md#state)).
+
+- **A replayed decision shows its hint and every move played there.** A
+  seat's replay view carries `replay.hint`, the hint its guide gave there,
+  and `replay.played`, each move the seat played there with its note, kept or
+  taken back. The page shows the hint at once, with its cards, and gives any
+  other move played a bubble of its grade and its note's card.
+
+- **The page shows a registered guide.** Where a table offers a guide, round
+  buttons in the board's top-left corner turn it on and off and ask for a
+  hint. The page rings a hint's moves on the board, puts a bubble with each
+  note's grade at the move it is on, opening the note's card, draws the
+  seat's win chance over the game in the replay bar's strip, and opens a
+  review of the game's key moments beside a graph of the win chance
+  ([api.md](docs/api.md#on-the-page)). Where no guide is offered, none of
+  this shows.
+
+- **`hexset.endings`: how each playout ended.** `RolloutBatch`, `play_lanes`,
+  `RolloutPool.play` and `PairedRollouts._lanes` take `endings=True` and
+  return one row per copy in `Lanes.endings` (points, awards, cards
+  discarded to sevens, buildings, income and hand by resource, development
+  cards, ports, room to build, who holds each vertex, the robber's hex and
+  the pips it keeps from each side), and a trace of what the playout did
+  (the seat's first build, the other seats' first settlement, the Knights
+  played, the development cards bought and the first robber hex: `TRACE`,
+  counted by `follow`), without changing any move or score. Native and
+  Python copies give the same rows.
+
+- **`hexset.board.spots`: a name for every spot.** `spot_names(board)` names
+  every vertex by its numbers so that no two on one board share a name
+  ("6-8-3", "11 wheat spot", "8-5-10 at the wheat 8"); `GET /api/board`
+  carries them as `spots`.
+
+- **The registered guide decides who may use it.** A guide provider
+  (`hexset.guides`) may refuse the guide's routes (`clear`), stamp the page
+  as it is served with a page token and a Cloudflare Turnstile site key
+  (`stamp_page`), read the token the page sends in `X-HexSet-Page`
+  (`page_id`, `pages_required`), and answer the page's check (`POST
+  /api/page`, `page_check`) ([api.md](docs/api.md#who-may-use-the-guide)).
+
+- **`onnxbot.rollout_search`: a file's paired-rollout search on its own.**
+  It returns the search a checkpoint declares, with no closer or trader in
+  front of it, and the closer the file names.
+
+- **The page's sidebar can be dragged wider on a desktop.** Its left edge is
+  a handle: from 360 pixels, the width as drawn before, to 720 or half the
+  window, kept in the browser; a double-click puts it back. The board fits
+  the room left.
+
+- **The page marks cards lost to a discard or a steal.** The inverse of a
+  card gained: the card dims and a red ring leaves it, its count dipping, and
+  a kind the seat no longer holds fades out where it stood. Cards spent or
+  traded away are not marked.
+
+### Changed
+
+- **The page's discard window takes the whole discard, then Confirm.** A tap
+  on a card adds one of it to the discard and the "−" under it takes one
+  back; Confirm sends the cards once the discard holds as many as are owed.
+  With the guide's hint up, a tap on a hinted discard's bubble opens its card
+  and a tap on its cards picks that discard. While the guide offers a take
+  back, the window has its own Take back button.
+
+- The page's sound and guide toggles are 40 pixels on a phone, up from 34;
+  the guide's toggle is drawn as a compass with a needle and four ticks; and
+  a card's "You played this move" line is set in italics. A resource or
+  development card the seat gains is marked in its hand for 0.9 seconds: a
+  ring that settles onto the card and fades, the card brightened, its count
+  enlarged a moment; a kind the seat did not hold fades in. Nothing runs with
+  reduced motion, at a past position, or when another seat's row is opened.
+
+- **A click on the board no longer cuts a turn's playback short.** It does
+  nothing while a turn plays, except on the guide's bubbles and the corner
+  toggles.
+
+- **End turn keeps its corner on the page** through the other seat's turn and
+  any phase without it, greyed out like the deck; the roll button takes the
+  corner while the seat has a roll to make.
+
+### Fixed
+
+- **A replay stops between a Knight and its robber move**, the robber move
+  owed, where it was a 500, and a journal that stops there reopens.
+  `GameSession.restore` takes `split_last`.
+
+- **The page's game log and card counts read a discard the feed sends
+  alone**, as well as discards run together; one sent alone stopped the
+  page's playback with a script error.
+
 ## 1.42.0
 
 ### Added

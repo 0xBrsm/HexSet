@@ -359,8 +359,9 @@ A bot may also take part in these, each optional:
   everywhere else; every trade hook stays the mover's. A closer is meant to
   be narrow and deterministic, such as a rule that finds a finish the
   mover's hand holds this turn. `hexset.arena.closed(bot, name, board, rng)`
-  builds one from a lineup name, and a checkpoint names one with its
-  `closer` metadata ([onnx.md](onnx.md#how-it-plays)).
+  builds one from a lineup name (`hexset.arena.closer_for(name, board, rng)`
+  the closer alone), and a checkpoint names one with its `closer` metadata
+  ([onnx.md](onnx.md#how-it-plays)).
 - **Choosing for many.** A bot class with a classmethod `choose_many(pairs)`
   (`hexset.bots.ChoosesMany`) is asked once a tick by `LaneEnv` for every
   one of its bots that is to move, `(bot, game)` pairs in lane order, and

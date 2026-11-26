@@ -142,6 +142,31 @@ class NativePlayout(unittest.TestCase):
                 self.assertEqual((native.steps, native.row_steps, native.mark_row_steps, native.truncated),
                                  (python.steps, python.row_steps, python.mark_row_steps, python.truncated))
 
+    def test_endings_held_natively_read_as_the_python_ones(self):
+        """Each copy's ending row (`hexset.endings`), discards and all, is the
+        same read off a native copy as off its Python twin, playouts to the
+        end included."""
+        for players in (2, 4):
+            with self.subTest(players=players):
+                game = discarding(players)
+                space = space_of(game)
+                policy = Probe(space, contract_of(players))
+                seat = to_move(game)
+                moves = tuple(legal_actions(game))[:2]
+                tasks = [(game, 19), (game, 29)]
+
+                def lanes(native, horizon):
+                    with mock.patch.object(rollout, "copyable", lambda *a: native and real(*a)):
+                        batch = RolloutBatch.from_tasks(policy, tasks, moves, seat, game.turns, endings=True)
+                        return batch.advance(horizon)
+
+                real = rollout.copyable
+                for horizon in (3, None):
+                    python, native = lanes(False, horizon), lanes(True, horizon)
+                    np.testing.assert_array_equal(native.outcomes, python.outcomes)
+                    np.testing.assert_array_equal(native.endings, python.endings)
+                    self.assertTrue((python.endings[:, 0:2].sum(axis=1) <= 1).all())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -505,8 +505,15 @@ def closed(bot: Bot, closer: str | None, board: Board, rng: random.Random) -> Bo
         return bot
     from .bots import Closes
 
+    return Closes(bot, closer_for(closer, board, rng))
+
+
+def closer_for(closer: str, board: Board, rng: random.Random):
+    """The closer named `closer` (as a lineup names it), built bare for
+    `board` and seeded off `rng`'s state without drawing from it: the object
+    whose `closing(game)` `hexset.bots.Closes` asks first."""
     seed = int.from_bytes(hashlib.sha256(repr(rng.getstate()).encode() + b"closer").digest()[:8], "big")
-    return Closes(bot, _spawn(entrant_from_name(closer), board, random.Random(seed)))
+    return _spawn(entrant_from_name(closer), board, random.Random(seed))
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:

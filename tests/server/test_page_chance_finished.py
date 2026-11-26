@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The win chance at a finished game and at a past round, in a real browser:
-the seat's line keeps its row and shows the read at the game's last position
-still in play, or at the round being read; the corner keeps only the win
-chance's toggle once the game is over. Skipped without Playwright or
+"""A finished game and its past rounds, in a real browser, show no win
+chance: the bar is the guide's, and only while a game is live. The corner
+keeps the sound toggle once the game is over. Skipped without Playwright or
 onnxruntime.
 """
 
@@ -90,24 +89,7 @@ def browser():
             chromium.close()
 
 
-def _top(page, selector: str) -> float:
-    return page.eval_on_selector(selector, "(el) => el.getBoundingClientRect().top")
-
-
-# The colour the chance bar is filled in, beside the seat's own.
-_BAR_AND_SEAT = """
-() => {
-  const probe = document.createElement("i");
-  probe.style.color = SEAT_COLORS[liveView().seat].fill;
-  document.body.appendChild(probe);
-  const seat = getComputedStyle(probe).color;
-  probe.remove();
-  return [getComputedStyle(document.querySelector("#chance .chance-fill")).backgroundColor, seat];
-}
-"""
-
-
-def test_a_finished_game_and_its_past_rounds_keep_the_seats_chance(finished_game, browser):
+def test_a_finished_game_and_its_past_rounds_show_no_chance(finished_game, browser):
     with serving(PORT, str(finished_game)):
         context = browser.new_context()
         context.add_init_script(
@@ -120,32 +102,32 @@ def test_a_finished_game_and_its_past_rounds_keep_the_seats_chance(finished_game
         try:
             with page.expect_response(lambda r: "/api/reclaim" in r.url):
                 page.goto(f"{BASE_URL}/{CODE.lower()}", wait_until="load")
-            page.wait_for_selector("#chance.show")
-            assert page.evaluate("() => state.game_over") is True
-            final = page.inner_text("#chance .chance-pct")
-            assert final.endswith("%") and 0 <= int(final[:-1]) <= 100
-            log_top = _top(page, "#log")
-            # The bar is the seat's own colour, at the end and at every round.
-            bar, seat = page.evaluate(_BAR_AND_SEAT)
-            assert bar == seat
-
-            # Over, the corner keeps both: sound is set between games too.
-            assert page.is_visible("#chance-toggle")
+            page.wait_for_function("() => state && state.game_over === true")
+            assert page.inner_text("#replay-pct") == ""
+            # Over, the corner keeps sound: it is set between games too.
             assert page.is_visible("#sound-toggle")
+            assert page.query_selector("#chance-toggle") is None
 
-            # A past round shows that round's read, in the same row.
-            page.click("#replay-prev")
-            page.wait_for_function("() => state.replay && state.chance && typeof state.chance.chance === 'number'")
-            page.wait_for_selector("#chance.show")
-            shown = page.inner_text("#chance .chance-pct")
-            assert shown == f"{round(page.evaluate('() => state.chance.chance') * 100)}%"
-            assert page.evaluate(_BAR_AND_SEAT) == [seat, seat], "a past round keeps the bar's colour"
-            assert _top(page, "#log") == log_top, "stepping back moves nothing"
-            page.click("#replay-first")
-            page.wait_for_function("() => state.replay && state.replay.round === 0")
-            page.wait_for_selector("#chance.show")
-            assert page.evaluate(_BAR_AND_SEAT) == [seat, seat]
-            assert _top(page, "#log") == log_top
-            assert page.is_visible("#chance-toggle") and page.is_visible("#sound-toggle")
+            # A swipe right across the board steps back a move; the LIVE pill
+            # brings the game back. No buttons in the replay bar.
+            # One pill each side of the strip: the win chance (none without the
+            # guide) and the round, which returns to the game once stepped back.
+            assert page.query_selector("#replay-bar button:not(#replay-pct):not(#replay-round)") is None
+            assert not page.is_visible("#replay-pct"), "no win chance without the guide"
+            assert page.query_selector("#replay-round.back") is None
+            box = page.query_selector("#board-pane").bounding_box()
+            y = box["y"] + box["height"] / 2
+            page.mouse.move(box["x"] + box["width"] * 0.3, y)
+            page.mouse.down()
+            page.mouse.move(box["x"] + box["width"] * 0.7, y, steps=5)
+            page.mouse.up()
+            page.wait_for_function("() => state.replay && replayStep !== null")
+            page.wait_for_timeout(300)
+            assert "%" not in page.inner_text("#replay-strip"), "a past round shows no chance either"
+            assert page.is_visible("#replay-round.back")
+            assert not page.is_visible("#undo-build"), "no guide shown: nothing to play on with"
+            page.click("#replay-round")
+            page.wait_for_function("() => replayStep === null")
+            assert page.query_selector("#replay-round.back") is None
         finally:
             context.close()

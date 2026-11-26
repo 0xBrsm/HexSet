@@ -175,7 +175,8 @@ def test_ending_the_held_turn_releases_the_table(running_server, browser):
         "document.getElementById('phase').innerText.trim() !== 'END TURN'",
         timeout=10_000,
     )
-    assert not _shown(page, "end-turn")
+    # End turn keeps its corner through the other seat's turn, greyed out.
+    assert page.is_disabled("#end-turn")
 
     context.close()
 

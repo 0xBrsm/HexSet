@@ -98,7 +98,9 @@ from .api import (
     model_catalogue,
     model_options,
 )
-from .constants import KEY_HEADER, TOKEN_HEADER
+from hexset.guides import guide_provider
+
+from .constants import KEY_HEADER, PAGE_HEADER, TOKEN_HEADER
 
 __all__ = [
     "DEFAULT_MCP_PROTOCOL_VERSION",
@@ -213,10 +215,36 @@ class Handler(BaseHTTPRequestHandler):
         return self.client_address[0]
 
     def origin(self, via: str) -> Origin:
+        """Where this request came from. Where the registered guide reads page
+        tokens (`hexset.guides`, `page_id`), `page_id` is the one this
+        request's token carries, and where it requires them
+        (`pages_required`), the request is the page's only with one."""
+        tables = self.server.tables
+        user_agent = self.headers.get("User-Agent")
+        provider = guide_provider()
+        read = getattr(provider, "page_id", None)
+        page_id = read(tables, self.headers.get(PAGE_HEADER), user_agent) if read is not None else None
+        required = getattr(provider, "pages_required", None)
+        page = self.from_page() and (page_id is not None or required is None or not required(tables))
         return Origin(
-            ip=self.client_ip(), via=via, user_agent=self.headers.get("User-Agent"),
-            key=self.headers.get(KEY_HEADER), page=self.from_page(),
+            ip=self.client_ip(), via=via, user_agent=user_agent,
+            key=self.headers.get(KEY_HEADER), page=page, page_id=page_id,
         )
+
+    def _page(self) -> None:
+        """The game page, as the registered guide stamps it for this browser
+        (`hexset.guides`, `stamp_page`: its `hexset-page` and
+        `hexset-turnstile` meta tags), else as it is."""
+        body = INDEX_HTML.read_bytes()
+        stamp = getattr(guide_provider(), "stamp_page", None)
+        if stamp is not None:
+            body = stamp(self.server.tables, body, self.headers.get("User-Agent"))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def from_page(self) -> bool:
         """Whether the browser marked this request as sent by a page this
@@ -279,7 +307,7 @@ class Handler(BaseHTTPRequestHandler):
             # No standing stream to open; the spec allows a GET to 405.
             self.send_error(405)
         elif self.path in ("/", "/index.html") or is_code(self.path):
-            self._file(INDEX_HTML, "text/html; charset=utf-8")
+            self._page()
         elif self.path.partition("?")[0] == "/rankings":
             self._file(RANKINGS_HTML, "text/html; charset=utf-8")
         elif self.path.partition("?")[0] in APP_FILES:
@@ -291,7 +319,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/") or self.path.partition("?")[0] == "/api":
             self._serve("GET", {})
         elif looks_like_a_code_attempt(self.path):
-            self._file(INDEX_HTML, "text/html; charset=utf-8")
+            self._page()
         else:
             self.send_error(404)
 
@@ -476,13 +504,14 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-def chance_model(parser: argparse.ArgumentParser, name: str) -> str:
-    """`--chance-model NAME`, held to an entry `model_catalogue` offers as a
-    model file at some game type: a preset has no value head to read."""
+def chance_model(parser: argparse.ArgumentParser, name: str, flag: str = "--chance-model") -> str:
+    """`--chance-model NAME` (or `flag`), held to an entry `model_catalogue`
+    offers as a model file at some game type: a preset has no value head to
+    read, nor a search a guide can run."""
     files = sorted({entry for offered in model_catalogue().values()
                     for entry, held in offered.items() if held.name is not None})
     if name not in files:
-        parser.error(f"--chance-model: no model file offered as {name}; one of {files}")
+        parser.error(f"{flag}: no model file offered as {name}; one of {files}")
     return name
 
 
@@ -591,6 +620,12 @@ def main(argv: list[str] | None = None) -> None:
              "bot:<NAME>. Repeat for more. Default: none.",
     )
     parser.add_argument(
+        "--guide-model", default=None, metavar="NAME",
+        help="The model, as the opponent picker names it, that the guide a runtime registers "
+             "(hexset.guides) reads with, for a page seat that asks for it at an unranked duel "
+             "of a game type the model is offered at. Default: none, and no table offers a guide.",
+    )
+    parser.add_argument(
         "--chance-model", default=None, metavar="NAME",
         help="The model, as the opponent picker names it, that rates a seated player's win "
              "chance at every unranked table of a game type it is offered at, whether or not "
@@ -643,6 +678,8 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(f"--ranked-entrant: {args.ranked_bot} is the --ranked-bot, which fills seats")
     if args.chance_model is not None:
         chance_model(parser, args.chance_model)
+    if args.guide_model is not None:
+        chance_model(parser, args.guide_model, flag="--guide-model")
     menu_tabs = []
     for spec in args.menu_tab:
         label, _, url = spec.partition("=")
@@ -672,6 +709,7 @@ def main(argv: list[str] | None = None) -> None:
         ranked_bot=args.ranked_bot,
         ranked_entrants=entrants,
         chance_model=args.chance_model,
+        guide_model=args.guide_model,
         rollout_workers=args.rollout_workers,
         search_logs=args.search_logs,
         menu_tabs=tuple(menu_tabs),

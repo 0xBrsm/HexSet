@@ -104,6 +104,7 @@ import numpy as np
 from .actions import Action, ActionType, apply, legal_actions
 from .chance import Balanced, Live
 from .decisions import Compound, Option, Plans, first_move, inside, opens, option_json
+from .endings import NO_TRACE, ending, follow, play_noted
 from .game import Game, Phase, imagine, is_over, observed_digest, to_move
 from .native.playout import NativeCopy, copyable, held
 from .victory import public_victory_points, victory_points
@@ -530,6 +531,24 @@ class PairedRollouts:
         self.rng.shuffle(world._state.deck)
         return world
 
+    def tasks(self, game: Game, seat: int) -> tuple[list[tuple[Game, int]], str]:
+        """The `worlds` worlds a searched decision of `seat` at `game` plays
+        out in, each with the seed of its playouts' chance, and the decision's
+        `det_key` (`""` without `det`). Drawn in order, whoever plays them
+        out, so a pool's decision is the one this process would make alone.
+        Under `det` they come from the decision's own stream and `rng` is left
+        untouched; otherwise from `rng`."""
+        if not self.det:
+            return [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)], ""
+        seed = self.decision_key(game, seat)
+        # `world` draws from `rng`: the decision's stream stands in for it,
+        # and the searcher's own is put back untouched.
+        running, self.rng = self.rng, random.Random(seed)
+        try:
+            return [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)], seed.hex()
+        finally:
+            self.rng = running
+
     def decision_key(self, game: Game, seat: int) -> bytes:
         """The seed of `seat`'s decision at `game` under `det`: a sha256 of
         `hexset.game.observed_digest(game, seat)` behind a fixed prefix, so of
@@ -582,21 +601,7 @@ class PairedRollouts:
         mean score chosen (the earlier candidate on a tie) or, under `margin`
         outside the setup phases, the best of those clearing the margin over
         the policy's own move (candidate 0), and logged."""
-        # Worlds and seeds are drawn here, in order, whoever plays them out:
-        # a pool's decision is the one this process would have made alone.
-        key = ""
-        if not self.det:
-            tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
-        else:
-            seed = self.decision_key(game, seat)
-            key = seed.hex()
-            # `world` draws from `rng`: the decision's stream stands in for it,
-            # and the searcher's own is put back untouched.
-            running, self.rng = self.rng, random.Random(seed)
-            try:
-                tasks = [(self.world(game, seat), self.rng.getrandbits(64)) for _ in range(self.worlds)]
-            finally:
-                self.rng = running
+        tasks, key = self.tasks(game, seat)
         margin = self.margin if self.margin and game.phase not in SETUP_PHASES else 0.0
         stop = self.stop if margin else 0.0
         tie = self.tie if margin else 0.0
@@ -838,12 +843,13 @@ class PairedRollouts:
     def choose(self, game: Game) -> Action:
         return self.decide(game).move
 
-    def _lanes(self, tasks, moves, seat: int, start: int) -> "Lanes":
+    def _lanes(self, tasks, moves, seat: int, start: int, *, endings: bool = False) -> "Lanes":
         """Every world of `tasks` played out after each of `moves`: here, or
-        split across the pool's workers, with this process playing a share."""
+        split across the pool's workers, with this process playing a share.
+        With `endings`, each copy's ending row is kept too (`Lanes.endings`)."""
         if self.pool is None:
-            return play_lanes(self.policy, tasks, moves, seat, start, self.horizon, self.marks)
-        return self.pool.play(self.policy, tasks, moves, seat, start, self.horizon, self.marks)
+            return play_lanes(self.policy, tasks, moves, seat, start, self.horizon, self.marks, endings=endings)
+        return self.pool.play(self.policy, tasks, moves, seat, start, self.horizon, self.marks, endings=endings)
 
     def _keep(self, lanes: "Lanes") -> None:
         self.last_truncated_rollouts = lanes.truncated
@@ -868,8 +874,12 @@ class Lanes:
     `after`, the value head's read right after the candidate (`None` with
     no `marks`); `reads`, the read at each mark, `(len(marks), copies)`; and
     the counts `Decision` keeps (`steps`, `row_steps`, `mark_row_steps`,
-    `truncated`); and `leads`, each copy's point lead for the mover where it
-    stopped (`_lead_of`), or `None`."""
+    `truncated`); `leads`, each copy's point lead for the mover where it
+    stopped (`_lead_of`), or `None`; `endings`, each copy's ending row
+    (`hexset.endings.ending`), or `None` where they were not asked for; and
+    `moves`, with `endings`, each copy's every move from its candidate on,
+    an int32 array of `hexset.endings.move_code`s, each followed by its
+    notes (`hexset.endings.play_noted`)."""
 
     outcomes: np.ndarray
     after: np.ndarray | None
@@ -879,6 +889,8 @@ class Lanes:
     mark_row_steps: tuple[int, ...]
     truncated: int
     leads: np.ndarray | None = None
+    endings: np.ndarray | None = None
+    moves: tuple | None = None
 
     @staticmethod
     def joined(parts: Sequence["Lanes"]) -> "Lanes":
@@ -893,18 +905,21 @@ class Lanes:
             mark_row_steps=tuple(int(sum(c)) for c in zip(*(p.mark_row_steps for p in parts))),
             truncated=sum(p.truncated for p in parts),
             leads=None if any(p.leads is None for p in parts) else np.concatenate([p.leads for p in parts]),
+            endings=None if any(p.endings is None for p in parts) else np.concatenate([p.endings for p in parts]),
+            moves=None if any(p.moves is None for p in parts) else tuple(m for p in parts for m in p.moves),
         )
 
 
 def play_lanes(
     policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option], seat: int, start: int,
-    horizon: int | None, marks: tuple[int, ...],
+    horizon: int | None, marks: tuple[int, ...], *, endings: bool = False,
 ) -> Lanes:
     """Each `(world, seed)` of `tasks` copied once per move of `moves`
     (`paired_copy`), the move applied, and every copy played out by `policy`
-    (`PairedRollouts.play_out`). A function of its arguments alone, so a
-    worker process plays a share of the worlds as this one would."""
-    return RolloutBatch.from_tasks(policy, tasks, moves, seat, start, marks).advance(horizon)
+    (`PairedRollouts.play_out`); with `endings`, each copy's ending row kept.
+    A function of its arguments alone, so a worker process plays a share of
+    the worlds as this one would."""
+    return RolloutBatch.from_tasks(policy, tasks, moves, seat, start, marks, endings=endings).advance(horizon)
 
 
 def _to_move(game) -> int:
@@ -932,6 +947,19 @@ def _apply_option(game, option: Option, seat: int) -> None:
             game.apply(part, seat)
         else:
             apply(game, part, seat if part.type is ActionType.DISCARD else None)
+
+
+def _apply_recorded(game, option: Option, seat: int) -> list[int]:
+    """`_apply_option`, returning the move as a playout record opens on it
+    (`hexset.endings.play_noted`): each part's code and notes."""
+    codes = []
+    start = game.turns
+    for part in (option.parts if isinstance(option, Compound) else (option,)):
+        if is_over(game):
+            break
+        actor = seat if part.type is ActionType.DISCARD else _to_move(game)
+        codes += play_noted(game, actor, part, start, lambda: _apply_option(game, part, seat))
+    return codes
 
 
 def _stops(game: Game, seat: int, start: int, horizon: int | None) -> bool:
@@ -975,6 +1003,11 @@ class RolloutBatch:
     root seat's turn boundary, as in one-shot play. A paused copy's game and
     chance source are retained, so extending it does not replay its prefix.
 
+    With ``endings``, the batch counts the cards each copy's seats discard
+    to sevens and follows each copy's moves (``hexset.endings.follow``), and
+    ``advance`` returns each selected copy's ending row
+    (``hexset.endings.ending``). Reading them changes no move or score.
+
     Identity across different schedules requires a policy whose row actions
     and values are independent of batch composition and unrelated cache
     eviction. Keep the policy fixed while retaining copies for a one-shot
@@ -983,8 +1016,9 @@ class RolloutBatch:
     """
 
     def __init__(self, policy, games: Sequence[Game], seat: int, start: int,
-                 marks: Sequence[int] = (), *, after: bool = False) -> None:
+                 marks: Sequence[int] = (), *, after: bool = False, endings: bool = False) -> None:
         self.policy, self.games = policy, tuple(games)
+        self.endings = endings
         if len({id(game) for game in games}) != len(games):
             raise ValueError("each rollout copy must be a distinct game")
         self.seat, self.start = seat, start
@@ -998,14 +1032,20 @@ class RolloutBatch:
         self.reads = np.full((len(self.marks), size), np.nan)
         self.at = np.full((len(self.marks), size), -1, dtype=np.int64)
         self.reached = np.zeros(size, dtype=np.int64)
+        # Cards discarded to sevens, by copy: the root seat's, then every other seat's.
+        self.discards = np.zeros((size, 2), dtype=np.int64)
+        # What `hexset.endings.follow` counts of each copy's playout, and with
+        # `endings` every move it made with its notes (`hexset.endings.play_noted`).
+        self.traces = [list(NO_TRACE) for _ in range(size)]
+        self.moves: list[list[int]] = [[] for _ in range(size)]
         self.after = _read_after(policy, self.games, seat) if after else None
         self.scores = np.full(size, np.nan) if self.after is None else self.after.copy()
 
     @classmethod
     def from_tasks(cls, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option],
-                   seat: int, start: int, marks: Sequence[int] = ()) -> "RolloutBatch":
+                   seat: int, start: int, marks: Sequence[int] = (), *, endings: bool = False) -> "RolloutBatch":
         """A paired copy per world and move, in world-major order."""
-        batch = cls(policy, (), seat, start, marks, after=bool(marks))
+        batch = cls(policy, (), seat, start, marks, after=bool(marks), endings=endings)
         batch.add_tasks(tasks, moves)
         return batch
 
@@ -1013,7 +1053,7 @@ class RolloutBatch:
         """Append paired copies for new worlds or moves; return their indices.
         A world the native engine can hold for this policy (`copyable`) is
         copied once and held natively, each move's copy a fork of it."""
-        copies = []
+        copies, firsts = [], []
         contract = getattr(self.policy, "native_contract", None)
         for world, seed in tasks:
             base = paired_copy(world, seed, self.seat)
@@ -1023,9 +1063,15 @@ class RolloutBatch:
                     copy = native.fork()
                 else:
                     copy = base if k == 0 else paired_copy(world, seed, self.seat)
-                _apply_option(copy, move, self.seat)
+                firsts.append(_apply_recorded(copy, move, self.seat) if self.endings
+                              else _apply_option(copy, move, self.seat))
                 copies.append(copy)
-        return self.add(copies)
+        added = self.add(copies)
+        if self.endings:
+            # Each record opens on the move searched (`_apply_recorded`).
+            for i, first in zip(added, firsts):
+                self.moves[i] = list(first)
+        return added
 
     def add(self, games: Sequence[Game]) -> tuple[int, ...]:
         """Append distinct, already constructed copies with their move applied.
@@ -1046,6 +1092,9 @@ class RolloutBatch:
         self.reads = np.concatenate([self.reads, np.full((len(self.marks), size), np.nan)], axis=1)
         self.at = np.concatenate([self.at, np.full((len(self.marks), size), -1, dtype=np.int64)], axis=1)
         self.reached = np.concatenate([self.reached, np.zeros(size, dtype=np.int64)])
+        self.discards = np.concatenate([self.discards, np.zeros((size, 2), dtype=np.int64)])
+        self.traces += [list(NO_TRACE) for _ in range(size)]
+        self.moves += [[] for _ in range(size)]
         if self.after is not None:
             self.after = np.concatenate([self.after, initial])
         self.scores = np.concatenate([self.scores, np.full(size, np.nan) if initial is None else initial])
@@ -1097,8 +1146,18 @@ class RolloutBatch:
                 if not row[2]:
                     self.blocked[i] = True
             chosen = self.policy.act_rows([row for _, row in moving])
-            for (i, _), action in zip(moving, chosen):
-                _apply(self.games[i], action)
+            for (i, row), action in zip(moving, chosen):
+                if self.endings:
+                    if action.type is ActionType.DISCARD:
+                        self.discards[i, 0 if row[1] == self.seat else 1] += 1
+                    else:
+                        follow(self.traces[i], action, row[1] == self.seat, self.games[i].turns - self.start)
+                if self.endings:
+                    game = self.games[i]
+                    self.moves[i] += play_noted(game, row[1], action, self.start,
+                                                lambda: _apply(game, action))
+                else:
+                    _apply(self.games[i], action)
                 self.scores[i] = np.nan
             live = [i for i, _ in moving if self.counts[i] < STEP_LIMIT
                     and not _stops(self.games[i], self.seat, self.start, horizon)]
@@ -1115,7 +1174,12 @@ class RolloutBatch:
                      reads=reads, steps=int(counts.max(initial=0)), row_steps=int(counts.sum()),
                      mark_row_steps=tuple(int(np.where(row >= 0, np.minimum(row, counts), counts).sum()) for row in at),
                      truncated=sum(not is_over(self.games[i]) for i in selected),
-                     leads=np.array([_lead_of(self.games[i], self.seat) for i in selected], dtype=np.float64))
+                     leads=np.array([_lead_of(self.games[i], self.seat) for i in selected], dtype=np.float64),
+                     endings=np.stack([ending(self.games[i], self.seat, self.start, tuple(self.discards[i]),
+                                              self.traces[i])
+                                       for i in selected]) if self.endings and selected else None,
+                     moves=tuple(np.asarray(self.moves[i], dtype=np.int32) for i in selected)
+                     if self.endings and selected else None)
 
 
 def _play(
@@ -1155,10 +1219,10 @@ def _ready(seconds: float) -> int:
     return os.getpid()
 
 
-def _play_share(tasks, moves, seat, start, horizon, marks, context=None) -> Lanes:
+def _play_share(tasks, moves, seat, start, horizon, marks, context=None, endings=False) -> Lanes:
     if context is not None:
         _worker_policy.set_context(context)
-    return play_lanes(_worker_policy, tasks, moves, seat, start, horizon, marks)
+    return play_lanes(_worker_policy, tasks, moves, seat, start, horizon, marks, endings=endings)
 
 
 class RolloutPool:
@@ -1206,12 +1270,12 @@ class RolloutPool:
 
     def play(
         self, policy, tasks: Sequence[tuple[Game, int]], moves: Sequence[Option], seat: int,
-        start: int, horizon: int | None, marks: tuple[int, ...],
+        start: int, horizon: int | None, marks: tuple[int, ...], *, endings: bool = False,
     ) -> Lanes:
         """`play_lanes(policy, tasks, ...)`, with the workers playing all
         but the first run of worlds; `policy` is this process's own."""
         if self.broken:
-            return play_lanes(policy, tasks, moves, seat, start, horizon, marks)
+            return play_lanes(policy, tasks, moves, seat, start, horizon, marks, endings=endings)
         runs = _shares(tasks, self.workers + 1)
         # A policy that plays by state its searcher holds (`context`, as
         # `hexset.clients.conditioned.SeatRouted` holds each seat's condition)
@@ -1220,10 +1284,11 @@ class RolloutPool:
         futures = []
         try:
             for run in runs[1:]:
-                futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks, context))
+                futures.append(self._executor.submit(_play_share, run, moves, seat, start, horizon, marks, context,
+                                                    endings))
         except (BrokenProcessPool, RuntimeError):   # RuntimeError: retired since the check above
             self.broken = True
-        here = play_lanes(policy, runs[0], moves, seat, start, horizon, marks)
+        here = play_lanes(policy, runs[0], moves, seat, start, horizon, marks, endings=endings)
         parts = [here]
         if not self.broken:
             try:
@@ -1232,7 +1297,8 @@ class RolloutPool:
                 self.broken = True
         if self.broken:
             rest = [task for run in runs[1:] for task in run]
-            parts = [here] + ([play_lanes(policy, rest, moves, seat, start, horizon, marks)] if rest else [])
+            parts = [here] + ([play_lanes(policy, rest, moves, seat, start, horizon, marks, endings=endings)]
+                              if rest else [])
         return Lanes.joined(parts)
 
     def close(self) -> None:

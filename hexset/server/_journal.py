@@ -321,6 +321,25 @@ class Journal:
             }
         )
 
+    def reseed(self, *, at: int, dice: int, steals: int, deck: int) -> None:
+        """The game's chance drawn afresh from step `at` on, after a take back
+        that went back past a roll, a card drawn or a steal: the dice and
+        steals from the seeds `dice` and `steals` (`Live.reseed`), and the
+        development cards still in the deck reshuffled by `deck`. A replay
+        applies it at that step (`reseeds`)."""
+        self._emit({"kind": "reseed", "at": at, "dice": dice, "steals": steals, "deck": deck})
+
+    def trainer(self, *, seat: int, use: str) -> None:
+        """`seat` used a trainer feature (`use`: "guide", "hint" or
+        "takeback"). A game with such a line was played with help, which a
+        reader counting players' own results leaves out (`trained`)."""
+        self._emit({"kind": "trainer", "at": _now(), "seat": seat, "use": use})
+
+    def guided(self, note: dict) -> None:
+        """One graded move of a guided seat, as its guide gives it,
+        so the game's review can be rebuilt from its file."""
+        self._emit({"kind": "guide", **note})
+
     def seated(self, *, seat: int, name: str, spec: str, client: dict | None = None) -> None:
         """A seat's occupant, named after the deal: a bot swapped in mid-game,
         or an open seat somebody joined. `spec` is empty for a person, which is
@@ -612,6 +631,101 @@ def replayable_rounds(
             continue
         rounds.append(int(event.get("round", 0)))
     return steps, rounds
+
+
+def reseeds(events: list[dict]) -> dict[int, dict]:
+    """Step -> the `reseed` line (`Journal.reseed`) a replay applies before
+    that step, of those no later undo went back past."""
+    out: dict[int, dict] = {}
+    for event in events:
+        kind = event.get("kind")
+        if kind == "reseed":
+            out[int(event["at"])] = {k: int(event[k]) for k in ("dice", "steals", "deck")}
+        elif kind == "undo":
+            out = {at: seeds for at, seeds in out.items() if at < event["back_to"]}
+    return out
+
+
+def trained(events: list[dict]) -> set[int]:
+    """The seats that used a trainer feature anywhere in the game
+    (`Journal.trainer`)."""
+    return {int(event["seat"]) for event in events if event.get("kind") == "trainer"}
+
+
+#: The kinds a graded move's line carries: "guide", and "coach", an older
+#: name for the same line, still read.
+NOTE_KINDS = frozenset({"guide", "coach"})
+#: The trainer `use` that turned the guide on, under either name.
+GUIDE_USES = frozenset({"guide", "coach"})
+
+
+def guide_notes(events: list[dict]) -> list[dict]:
+    """The graded moves the file records (`Journal.guided`) that were not
+    taken back: a note at a step an undo dropped goes with the step."""
+    notes: list[dict] = []
+    for event in events:
+        kind = event.get("kind")
+        if kind in NOTE_KINDS:
+            notes.append({k: v for k, v in event.items() if k != "kind"})
+        elif kind == "undo":
+            notes = [note for note in notes if note["step"] < event["back_to"]]
+    return notes
+
+
+def taken_back_notes(events: list[dict]) -> list[dict]:
+    """The graded moves the file records that an undo dropped (the moves a
+    seat took back), in the order they were played, each as `guide_notes`
+    gives a note. The newest line of a note id stands for it."""
+    notes: list[dict] = []
+    dropped: dict = {}
+    for event in events:
+        kind = event.get("kind")
+        if kind in NOTE_KINDS:
+            notes.append({k: v for k, v in event.items() if k != "kind"})
+        elif kind == "undo":
+            for note in notes:
+                if note["step"] >= event["back_to"]:
+                    dropped.pop(note.get("id"), None)
+                    dropped[note.get("id")] = note
+            notes = [note for note in notes if note["step"] < event["back_to"]]
+    return list(dropped.values())
+
+
+def branched(events: list[dict], at: int, *, game_id: str, code: str) -> list[dict]:
+    """The lines of a new game that starts as `events`' game stood after
+    `at` steps of its final line, under `game_id` and join code `code`:
+    every line written before that line's step `at`, less closing lines
+    and the trade-round notes of step `at` on, then the graded notes
+    (`guide` lines) of steps before `at` written after it, then a `branch`
+    line naming the game it came from (`from`, its id, and `code`), the step
+    and that step's round (`round`: the last step's before it, 0 at the
+    deal). Moves taken back before
+    that point stay, with their undo lines, as in the original. The caller
+    draws the new game's chance afresh from `at` (`Journal.reseed`)."""
+    count = 0
+    holding: dict[int, int] = {}   # step -> the line that holds it on the line so far
+    for index, event in enumerate(events):
+        kind = event.get("kind")
+        if kind in ("action", "trade"):
+            holding[count] = index
+            count += 1
+        elif kind == "undo":
+            back_to = int(event["back_to"])
+            count = min(count, back_to)
+            holding = {step: line for step, line in holding.items() if step < back_to}
+    cut = holding.get(at, len(events))
+    header = {**events[0], "id": game_id, "code": code, "at": _now()}
+    lines = [header]
+    for event in events[1:cut]:
+        kind = event.get("kind")
+        if kind in CLOSING_KINDS or (kind == "note" and int(event["step"]) >= at):
+            continue
+        lines.append(event)
+    lines += [e for e in events[cut:] if e.get("kind") in NOTE_KINDS and int(e["step"]) < at]
+    _, rounds = replayable_rounds(events)
+    lines.append({"kind": "branch", "at": _now(), "from": events[0].get("id"), "code": events[0].get("code"),
+                  "step": at, "round": rounds[at - 1] if 0 < at <= len(rounds) else 0})
+    return lines
 
 
 def replayable(events: list[dict]) -> list[tuple[int, Action | None, tuple[Trade, ...]]]:

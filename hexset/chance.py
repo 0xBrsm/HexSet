@@ -153,6 +153,16 @@ class Live(Chance):
         self.rng.shuffle(deck)
         return deck
 
+    def reseed(self, dice: int, steals: int) -> None:
+        """Give the dice and the steals new generators, seeded by `dice` and
+        `steals`: every roll and steal from here on is drawn afresh. Only a
+        split source has streams of its own to replace (a `ValueError`
+        otherwise)."""
+        if not self.split:
+            raise ValueError("only a split chance source draws its dice and steals apart")
+        self.dice = random.Random(dice)
+        self.steals = random.Random(steals)
+
     def roll(self) -> int:
         first = self.dice.randint(1, DICE_SIDES)
         self.last_dice = (first, self.dice.randint(1, DICE_SIDES))

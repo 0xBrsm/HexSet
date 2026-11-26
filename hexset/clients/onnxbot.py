@@ -58,6 +58,7 @@ __all__ = [
     "DECISION_INPUTS",
     "load",
     "network_bot",
+    "rollout_search",
     "searcher",
     "spawn",
 ]
@@ -792,6 +793,28 @@ def spawn(
     own = closed(own, closer, board, random.Random() if rng is None else rng)
     return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded),
                   hold=loaded.hold)
+
+
+def rollout_search(
+    path: str,
+    board,
+    *,
+    device: str = "cpu",
+    threads: int | None = DEFAULT_THREADS,
+    workers: int = 0,
+    pools: SharedPools | None = None,
+):
+    """The paired-rollout search the checkpoint at `path` declares, on its
+    own, with no closer or trader in front of it (`spawn` adds both), and
+    the closer the file names (`netbot.declared_closer`, `None` for none):
+    `(search, closer)`. `workers` and `pools` are `spawn`'s. A file that
+    declares no paired-rollout search is refused with a `ValueError`, as is
+    a closer no loaded runtime registers."""
+    loaded = load(path, board.topology, device, threads)
+    if loaded.search.rollout is None:
+        raise ValueError(f"{path} declares no paired-rollout search")
+    closer = declared_closer(loaded, path)
+    return _spawn_own(path, board, loaded, None, device, threads, workers, pools, True), closer
 
 
 def _pool(path, load_policy, workers, pools, loaded_as):

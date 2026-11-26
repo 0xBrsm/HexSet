@@ -423,7 +423,9 @@ def test_a_client_seated_with_entrants_alone_is_not_at_a_fill_table(tmp_path, en
         assert meetings[frozenset(("a" * 64, f"bot:{entry}"))] == 1
 
 
-def test_an_entrants_rankings_row_carries_its_models_profile(tmp_path, entrant_model):
+def test_an_entrants_rankings_row_carries_its_models_served_profile(tmp_path, entrant_model):
+    """A model file's rankings row gets its version, not the owner or
+    description it declares (`api.SERVED_PROFILE_KEYS`)."""
     entry = entrant_model("duel-variant")
 
     def rank(games):
@@ -433,7 +435,7 @@ def test_an_entrants_rankings_row_carries_its_models_profile(tmp_path, entrant_m
     tables = new_tables(games_dir=str(tmp_path), ranker=rank)
     tables.rankings.wait()
     [row] = tables.handle("GET", "/api/rankings", {}, None)["boards"][0]["rows"]
-    assert (row["name"], row["version"], row["owner"], row["description"]) == (entry, "2.0", "octocat", "A test net.")
+    assert (row["name"], row["version"], row["owner"], row["description"]) == (entry, "2.0", None, None)
 
 
 def test_on_a_board_keyed_by_a_game_type_a_bots_row_shows_the_file_offered_there(tmp_path, entrant_model):

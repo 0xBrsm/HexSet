@@ -2,7 +2,10 @@
 bundles look in JSON, read by the page, every API client and `api`.
 
 `action_to_wire` renders an `Action` JSON-friendly; `wire_to_action` undoes
-it, exactly, for every action `legal_actions` can produce. Resource and card
+it, exactly, for every action `legal_actions` can produce. `option_to_wire`
+also renders a whole discard (`hexset.decisions.Compound`), as the guide
+names one: `{"type": "DISCARD_CARDS", "cards"}`, the count of each resource
+given. Resource and card
 names, and every positional count on the wire, are in `RESOURCE_NAMES` and
 `DEV_CARD_NAMES` order.
 """
@@ -17,6 +20,7 @@ from hexset.board.coords import Hex
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.board.topology import Topology
 from hexset.cards import DevCard
+from hexset.board.spots import spot_names
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS
 from hexset.trading import Bundle
 
@@ -27,6 +31,7 @@ __all__ = [
     "board_layout",
     "hex_center",
     "hex_corner",
+    "option_to_wire",
     "round_bundle_from_wire",
     "round_offer_from_wire",
     "signed_bundle_from_wire",
@@ -117,6 +122,9 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
         "vertices": vertices,
         "edges": edges,
         "ports": ports,
+        # Each vertex's name as the guide's sentences say it, apart from every
+        # other spot ("6-8-3", "11 wheat spot"; "" for none).
+        "spots": list(spot_names(board)),
         "resources": list(RESOURCE_NAMES),
         "dev_cards": list(DEV_CARD_NAMES),
         "year_of_plenty_pairs": [
@@ -137,6 +145,24 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
 def action_to_wire(action: Action) -> dict:
     """An `Action` as its JSON wire object: `{"type", "a", "b"}`."""
     return {"type": action.type.name, "a": action.a, "b": action.b}
+
+
+def option_to_wire(option) -> dict:
+    """A decision as the guide's wire names it: an `Action` as
+    `action_to_wire` renders it, a whole discard (a `hexset.decisions.Compound`
+    of kind `DISCARD`) as `{"type": "DISCARD_CARDS", "cards"}`, the count of
+    each resource it gives, in `RESOURCE_NAMES` order. `ValueError` for any
+    other compound decision."""
+    if isinstance(option, Action):
+        return action_to_wire(option)
+    from hexset.decisions import CompoundKind
+
+    if getattr(option, "kind", None) is not CompoundKind.DISCARD:
+        raise ValueError(f"no wire name for the decision {option!r}")
+    cards = [0] * NUM_RESOURCES
+    for part in option.parts:
+        cards[part.a] += 1
+    return {"type": "DISCARD_CARDS", "cards": cards}
 
 
 def wire_to_action(data: dict) -> Action:

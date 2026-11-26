@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The seat's chance of winning as the table's model rates it, under the
-player list: shown to the seat once a model sits at the table, never to a
-spectator. Skipped without Playwright or onnxruntime.
+"""The win chance is the guide's alone: a seat at a table where a model sits
+but no guide is on is shown none, nor is a spectator, and the board's corner
+holds no win chance toggle. The guide's own bar is checked in
+test_page_guide.py. Skipped without Playwright or onnxruntime.
 """
 
 from __future__ import annotations
@@ -65,43 +66,19 @@ def browser():
             chromium.close()
 
 
-def test_a_seat_sees_its_chance_once_a_model_sits_and_a_spectator_never(server, browser):
+def test_without_the_guide_no_seat_or_spectator_sees_a_chance(server, browser):
     page = browser.new_context().new_page()
     try:
         front_door(page, BASE_URL)
         page.wait_for_selector("#players .bot-pick")
-        # The line's row is held from the start, empty until a model sits.
-        page.wait_for_selector("#chance.held")
-        held = page.eval_on_selector("#log", "(el) => el.getBoundingClientRect().top")
-        assert not page.is_visible("#chance .chance-label"), "no model at the table, no chance"
-        assert not page.is_visible("#chance-toggle")
-
+        assert page.query_selector("#chance-toggle") is None, "the corner holds no win chance toggle"
         page.click("#players .bot-pick")
         page.wait_for_selector("#modal.show .bot-card")
-        assert page.inner_text('.bot-card[data-model="valued"] .bot-card-name') == "Valued"
         page.click('.bot-card[data-model="valued"]')
-        page.wait_for_selector("#chance.show")
-        assert page.inner_text("#chance .chance-who") == "WIN CHANCE"
+        page.wait_for_selector("#modal.show", state="hidden")
         assert "Valued" in page.inner_text("#players")
-        assert page.eval_on_selector("#log", "(el) => el.getBoundingClientRect().top") == held, \
-            "a chance appearing moves nothing"
-        # The corner: sound in it, the percent sign under it.
-        percent_sign = page.eval_on_selector("#chance-toggle", "(el) => el.getBoundingClientRect().toJSON()")
-        sound = page.eval_on_selector("#sound-toggle", "(el) => el.getBoundingClientRect().toJSON()")
-        assert percent_sign["top"] > sound["bottom"] and percent_sign["left"] == sound["left"]
-        percent = page.inner_text("#chance .chance-pct")
-        assert percent.endswith("%") and 0 <= int(percent[:-1]) <= 100
-        # The bar is drawn filled to the chance, not only styled to it: at a
-        # read of one half, the fill covers half the bar.
-        page.evaluate("() => { chanceRead.chance = 0.5; renderChance(); }")
-        assert page.inner_text("#chance .chance-pct") == "50%"
-        page.wait_for_timeout(600)
-        drawn = page.eval_on_selector(
-            "#chance", "(el) => el.querySelector('.chance-fill').getBoundingClientRect().width"
-                       " / el.querySelector('.chance-bar').getBoundingClientRect().width")
-        assert abs(drawn - 0.5) < 0.02, drawn
 
-        # Every seat filled, so the link watches rather than joins.
+        # Every seat filled, so the game plays and the link watches rather than joins.
         while page.query_selector("#players .bot-pick.unset"):
             page.click("#players .bot-pick.unset")
             page.wait_for_selector("#modal.show .bot-card")
@@ -109,31 +86,8 @@ def test_a_seat_sees_its_chance_once_a_model_sits_and_a_spectator_never(server, 
             page.wait_for_selector("#modal.show", state="hidden")
             page.wait_for_timeout(200)
         page.wait_for_function("() => state.waiting_for.length === 0")
-        assert page.is_visible("#chance.show")
-
-        # A click opens the note, never a hover; a click elsewhere closes it.
-        assert not page.is_visible("#chance .chance-note")
-        page.hover("#chance")
-        assert not page.is_visible("#chance .chance-note")
-        page.dispatch_event("#chance", "click")
-        assert page.is_visible("#chance .chance-note")
-        assert page.inner_text("#chance .chance-note") == "Valued's estimate of your chance of winning, read from your view."
-        page.dispatch_event("#log", "click")
-        assert not page.is_visible("#chance .chance-note")
-
-        # The corner toggle hides it, for this browser, across a reload, and
-        # moves nothing either way.
-        top = page.eval_on_selector("#log", "(el) => el.getBoundingClientRect().top")
-        assert page.get_attribute("#chance-toggle", "aria-pressed") == "true"
-        page.click("#chance-toggle")
-        assert not page.is_visible("#chance .chance-label")
-        assert page.get_attribute("#chance-toggle", "aria-pressed") == "false"
-        assert page.eval_on_selector("#log", "(el) => el.getBoundingClientRect().top") == top
-        page.reload(wait_until="load")
-        page.wait_for_selector("#chance-toggle:not([hidden])")
-        assert not page.is_visible("#chance .chance-label")
-        page.click("#chance-toggle")
-        page.wait_for_selector("#chance.show")
+        page.wait_for_timeout(500)
+        assert page.inner_text("#replay-pct") == "", "a model at the table shows no chance without the guide"
 
         watcher = browser.new_context().new_page()
         try:
@@ -141,8 +95,7 @@ def test_a_seat_sees_its_chance_once_a_model_sits_and_a_spectator_never(server, 
             watcher.wait_for_selector("#players .player-row")
             assert watcher.evaluate("() => state.seat") is None
             watcher.wait_for_timeout(500)
-            assert not watcher.is_visible("#chance"), "a spectator is shown no seat's chance, nor its row"
-            assert not watcher.is_visible("#chance-toggle")
+            assert watcher.inner_text("#replay-pct") == "", "a spectator is shown no seat's chance"
         finally:
             watcher.context.close()
     finally:

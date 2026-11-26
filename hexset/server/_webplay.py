@@ -10,6 +10,7 @@ objects `state_view()` sent rather than constructing an `Action` from parts.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import random
 from typing import Iterable, NamedTuple, Sequence
 
 from hexset.actions import (
@@ -745,14 +746,21 @@ def render_feed(
 
 
 def _is_split_knight_play(
-    steps: list[tuple[int, Action | None, tuple[Trade, ...]]], index: int, actor: int
+    steps: list[tuple[int, Action | None, tuple[Trade, ...]]], index: int, actor: int,
+    last: bool | None = None,
 ) -> bool:
     """Whether `steps[index]`, a `PLAY_KNIGHT` that did not end the game, is a
     bare card play followed by its own `MOVE_ROBBER` step, as against a
     journalled knight whose `a`/`b` carry that robber move. The *next* step is
-    the exact test; operand values cannot distinguish the two shapes."""
+    the exact test; operand values cannot distinguish the two shapes. For the
+    last step, with no next one, `last` says (`GameSession.restore`); left
+    `None`, a bare card (`a` and `b` both 0) is a split play whose robber move
+    is still owed."""
     if index + 1 >= len(steps):
-        return False
+        if last is not None:
+            return last
+        _, action, _ = steps[index]
+        return action is not None and action.a == 0 and action.b == 0
     next_actor, next_action, _ = steps[index + 1]
     return (
         next_actor == actor
@@ -785,6 +793,14 @@ def _concrete(state, seat: int) -> bool:
     counts an observed state holds for a seat it cannot see."""
     return not (is_hidden(state.hands[seat]) or is_hidden(state.dev_cards[seat])
                 or is_hidden(state.new_dev_cards[seat]))
+
+def reseed(game: Game, seeds: dict) -> None:
+    """Draw `game`'s chance afresh (`journal.reseeds`'s entry): new dice and
+    steal streams (`hexset.chance.Live.reseed`) and the development cards
+    still in the deck reshuffled."""
+    game.chance.reseed(seeds["dice"], seeds["steals"])
+    random.Random(seeds["deck"]).shuffle(game._state.deck)
+
 
 @dataclass
 class GameSession:
@@ -1311,9 +1327,16 @@ class GameSession:
         journal: Journal | None = None,
         notes: dict[int, list[tuple[int, RoundNote]]] | None = None,
         retired: dict[int, list[int]] | None = None,
+        reseeds: dict[int, dict] | None = None,
+        split_last: bool | None = None,
     ) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
-        where it left off. Every step with a real `action` goes through
+        where it left off. A Knight that is the last of `steps` is played as a
+        bare card, its robber move still owed, where `split_last` is true, or,
+        with `split_last` `None`, where it is a bare card in the file
+        (`_is_split_knight_play`); a replay cut short just after a Knight
+        whose robber move follows in the file passes true. `reseeds` (`journal.reseeds`) draw the game's chance
+        afresh at the step each names (`reseed`). Every step with a real `action` goes through
         `apply_action`, so the log, the per-seat rolls and the round numbering
         are rebuilt as a consequence of replaying; `action is None` is a
         manual trade, re-executed rather than re-gated. `notes` go back at the
@@ -1325,7 +1348,10 @@ class GameSession:
             raise ValueError("restore would rewrite the journal it is reading")
         notes = notes or {}
         retired = retired or {}
+        reseeds = reseeds or {}
         for index, (actor, action, trades) in enumerate(steps):
+            if self.steps in reseeds:
+                reseed(self.game, reseeds[self.steps])
             for seat in retired.get(self.steps, ()):
                 lock_seat(self.game, seat)
             for note_round, note in notes.get(self.steps, ()):
@@ -1334,13 +1360,15 @@ class GameSession:
                 self.replay_trades(actor, trades)
                 continue
             if action.type is ActionType.PLAY_KNIGHT:
-                self._apply_knight(actor, action, trades, steps, index)
+                self._apply_knight(actor, action, trades, steps, index, split_last)
                 continue
             if action not in legal_actions(self.game, actor):
                 raise ResumeError(
                     f"step {self.steps}: {action} is not legal in {self.game.phase.name}"
                 )
             self.apply_action(actor, action, replay=trades)
+        if self.steps in reseeds:
+            reseed(self.game, reseeds[self.steps])
         for seat in retired.get(self.steps, ()):
             lock_seat(self.game, seat)
         for note_round, note in notes.get(self.steps, ()):
@@ -1348,6 +1376,31 @@ class GameSession:
         self.journal = journal
         if journal is not None:
             journal.reopened(at_step=self.steps)
+
+    def transplant(self, other: "GameSession") -> None:
+        """Take `other`'s position, a replay of this game to an earlier step,
+        as this session's own: the game's state, chance and bookkeeping, the
+        log and the step count. The game object, the journal, the seats'
+        traders and the table's trade settings stay this session's, so
+        everything holding them plays on from the new position. Whatever was
+        pending (an undo point, an open round, held bot steps) is dropped, and
+        the epoch moves on, as after an undo."""
+        kept = {"gates", "trade_mode", "embargoes", "turn_cap"}
+        for name, value in vars(other.game).items():
+            if name not in kept:
+                setattr(self.game, name, value)
+        self.events = other.events
+        self.steps = other.steps
+        self.last_roll_by_seat = dict(other.last_roll_by_seat)
+        self.awaiting_confirm = other.awaiting_confirm
+        self.epoch += 1
+        self._broadcast_turn = None
+        self._roads = None
+        self._already_offered = set()
+        self._offers_made = 0
+        self._undo = None
+        self.open_round = None
+        self._held = []
 
     def replay_trades(self, actor: int, trades: tuple[Trade, ...]) -> None:
         """Exchanges already agreed elsewhere, as a step of their own: a manual
@@ -1380,6 +1433,7 @@ class GameSession:
         trades: tuple[Trade, ...],
         steps: list[tuple[int, Action | None, tuple[Trade, ...]]],
         index: int,
+        split_last: bool | None = None,
     ) -> None:
         """Replay one journalled `PLAY_KNIGHT` step: a bare card, or one whose
         `action.a`/`action.b` carry a robber move this engine resolves
@@ -1396,7 +1450,7 @@ class GameSession:
                 f"step {self.steps}: {action} is not legal in {self.game.phase.name}"
             )
         self.apply_action(actor, bare, replay=())
-        if is_over(self.game) or _is_split_knight_play(steps, index, actor):
+        if is_over(self.game) or _is_split_knight_play(steps, index, actor, split_last):
             return
         move = Action(ActionType.MOVE_ROBBER, action.a, action.b)
         if move not in legal_actions(self.game, actor):

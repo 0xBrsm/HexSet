@@ -70,12 +70,12 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
-from hexset.actions import build_space, legal_actions
+from hexset.actions import ActionType, build_space, legal_actions
 from hexset.arena import BOT_PROFILE_FIELDS, PRESETS, preset_profile, registered_presets, spawn as spawn_entrant
 from hexset.board.board import BOARD_MODES, Board, base_board
 from hexset.bots import Bot
 from hexset.chance import for_rules
-from hexset.clients.onnxmeta import PROFILE_KEYS, modes_of, read_metadata
+from hexset.clients.onnxmeta import modes_of, read_metadata
 from hexset.game import Game, Phase, is_over, lock_seat, may_act, pending_free_roads, start
 from hexset.onnx_record import record_from_game
 from hexset.record import from_events, open_record
@@ -84,13 +84,15 @@ from hexset.rules import GAME_TYPES, STANDARD_GAME, GameType, rules_from
 from hexset.trading import holds
 
 from . import _journal as journal
+from ._stats import seat_stats
+from hexset.guides import guide_provider
 from ._runner import BotRunner, DecisionFile, LocalSearchBrain, LocalTransport
 from ._seating import SETUP_PHASES, unlock_seat
 from ._webplay import GameSession, ResumeError
 from .constants import PROFILE_FIELDS, profile_value
 from .rankings import MIN_GAMES as RANKINGS_MIN_GAMES, Rankings
 from .ranked import TURN_SECONDS, RankedQueue
-from .wire import action_to_wire, board_layout, round_offer_from_wire, signed_bundle_from_wire
+from .wire import action_to_wire, wire_to_action, board_layout, round_offer_from_wire, signed_bundle_from_wire
 
 __all__ = [
     "API_VERSION",
@@ -309,16 +311,19 @@ class Origin:
     """Where a request came from, as the transport saw it: `ip` the client's
     address (behind a proxy, the one its forwarding header carried), `via` the
     route it actually arrived on (`"http"` for `/api/*`, `"mcp"` for a tool
-    call), its `User-Agent`, the API key it sent, if any, and `page`, whether
-    the browser marked it as sent by this server's own page (`web.py`). In-process
-    callers (the server's own bot seats, tests) pass none, and are neither
-    stamped nor limited."""
+    call), its `User-Agent`, the API key it sent, if any, `page`, whether
+    the browser marked it as sent by this server's own page (`web.py`), and
+    `page_id`, the id of the page token it carried where the registered
+    guide read one (`hexset.guides`, `page_id`). In-process callers (the
+    server's own bot seats, tests) pass none, and are neither stamped nor
+    limited."""
 
     ip: str | None = None
     via: str = "http"
     user_agent: str | None = None
     key: str | None = None
     page: bool = False
+    page_id: str | None = None
 
 
 def client_kind(origin: Origin | None) -> str:
@@ -343,6 +348,8 @@ def stamp_client(client: dict, origin: Origin | None, holder: str | None = None)
         return {**client, "kind": kind}
     ua = (origin.user_agent or "")[:MAX_USER_AGENT_LENGTH] or None
     stamped = {**client, "kind": kind, "via": origin.via, "ip": origin.ip, "ua": ua}
+    if origin.page_id:
+        stamped["page"] = origin.page_id
     return {**stamped, "key": holder} if holder else stamped
 
 
@@ -437,8 +444,8 @@ class Offered:
     """One entry the picker offers: the entrant spec it seats, for a model
     file the `name`, `version` and `commit` the file declares, and the
     `profile` a preset was registered with (`hexset.arena.preset_profile`)
-    or a model file declares (`owner`, `url`, `description`,
-    `hexset.clients.onnxmeta.PROFILE_KEYS`)."""
+    or, of a model file, the `label` it declares (`SERVED_PROFILE_KEYS`).
+    `public` is what clients see: everything but `spec` and `commit`."""
 
     spec: str
     name: str | None = None
@@ -447,7 +454,7 @@ class Offered:
     profile: tuple[tuple[str, str], ...] = ()
 
     def public(self) -> dict:
-        fields = (("name", self.name), ("version", self.version), ("commit", self.commit), *self.profile)
+        fields = (("name", self.name), ("version", self.version), *self.profile)
         return {key: value for key, value in fields if value}
 
 
@@ -529,12 +536,20 @@ def model_catalogue() -> dict[str, dict[str, Offered]]:
     return catalogue
 
 
+#: The profile fields of a model file's metadata the server shows clients: a
+#: file's `owner`, `url` and `description` (`PROFILE_KEYS`) stay on the
+#: server, so what a file says of how it was built or how it searches is not
+#: served with it.
+SERVED_PROFILE_KEYS = ("label",)
+
+
 def _declared_profile(path: Path, meta: dict[str, str]) -> tuple[tuple[str, str], ...]:
-    """The profile fields a model file declares, each held to a client's
-    lengths (`constants.profile_value`); one it would refuse is logged once
-    and left out."""
+    """The profile fields a model file declares that the server shows
+    (`SERVED_PROFILE_KEYS`), each held to a client's lengths
+    (`constants.profile_value`); one it would refuse is logged once and left
+    out."""
     profile = []
-    for key in PROFILE_KEYS:
+    for key in SERVED_PROFILE_KEYS:
         if key not in meta:
             continue
         try:
@@ -625,6 +640,18 @@ def wait_query(query: str) -> tuple[int | None, float]:
     return after, max(0.0, min(wait, MAX_WAIT_SECONDS))
 
 
+def step_query(query: str) -> int | None:
+    """The `step` a replay read stops after, or `None` where it names a
+    `round` instead. Clamped by the caller, like a round."""
+    raw = parse_qs(query).get("step", [None])[0]
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise ApiError("`step` is a step number") from None
+
+
 def round_query(query: str) -> int:
     """The `round` a replay read is stopping at. The caller clamps it against
     the game's last round rather than refusing an out-of-range one."""
@@ -694,6 +721,11 @@ class Config:
     # is offered, it rates every unranked table, seated or not; elsewhere, and
     # with None, a table's own model seat rates it (`_rater`).
     chance_model: str | None = None
+    # The model a page seat's guide reads with (`Tables.guide`): an entry
+    # `model_catalogue` offers as a model file. Where a runtime registered a
+    # guide (`hexset.guides`), every unranked duel of a game type the model is
+    # offered at offers one; elsewhere, and with None, none does.
+    guide_model: str | None = None
     # Worker processes a seated model that searches by paired rollouts plays
     # its worlds out in (`onnxbot.spawn`'s `workers`): every seat of one file
     # shares one pool of them, kept in `rollout_pools` and stopped by
@@ -818,6 +850,18 @@ class Table:
     # The last `GET /api/chance` answer, keyed by `(version, seat)`: a page
     # polling an unchanged table is answered without running the model again.
     chance_read: tuple | None = field(default=None, repr=False)
+    # The table's guide (`Tables.guide`), made the first time a seat asks.
+    # The table's guide (`hexset.guides`), once a page seat turns it on.
+    guide: Any = field(default=None, repr=False)
+    guide_offered: bool | None = field(default=None, repr=False)
+    # The journal as `game_stats` last read it: (its size, its events, the board).
+    stats_read: tuple | None = field(default=None, repr=False)
+    # The file a game reopened over was read from (`journal_path`), or False
+    # where there is none.
+    journal_found: Path | bool | None = field(default=None, repr=False)
+    # Where a table playing a game on from another's position came from
+    # (`Tables.play_from`): `{"code", "step", "round"}`; `None` for any other.
+    branch: dict | None = field(default=None, repr=False)
 
     def bump(self, clock: bool = True) -> None:
         """Marks this table changed and wakes everyone parked on it. With
@@ -866,6 +910,8 @@ class Table:
         touched for `TABLE_TTL_SECONDS`."""
         self.closed = True
         self.stop_runners()
+        if self.guide is not None:
+            self.guide.close()
         # Nothing more goes into the file from this table: the game's next
         # line is written by the table its code reopens.
         self.session.journal = None
@@ -948,8 +994,126 @@ class Table:
         state["seats"] = [seat.public(i, labels.get(i)) for i, seat in enumerate(self.seats)]
         state["version"] = self.version
         state["your_move"], state["waiting_on"] = your_move(state)
+        if viewer is not None and not omniscient and self.page_seat(viewer) and not self.session.ranked:
+            state["guide"] = self.guide_view(viewer)
+        if self.branch is not None:
+            state["branch"] = dict(self.branch)
         return state
 
+    def journal_path(self) -> Path | None:
+        """The game's journal: the one it writes to, or for a game reopened
+        over, which writes nothing more, the file it was reopened from."""
+        path = getattr(self.session.journal, "path", None)
+        if path is not None:
+            return Path(path)
+        if self.journal_found is None:
+            self.journal_found = journal.most_recent(journal_dir(self.config), self.code) or False
+        return self.journal_found or None
+
+    def _journal_read(self) -> tuple[list[dict], Board] | None:
+        """The journal's events and the board, read again only once the
+        file has grown; `None` without a journal."""
+        path = self.journal_path()
+        if path is None:
+            return None
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return None
+        cached = self.stats_read
+        if cached is None or cached[0] != size:
+            events = journal.read(path)
+            board = self.session.game.state(0, hidden=False).board
+            cached = (size, events, board)
+            self.stats_read = cached
+        return cached[1], cached[2]
+
+    def game_stats(self, seat: int) -> dict | None:
+        """`seat`'s dice and robber numbers beside its opponents' so far
+        (`_stats.seat_stats`), read from the game's journal, which is read
+        again only once it has grown. `None` without a journal."""
+        read = self._journal_read()
+        return None if read is None else seat_stats(read[0], read[1], seat)
+
+    def taken_back(self, seat: int) -> list[dict]:
+        """`seat`'s graded moves that were taken back
+        (`journal.taken_back_notes`), forced ones left out, read from the
+        journal as `game_stats` reads it."""
+        read = self._journal_read()
+        if read is None:
+            return []
+        provider = guide_provider()
+        if provider is None:
+            return []
+        return [provider.page_note_of(n)
+                for n in journal.taken_back_notes(read[0]) if n.get("seat") == seat and n.get("class") != "forced"]
+
+    def flags_file(self) -> Path | None:
+        """Where this game's review flags are kept (the guide's
+        `flags_file`), `None` without a journal or a guide."""
+        journal_, provider = self.session.journal, guide_provider()
+        return None if journal_ is None or provider is None else provider.flags_file(journal_.path)
+
+    def card_flags(self, seat: int) -> list[str]:
+        """The guide cards `seat` has flagged for review now, by the page's
+        key for each card (`POST /api/flag`)."""
+        journal_, provider = self.session.journal, guide_provider()
+        return [] if journal_ is None or provider is None else provider.card_flags(journal_.path, seat)
+
+    def guided_before(self, seat: int) -> bool:
+        """Whether `seat`'s guide was ever on at this table, live or in its
+        journal."""
+        if self.guide is not None and seat in self.guide.seats:
+            return True
+        read = self._journal_read()
+        return read is not None and any(e.get("kind") == "trainer" and e.get("seat") == seat
+                                        and e.get("use") in journal.GUIDE_USES for e in read[0])
+
+    def saved_guide(self, seat: int) -> dict | None:
+        """`seat`'s guide at a game over whose table has no guide of the
+        seat's on (one reopened from its journal), read from the journal
+        alone: on, with nothing to read or hint, every note not taken back
+        (`journal.guide_notes`), the chance its last graded move left, `stats`
+        and `taken_back`; `saved` true. `None` where the seat never turned its
+        guide on, or no runtime registered a guide."""
+        read, provider = self._journal_read(), guide_provider()
+        if read is None or provider is None:
+            return None
+        events = read[0]
+        if not any(e.get("kind") == "trainer" and e.get("seat") == seat and e.get("use") in journal.GUIDE_USES for e in events):
+            return None
+        notes = [provider.page_note_of(n) for n in journal.guide_notes(events) if n.get("seat") == seat]
+        return {"offered": True, "takeback": False, "on": True, "saved": True, "reading": "none", "grading": 0,
+                "hint": None, "notes": notes, "chance": provider.saved_chance(notes), "stats": self.game_stats(seat),
+                "taken_back": self.taken_back(seat)}
+
+    def guide_view(self, seat: int) -> dict:
+        """`seat`'s guide as its page shows it: `offered` whether this table
+        has one to turn on, `takeback` whether `POST /api/takeback` has a
+        move of the seat's to take back, and once it is on, the guide's
+        own view (`hexset.guides`) with `taken_back`, the seat's graded moves
+        taken back (`taken_back`); at a game over with no guide of the seat's on,
+        the guide the journal saved (`saved_guide`)."""
+        moved = any(event.actor == seat and event.action is not None for event in self.session.events)
+        if self.guide is not None and seat in self.guide.seats:
+            return {"offered": True, "takeback": moved, **self.guide.view(seat, self.session.steps),
+                    "stats": self.game_stats(seat), "flags": self.card_flags(seat),
+                    "taken_back": self.taken_back(seat)}
+        if is_over(self.session.game):
+            saved = self.saved_guide(seat)
+            if saved is not None:
+                return {**saved, "flags": self.card_flags(seat)}
+        if self.guide_offered is None:
+            self.guide_offered = guide_spec(self.config, self.session.game_type.name) is not None
+        offered = self.guide_offered and two_seats(self.session.game)
+        return {"offered": offered, "takeback": offered and moved, "on": False}
+
+
+    def guide_position(self) -> None:
+        """Let the guide start reading whatever guided seat now owes a
+        decision. Called with the table's lock held, after any change."""
+        if self.guide is not None:
+            self.guide.position(self.session.game, self.session.steps)
 
     def page_seat(self, seat: int | None) -> bool:
         """Whether this server's own page claimed `seat`. Undo is the page's:
@@ -1146,6 +1310,60 @@ def _rater(session: GameSession, seats: list[Seat], config: Config) -> tuple[str
     return None
 
 
+# The actions whose outcome the game's chance decides: a take back that goes
+# back past one draws the chance afresh (`Tables.takeback`).
+CHANCE_ACTIONS = frozenset({ActionType.ROLL, ActionType.BUY_DEV_CARD, ActionType.MOVE_ROBBER,
+                            ActionType.PLAY_KNIGHT})
+
+
+def takeback_step(steps: list, seat: int, played: int) -> int | None:
+    """The step a take back of `seat`'s most recent move returns to: the
+    last of the first `played` journalled `steps` that is a move of the
+    seat's own (not a trade), stepping back over a robber move that is the
+    second half of a Knight the seat played just before it, so the Knight
+    goes back with it, and over the seat's earlier cards of a discard, so
+    the whole discard goes back (other seats' cards of the same discard
+    between them are taken back too). `None` where the seat has made no
+    move."""
+    for index in range(min(played, len(steps)) - 1, -1, -1):
+        actor, action, _ = steps[index]
+        if actor != seat or action is None:
+            continue
+        if action.type is ActionType.MOVE_ROBBER and index > 0:
+            before_actor, before, _ = steps[index - 1]
+            if before_actor == seat and before is not None and before.type is ActionType.PLAY_KNIGHT:
+                return index - 1
+        if action.type is ActionType.DISCARD:
+            first = index
+            for earlier in range(index - 1, -1, -1):
+                earlier_actor, earlier_action, _ = steps[earlier]
+                if earlier_action is None or earlier_action.type is not ActionType.DISCARD:
+                    break
+                if earlier_actor == seat:
+                    first = earlier
+            return first
+        return index
+    return None
+
+
+def two_seats(game) -> bool:
+    """Whether two seats play `game`, the rest locked: the only games the
+    guide reads."""
+    return sum(p not in game.locked for p in range(game.num_players)) == 2
+
+
+def guide_spec(config: Config, kind: str) -> str | None:
+    """The model file the server's `guide_model` is offered as at game type
+    `kind`, or `None` where it names none, is not offered there, or no
+    runtime registered a guide (`hexset.guides`)."""
+    if not config.guide_model or guide_provider() is None:
+        return None
+    offered = model_catalogue().get(kind, {}).get(config.guide_model)
+    if offered is None or offered.name is None:     # not offered, or a preset
+        return None
+    return offered.spec
+
+
 def read_chance(session: GameSession, seats: list[Seat], seat: int, config: Config) -> dict:
     """`{"rater", "chance"}`: `seat`'s chance of winning `session`'s game as
     its model rates it (`_rater`, `win_chance`). `rater` is `None` with no
@@ -1171,8 +1389,7 @@ def read_chance(session: GameSession, seats: list[Seat], seat: int, config: Conf
 def before_end(code: str, seats: list[Seat], events: list[dict]) -> GameSession | None:
     """A finished game's last position still in play: the journalled game
     replayed to just before the step that ended it, or the nearest earlier
-    step a replay can stop at (it cannot stop inside a knight's robber move,
-    say). `None` where no such position replays."""
+    step a replay can stop at. `None` where no such position replays."""
     steps, _ = journal.replayable_rounds(events)
     for upto in range(len(steps) - 1, -1, -1):
         try:
@@ -1303,7 +1520,15 @@ def replay_session(code: str, seats: list[Seat], events: list[dict], upto: int) 
     steps, _ = journal.replayable_rounds(events)
     notes = {at: note for at, note in journal.notes_of(events).items() if at < upto}
     retired = {at: seats for at, seats in journal.retirements(events).items() if at <= upto}
-    session.restore(steps[:upto], notes=notes, retired=retired)
+    reseeds = {at: seeds for at, seeds in journal.reseeds(events).items() if at <= upto}
+    # Cut just after a Knight whose robber move follows: the robber move is owed.
+    split = None
+    if 0 < upto < len(steps) and steps[upto - 1][1] is not None \
+            and steps[upto - 1][1].type is ActionType.PLAY_KNIGHT:
+        actor, following, _ = steps[upto]
+        split = (actor == steps[upto - 1][0] and following is not None
+                 and following.type is ActionType.MOVE_ROBBER)
+    session.restore(steps[:upto], notes=notes, retired=retired, reseeds=reseeds, split_last=split)
     return session
 
 
@@ -1328,6 +1553,7 @@ def reopen_session(
             journal.replayable(events),
             notes=journal.notes_of(events),
             retired=journal.retirements(events),
+            reseeds=journal.reseeds(events),
         )
     except (ResumeError, ValueError, KeyError) as error:
         # The file is kept, but closed, so the next request deals a game
@@ -1351,6 +1577,19 @@ def resume_journal(session: GameSession, path: Path) -> None:
     from, marking the seam."""
     session.journal = journal.Journal(directory=str(path.parent), game_id=path.stem)
     session.journal.reopened(at_step=session.steps)
+
+
+def _write_lines(path: Path, lines: list[dict]) -> None:
+    """`lines` as the JSON-lines file at `path`, written to a temporary file
+    beside it, flushed to disk and renamed into place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.part")
+    with open(temporary, "w", encoding="utf-8") as handle:
+        for line in lines:
+            handle.write(json.dumps(line, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
 
 
 class Tables:
@@ -1403,6 +1642,23 @@ class Tables:
                 if ip and not self.config.is_exempt(ip):
                     dealt.setdefault(_allowance(ip, (client or {}).get("key")), []).append(at)
         return {ip: deque(sorted(times)) for ip, times in dealt.items()}
+
+    def _clear(self, origin: Origin | None, table: Table, seat: int, use: str) -> None:
+        """Let the registered guide (`hexset.guides`) refuse a guide request
+        it does not clear (`clear`), raising an `ApiError`: `use` is "start"
+        for a guided game starting (the seat's guide turned on at a table
+        where it never was, or a game played on from a position), else
+        "guide", "hint" or "takeback"."""
+        clear = getattr(guide_provider(), "clear", None)
+        if clear is not None:
+            clear(self, origin, table, seat, use)
+
+    def page_check(self, origin: Origin | None, payload: dict) -> dict:
+        """`POST /api/page`: the page's answer to a check its guide asks for,
+        handed to the registered guide (`page_check`); `{"verified": true}`
+        where there is none to hand it to."""
+        check = getattr(guide_provider(), "page_check", None)
+        return check(self, origin, payload) if check is not None else {"verified": True}
 
     def holder(self, origin: Origin | None) -> str | None:
         """The name of whoever `origin`'s API key was issued to, `None` when
@@ -1861,7 +2117,13 @@ class Tables:
             return None
         # The one read of this file; both callers below work off it.
         events = journal.read(path)
-        seats = reopened_seats(events)
+        return self._rebuilt(code, path, events, reopened_seats(events))
+
+    def _rebuilt(self, code: str, path: Path, events: list[dict], seats: list[Seat],
+                 marker: bool = True) -> tuple[Table, dict[int, Bot]] | None:
+        """`_reopen`'s table, from the journal at `path` already read as
+        `events`, seated as `seats`; `marker` writes the `reopened` line
+        that marks the seam."""
         session = reopen_session(code, seats, path, events, attach=False)
         if session is None:
             return None
@@ -1876,7 +2138,10 @@ class Tables:
         for index, bot in spawned.items():
             session.set_trader(index, bot)
         if live:
-            resume_journal(session, path)
+            if marker:
+                resume_journal(session, path)
+            else:
+                session.journal = journal.Journal(directory=str(path.parent), game_id=path.stem)
             self._watch(session)
         table = Table(
             code=code,
@@ -1885,6 +2150,9 @@ class Tables:
             session=session,
             layout=board_layout(board),
         )
+        branched = next((e for e in events if e.get("kind") == "branch"), None)
+        if branched is not None:
+            table.branch = {"code": branched.get("code"), "step": branched.get("step"), "round": branched.get("round")}
         return table, spawned
 
     def by_token(self, token: str | None) -> tuple[Table, int]:
@@ -1984,7 +2252,11 @@ class Tables:
             raise ApiError(f"waiting for seats: {names}", status=409)
         if table.session.trade_wait():
             raise ApiError("waiting for trade answers", status=409)
+        step, round_num = table.session.steps, table.session.round
         table.session.submit(seat, wire)
+        if table.guide is not None:
+            table.guide.played(seat, step, round_num, wire_to_action(wire))
+        table.guide_position()
         table.bump()
         return table.view(seat)
 
@@ -1996,8 +2268,222 @@ class Tables:
         if not table.page_seat(seat):
             raise ApiError("undo is for the web page; a client plays each move as meant", status=403)
         table.session.undo_last_build(seat)
+        if table.guide is not None:
+            table.guide.undone(table.session.steps)
+        table.guide_position()
         table.bump()
         return table.view(seat)
+
+    def guide(self, table: Table, seat: int, origin: Origin | None = None) -> dict:
+        """`POST /api/guide`: turn on `seat`'s guide, the one a runtime
+        registered (`hexset.guides`), built the first time a seat of the
+        table asks. The view carries it (`Table.view`'s `guide`). The page's
+        alone, at an unranked duel of a game type the server's `guide_model`
+        is offered at: a 403 or a 409 otherwise. The game's journal records
+        that the seat had help. The registered guide may refuse `origin`
+        (`_clear`); a seat whose guide was never on at this table starts a
+        guided game."""
+        self._guideable(table, seat)
+        self._clear(origin, table, seat, "guide" if table.guided_before(seat) else "start")
+        if table.guide is None:
+            spec = guide_spec(self.config, table.session.game_type.name)
+            table.guide = guide_provider().table_guide(table, spec, self.config)
+        if seat not in table.guide.seats:
+            table.guide.turn_on(seat)
+            if table.session.journal is not None:
+                table.session.journal.trainer(seat=seat, use="guide")
+        table.guide_position()
+        table.bump(clock=False)
+        return table.view(seat)
+
+    def hint(self, table: Table, seat: int, origin: Origin | None = None) -> dict:
+        """`POST /api/hint`: show `seat` its guide's move for the decision in
+        front of it, once the guide has read it (the view's `guide.hint`). A
+        409 where the seat's guide is off."""
+        if table.guide is None or seat not in table.guide.seats:
+            raise ApiError("turn the guide on first", status=409)
+        self._clear(origin, table, seat, "hint")
+        step = table.session.steps
+        table.guide.hint(seat, step)
+        if table.session.journal is not None:
+            table.session.journal.trainer(seat=seat, use="hint")
+        table.bump(clock=False)
+        return table.view(seat)
+
+    def flag(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/flag`: flag one of the guide's cards for review, or
+        unflag it, as `seat`'s page showed it: `{"card", "of", "id", "step",
+        "round", "text", "grade", "played", "best", "flagged"}`, checked by
+        the guide (`flag_row`). Appended, fsynced, to the game's flags file
+        (`Table.flags_file`), with the table's code, the game, the seat and
+        the time; the view's
+        `guide.flags` lists the cards flagged now. The page's alone; a 409
+        for a game with no journal, a 400 for a malformed flag."""
+        from hexset.gamelog import append
+
+        if not table.page_seat(seat):
+            raise ApiError("flags are for the web page", status=403)
+        path = table.flags_file()
+        if path is None:
+            raise ApiError("this game has no journal to keep flags in", status=409)
+        card, text = payload.get("card"), payload.get("text")
+        if not isinstance(card, str) or not card or len(card) > 400 or not isinstance(text, str) or len(text) > 4000:
+            raise ApiError("a flag names its card and the card's text")
+        try:
+            row = guide_provider().flag_row({**{k: payload.get(k) for k in ("of", "id", "step", "round", "grade", "played", "best",
+                                                          "flagged")},
+                            "card": card, "text": text, "code": table.code, "game": table.session.journal.game_id,
+                            "seat": seat}, time.time())
+        except ValueError as error:
+            raise ApiError(str(error)) from None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        append(path, row)
+        table.bump(clock=False)
+        return table.view(seat)
+
+    def takeback(self, table: Table, seat: int, origin: Origin | None = None) -> dict:
+        """`POST /api/takeback`: take the game back to just before `seat`'s
+        most recent move, however many moves ago and whoever moved since.
+        The journal records an undo back to that step; where the moves taken
+        back include a roll, a card drawn or a steal, the game's chance is
+        drawn afresh from there (`Journal.reseed`), so nothing seen in them
+        comes round again. The table then plays on from the position the
+        journal replays to (`GameSession.transplant`); a trade round open at
+        the time goes with the moves. The page's alone, at an unranked table
+        that offers a guide (as `POST /api/guide`); a 400 with no move of the
+        seat's to take back."""
+        self._guideable(table, seat)
+        self._clear(origin, table, seat, "takeback")
+        session = table.session
+        if session.journal is None:
+            raise ApiError("this game has no journal to take back from", status=409)
+        events = journal.read(session.journal.path)
+        steps, _ = journal.replayable_rounds(events)
+        target = takeback_step(steps, seat, session.steps)
+        if target is None:
+            raise ApiError("no move of yours to take back")
+        crossed = any(action is not None and action.type in CHANCE_ACTIONS for _, action, _ in steps[target:])
+        session.journal.undo(session.game, back_to=target)
+        if crossed:
+            draw = random.SystemRandom()
+            session.journal.reseed(at=target, dice=draw.getrandbits(63), steals=draw.getrandbits(63),
+                                   deck=draw.getrandbits(63))
+        events = journal.read(session.journal.path)
+        rebuilt = replay_session(table.code, table.seats, events, target)
+        if rebuilt is None or rebuilt.steps != target:
+            raise ApiError("the game could not be replayed to that move", status=500)
+        session.transplant(rebuilt)
+        session.journal.trainer(seat=seat, use="takeback")
+        if table.guide is not None:
+            table.guide.undone(target)
+        table.guide_position()
+        table.bump()
+        return table.view(seat)
+
+    def play_from(self, table: Table, seat: int, payload: dict, origin: Origin | None = None) -> dict:
+        """`POST /api/playfrom` with `{"step": N}`: a new table, under a code
+        of its own, playing the game on from the position after its first N
+        steps: the same board and seats, each bot the same entry and spec,
+        the seat asking holding its own seat there with the guide on. Its
+        journal is the game's up to that point (`journal.branched`), moves
+        taken back and graded moves included, so its replay and the guide's
+        review start at the deal; what the guide kept of those moves goes
+        with it (`carry_readings`). The dice, steals and the development cards still
+        in the deck are drawn afresh from that step (`Journal.reseed`). The
+        game asked from is left as it is, finished or not. The answer is
+        `POST /api/games`'s: the new seat's `token` with its view. The
+        page's alone, at an unranked table that offers a guide (as `POST
+        /api/guide`); a 400 for a step outside the game, a 409 where the
+        game does not replay to that step or is over there."""
+        with table.lock:
+            self._guideable(table, seat)
+            requester = table.seats[seat]
+        # A new guided game, cleared before anything is built.
+        self._clear(origin, table, seat, "start")
+        with table.lock:
+            client = dict(requester.client or {})
+            source_code = table.code
+        raw = payload.get("step")
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise ApiError("step is a whole number of steps")
+        path = journal.most_recent(journal_dir(self.config), source_code)
+        if path is None:
+            raise ApiError("this game has no journal to play from", status=409)
+        events = journal.read(path)
+        steps, _ = journal.replayable_rounds(events)
+        if not 0 <= raw <= len(steps):
+            raise ApiError(f"step is from 0 to {len(steps)}")
+        try:
+            probe = replay_session(source_code, reopened_seats(events), events, raw)
+        except (ResumeError, ValueError, KeyError):
+            probe = None
+        if probe is None or probe.steps != raw:
+            raise ApiError("the game does not replay to that move; step to another one", status=409)
+        if is_over(probe.game):
+            raise ApiError("the game is over at that move", status=409)
+        holder = self.holder(origin)
+        self.admit(origin, holder)
+        try:
+            table_new = self._branch(path, events, raw, seat, client)
+        except BaseException:
+            self.unadmit(origin, holder)
+            raise
+        if origin is not None:
+            table_new.creator_ip = origin.ip or "?"
+        token = table_new.seats[seat].token
+        with table_new.lock:
+            self.guide(table_new, seat)
+            return {"token": token, **table_new.view(seat)}
+
+    def _branch(self, source: Path, events: list[dict], at: int, seat: int, client: dict) -> Table:
+        """`play_from`'s new table, registered with its bots' runners
+        started: `events`, the journal at `source`, cut at step `at` into a
+        journal of its own, the chance drawn afresh from there, `seat` held
+        by `client` with a fresh token. Nothing of it is left on disk where
+        it cannot be built."""
+        provider = guide_provider()
+        directory = journal_dir(self.config)
+        with self._registry_lock:
+            evicted = self._evict_stale(time.monotonic())
+            code = new_code(set(self._tables))
+        for stale in evicted:
+            stale.release()
+        game_id = journal.new_game_id(events[0].get("seed"))
+        lines = journal.branched(events, at, game_id=game_id, code=code)
+        draw = random.SystemRandom()
+        lines.append({"kind": "reseed", "at": at, "dice": draw.getrandbits(63), "steals": draw.getrandbits(63),
+                      "deck": draw.getrandbits(63)})
+        path = Path(directory) / f"{game_id}.jsonl"
+        try:
+            _write_lines(path, lines)
+            # The readings of the graded moves the new game keeps.
+            if provider is not None:
+                provider.carry_readings(source, path, lines, game_id)
+            seats = reopened_seats(lines)
+            token = secrets.token_urlsafe(18)
+            seats[seat] = Seat(kind=SeatKind.PLAYER, name=seats[seat].name, token=token, client=client)
+            rebuilt = self._rebuilt(code, path, lines, seats, marker=False)
+            if rebuilt is None or rebuilt[0].session.steps != at:
+                raise ApiError("the game does not replay to that move; step to another one", status=409)
+        except BaseException:
+            for leftover in (path, *(() if provider is None else (provider.readings_path(path),))):
+                leftover.unlink(missing_ok=True)
+            raise
+        table, spawned = rebuilt
+        with self._registry_lock:
+            self._tables[code] = table
+        self._start_runners(table, spawned)
+        return table
+
+    def _guideable(self, table: Table, seat: int) -> None:
+        if not table.page_seat(seat):
+            raise ApiError("the guide is for the web page", status=403)
+        if table.session.ranked:
+            raise ApiError("a ranked table has no guide", status=409)
+        if guide_spec(self.config, table.session.game_type.name) is None:
+            raise ApiError("no guide is offered at this table's game type", status=409)
+        if not two_seats(table.session.game):
+            raise ApiError("the guide is for two-seat games", status=409)
 
     def rename(self, table: Table, seat: int, name: object) -> dict:
         """`POST /api/name`: set `seat`'s display name. An empty one falls
@@ -2356,16 +2842,22 @@ class Tables:
         cards and then playing on with them.
         """
         code = code.lower()
-        asked = round_query(query)
+        at_step = step_query(query)
+        asked = round_query(query) if at_step is None else 0
         path = journal.most_recent(journal_dir(self.config), code)
         if path is None:
             raise ApiError(f"no game with code {code}", status=404)
         events = journal.read(path)
         steps, rounds = journal.replayable_rounds(events)
         last = max(rounds, default=0)
-        wanted = max(0, min(asked, last))
-        # The first step *past* the wanted round.
-        upto = next((i for i, played in enumerate(rounds) if played > wanted), len(steps))
+        if at_step is not None:
+            # After `step` steps: the round is the last step's.
+            upto = max(0, min(at_step, len(steps)))
+            wanted = rounds[upto - 1] if upto else 0
+        else:
+            wanted = max(0, min(asked, last))
+            # The first step *past* the wanted round.
+            upto = next((i for i, played in enumerate(rounds) if played > wanted), len(steps))
         seats = reopened_seats(events)
         session = replay_session(code, seats, events, upto)
         if session is None:
@@ -2403,11 +2895,70 @@ class Tables:
             rated = session if not is_over(session.game) else before_end(code, seats, events)
             view["chance"] = (read_chance(rated, seats, viewer, self.config) if rated is not None
                               else {"rater": (_rater(session, seats, self.config) or (None,))[0], "chance": None})
+        # A guided seat's chance at that point, as its guide read it then:
+        # from the live table's guide where it has it, else from the graded
+        # moves in the journal.
+        guide_chance = None
+        if viewer is not None and not session.ranked:
+            with self._registry_lock:
+                live = self._tables.get(code)
+            if live is not None and live.guide is not None and viewer in live.guide.seats:
+                guide_chance = live.guide.chance_at(viewer, session.steps)
+            else:
+                notes = [n for n in journal.guide_notes(events) if n["seat"] == viewer and n["step"] < session.steps]
+                provider = guide_provider()
+                guide_chance = provider.saved_chance(notes) if notes and provider is not None else None
         # `version` here is the stand-in's own and means nothing outside it:
         # replay steps by round, not by long poll. `finished` rides along so a
         # client can match the live finished view's observer footing.
-        view["replay"] = {"round": wanted, "last_round": last, "finished": finished}
+        view["replay"] = {"round": wanted, "last_round": last, "step": upto, "last_step": len(steps),
+                          "finished": finished, "guide_chance": guide_chance}
+        # The seat's dice and robber numbers as they stood there, for the
+        # guide's review of the game up to that point.
+        if viewer is not None and not session.ranked:
+            board = session.game.state(0, hidden=False).board
+            view["replay"]["stats"] = seat_stats(events, board, viewer, upto)
+        # The hint the seat's guide gave at this decision, from its saved
+        # reading: never a spectator's, nor at a ranked game.
+        provider = guide_provider()
+        guided = viewer is not None and not session.ranked and provider is not None
+        view["replay"]["hint"] = provider.replay_hint(path, events, viewer, upto, session.game) if guided else None
+        # Every move the seat played at this decision, kept or taken back,
+        # with what its guide said of it.
+        view["replay"]["played"] = provider.replay_played(path, events, viewer, upto, session.game) if guided else []
         return view
+
+    def timeline_view(self, code: str, token: str | None = None) -> dict:
+        """`GET /api/table/<code>/timeline`: the game's steps for a replay
+        strip. `steps` the count; `items`, one a step, `{"round", "actor",
+        "type"}` (`type` an action type's name, `TRADE` for a trade); and for
+        a seat's token at an unranked game, `chance`, the seat's guide's
+        chance after each step, position 0 to `steps` (`chance_series`; from
+        the live guide where it is on, else from the journal's graded moves),
+        and `marks`, `{"step", "class"}` for each graded move of the seat's.
+        Both `null` and empty for anyone else."""
+        code = code.lower()
+        path = journal.most_recent(journal_dir(self.config), code)
+        if path is None:
+            raise ApiError(f"no game with code {code}", status=404)
+        events = journal.read(path)
+        steps, rounds = journal.replayable_rounds(events)
+        items = [{"round": rounds[i], "actor": actor, "type": action.type.name if action is not None else "TRADE"}
+                 for i, (actor, action, _) in enumerate(steps)]
+        viewer = self._replay_viewer(code, token)
+        ranked = bool(events and events[0].get("ranked"))
+        chance, marks = None, []
+        if viewer is not None and not ranked:
+            notes = [n for n in journal.guide_notes(events) if n["seat"] == viewer]
+            with self._registry_lock:
+                live = self._tables.get(code)
+            if live is not None and live.guide is not None and viewer in live.guide.seats:
+                chance = live.guide.series(viewer, len(steps))
+            elif notes and guide_provider() is not None:
+                chance = guide_provider().saved_series(notes, len(steps))
+            marks = [{"step": n["step"], "class": n["class"]} for n in notes if n["class"] != "forced"]
+        return {"steps": len(steps), "last_round": max(rounds, default=0), "items": items,
+                "chance": chance, "marks": marks}
 
     def handle(
         self, method: str, path: str, payload: dict, token: str | None, origin: Origin | None = None
@@ -2451,6 +3002,8 @@ class Tables:
                 return table.layout
             if tail == "replay":
                 return self.replay_view(code, query, token)
+            if tail == "timeline":
+                return self.timeline_view(code, token)
             raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/games":
@@ -2505,6 +3058,8 @@ class Tables:
                 return {"left": self.queue.leave(ticket_id)}
             raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
+        if method == "POST" and path == "/api/page":
+            return self.page_check(origin, payload)
         if method == "POST" and path == "/api/reclaim":
             reclaimed = self.reclaim(
                 str(payload.get("code", "")),
@@ -2519,6 +3074,10 @@ class Tables:
 
         # Everything past here acts on a seat, so it needs a token.
         table, seat = self.by_token(token)
+        if method == "POST" and path == "/api/playfrom":
+            # A finished game plays on from any of its moves too, so this is
+            # not one of `_seated`'s mutations; it takes the locks it needs.
+            return self.play_from(table, seat, payload, origin)
         if method == "GET" and path == "/api/state":
             # Outside the lock below, which the mutation this waits for needs.
             self.await_change(table, query)
@@ -2528,17 +3087,21 @@ class Tables:
             # The session raises `ValueError` for an illegal or out-of-turn
             # move, which is a 400.
             try:
-                return self._seated(table, seat, method, path, payload, token)
+                return self._seated(table, seat, method, path, payload, token, origin)
             except ValueError as error:
                 raise ApiError(str(error)) from None
 
     def _seated(
-        self, table: Table, seat: int, method: str, path: str, payload: dict, token: str
+        self, table: Table, seat: int, method: str, path: str, payload: dict, token: str,
+        origin: Origin | None = None,
     ) -> dict:
         """The routes that act on one seat. Called with the table's lock held.
         Every route but the three reads is a mutation, and one `require_live`
         gate here refuses every POST once `is_over`, so a finished game is
         read-only for its seats as well as for spectators."""
+        if method == "POST" and path == "/api/flag":
+            # A finished game's review flags its cards too.
+            return self.flag(table, seat, payload)
         if method == "POST":
             require_live(table.session.game)
         if method == "GET" and path == "/api/state":
@@ -2553,6 +3116,12 @@ class Tables:
             return self.act(table, seat, payload.get("action") or {}, payload.get("version"))
         if method == "POST" and path == "/api/undo":
             return self.undo(table, seat)
+        if method == "POST" and path == "/api/guide":
+            return self.guide(table, seat, origin)
+        if method == "POST" and path == "/api/hint":
+            return self.hint(table, seat, origin)
+        if method == "POST" and path == "/api/takeback":
+            return self.takeback(table, seat, origin)
         if method == "POST" and path == "/api/name":
             return self.rename(table, seat, payload.get("name"))
         if method == "POST" and path == "/api/bot":

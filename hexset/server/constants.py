@@ -26,6 +26,10 @@ TOKEN_HEADER = "X-HexSet-Token"
 # The header an API key travels on, from a client the owner issued one to.
 KEY_HEADER = "X-HexSet-Key"
 
+# The header a page sends its page token in, where the registered guide
+# stamped the page with one (`hexset.guides`, `stamp_page`).
+PAGE_HEADER = "X-HexSet-Page"
+
 # What a client may say about itself beside its id, on `POST /api/games` and
 # `/api/join` (`api.parse_client`): the latest a client id sent is its profile
 # in the rankings (`rankings.Rankings.seen`).

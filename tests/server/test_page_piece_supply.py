@@ -147,10 +147,13 @@ def test_a_replayed_round_shows_the_open_seats_pieces_as_they_stood(running_serv
             page.locator(".player-row").nth(3).click()
             page.wait_for_selector(".player-row-open")
 
-            label = page.locator("#replay-label")
-            page.click("#replay-first")
+            label = page.locator("#replay-round")
+            # The end of the opening, a step at a time from the strip's own steps.
+            page.evaluate("swipeHinted()")   # the strip's label is the round, not the first-time hint
+            page.evaluate(f"stepReplay({opening['replay']['step']})")
             page.wait_for_function(
-                "() => document.getElementById('replay-label').textContent.startsWith('ROUND 0 /')"
+                f"() => replayStep === {opening['replay']['step']}"
+                " && document.getElementById('replay-round').textContent === 'R0»'"
             )
             # The open row survives the step back, and so does its supply.
             assert page.locator(".player-row-open").count() == 1
@@ -162,11 +165,9 @@ def test_a_replayed_round_shows_the_open_seats_pieces_as_they_stood(running_serv
                 "road": supply["road"] - 2,
             }
 
-            page.click("#replay-next")
-            page.wait_for_function(
-                "() => document.getElementById('replay-label').textContent.startsWith('ROUND 1 /')"
-            )
-            assert label.inner_text().startswith("ROUND 1 /")
+            page.evaluate(f"stepReplay({first['replay']['step']})")
+            page.wait_for_function(f"() => replayStep === {first['replay']['step']}")
+            assert label.inner_text() == "R1»"
             assert _shown(page) == _left(first, supply, 3)
 
             page.locator(".player-row").nth(3).click()

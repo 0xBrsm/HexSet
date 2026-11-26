@@ -46,8 +46,8 @@ engine's board indexing.
 | `name` | The model's name; the server's picker offers the file by it ([serving a model](#serving-a-model)) | Absent: the server does not list the file |
 | `modes` | Game types it plays, comma separated `hexset.rules.GAME_TYPES` names | `standard`; seating it at a table of another type raises, and so does `spawn` given the table's `game_type` |
 | `version` | The model's version, shown with it and journalled with each game it plays | Free text |
-| `commit` | The code commit it was built and served from | Free text; kept as model information |
-| `owner`, `url`, `description` | Shown with it in the model list and on its rankings row | Optional; a value a client's profile would refuse leaves the field out |
+| `commit` | The code commit it was built and served from | Free text; kept as model information, never served to clients |
+| `owner`, `url`, `description` | Model information, never served to clients | Optional |
 | `label` | The name the server shows for it: on the page, in the log, in the model list and on its rankings row. Clients still ask for it by `name` | Absent: shown by its `name`. Cut to 40 characters |
 
 ### How it plays
@@ -204,10 +204,9 @@ game alone unless its `modes` say otherwise, so no file is offered at every
 game type by default. One name is one bot, which may be one file at some game
 types and another at the rest. A file declaring no `name`, or a registered
 bot's name, is not listed, and two offering one name at one game type are
-neither offered there. A file may also declare an `owner`, a `url` and a
-one-sentence `description` (at most 100 characters), shown with it in the
-model list and on its rankings row; one a client's profile would refuse is
-left out.
+neither offered there. Of what a file declares, clients see its `name`,
+`version` and `label`: in the model list and on its rankings row. Its
+`commit`, `owner`, `url` and `description` stay on the server.
 
 `hexset.clients.onnxmeta` reads and writes these keys without a model runtime,
 copying the graph unchanged:

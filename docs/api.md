@@ -14,16 +14,22 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `GET /api/menu` | `{"tabs": [{"label": "...", "url": "..."}]}`, the tabs the server adds to the page's menu for this client ([below](#menu-tabs)) |
 | `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals an unranked game |
 | `POST /api/join` | `{"code": "abcdef", "name": "Alice", "client": {...}}`; claims a random open seat |
+| `POST /api/page` | `{"turnstile": "<answer>"}`: the page's check, for the registered guide; `{"verified": bool}` ([below](#who-may-use-the-guide)) |
 | `POST /api/reclaim` | `{"code": "abcdef", "secret": "...", "probe": false}`; a fresh token for the seat whose client id matches |
 | `POST /api/ranked` | `{"game_type": "standard", "client": {...}}`; a ticket for a ranked game ([below](#ranked-play)) |
 | `GET /api/ranked/<ticket>?wait=N` | `waiting`, or once matched the seat's token and state |
 | `POST /api/ranked/<ticket>/leave` | Leaves the queue |
 | `GET /api/state` | The seat's view, including `legal_actions` |
-| `GET /api/board` | Static board layout |
+| `GET /api/board` | Static board layout; `spots` names each vertex by its numbers, no two alike (`hexset.board.spots.spot_names`) |
 | `GET /api/record` | The seat's ONNX input record, `options` and `space`; 409 unless the seat may act |
 | `GET /api/chance` | The seat's chance of winning as the table's model rates it ([below](#win-chance)); 409 at a ranked table |
 | `POST /api/action` | `{"action": <legal_actions entry>, "version": n}` |
 | `POST /api/undo` | The web page's: take back the seat's last action; see `can_undo` |
+| `POST /api/guide` | The web page's: turn on the seat's guide ([below](#guide)); 409 at a ranked table, at a table more than two seats play, or where no guide is offered |
+| `POST /api/hint` | Show the seat its guide's move for the current decision ([below](#guide)); 409 while the guide is off |
+| `POST /api/takeback` | The web page's: take the game back to just before the seat's last move ([below](#guide)) |
+| `POST /api/flag` | The web page's: flag one of the guide's cards for review, or unflag it ([below](#guide)); a finished game's too |
+| `POST /api/playfrom` | The web page's: `{"step": N}`; a new table playing the game on from the position after `N` steps ([below](#guide)) |
 | `POST /api/name` | `{"name": "Alice"}`; an empty name restores the seat's default |
 | `POST /api/bot` | `{"seat": 1, "model": "mybot"}`; seats a bot on an empty seat or replaces a bot |
 | `POST /api/close` | `{"seat": 1}`; closes an empty seat, or one a bot holds, before the first move |
@@ -31,7 +37,8 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `POST /api/leave` | Retires the caller's seat for the rest of the game; 400 while a trade round awaits it or is its own |
 | `GET /api/table/<code>` | Spectator view: every hand, omniscient |
 | `GET /api/table/<code>/board` | Board layout |
-| `GET /api/table/<code>/replay?round=N` | The position at the end of round `N` |
+| `GET /api/table/<code>/replay?round=N` | The position at the end of round `N`; `?step=N` the position after `N` steps |
+| `GET /api/table/<code>/timeline` | The game's steps, and a seat's guide chance and graded moves at each, for a replay strip |
 
 `/api`, `version`, `models`, `rankings`, `games`, `join`, `reclaim`, the `ranked` routes and the three
 `/api/table/<code>` reads take no token. Codes are six characters from
@@ -150,13 +157,65 @@ otherwise). It is the web page's, for a click taken back: a seat an API or
 MCP client claimed gets a 403 and plays each move as meant.
 
 `GET /api/table/<code>/replay?round=N` clamps `N` to the game's rounds; a
-missing or non-integer `round` is a 400. A token for a seat at that game reads
+missing or non-integer `round` is a 400. `?step=N` in its place reads the
+position after `N` steps (0 is the deal), clamped to the steps played, and the
+round is the last step's. A token for a seat at that game reads
 the round as that seat; any other reader, or no token, reads it omniscient.
 The replay view has empty `legal_actions`, `can_undo` false, `your_move`
 `wait` (`game_over` at a finished game's end), and a `replay` object with
-`round`, `last_round` and `finished`. Read with a seat's token at an unranked
-game, it also carries `chance`, `{"rater", "chance"}` as `GET /api/chance`
-gives them, read at that round.
+`round`, `last_round`, `step`, `last_step`, `finished` and `guide_chance`. Read with a seat's token
+at an unranked game, it also carries `chance`, `{"rater", "chance"}` as `GET
+/api/chance` gives them, read at that round, and `guide_chance` is the seat's
+guide `chance` as it stood at that round's end, from only what the guide read
+up to there: from the live table's guide where the seat's guide is on, else
+from the graded moves in the journal; `null` for anyone else or with nothing
+read.
+
+`replay.hint` is the hint the seat's guide gave at the decision after that
+step, in the shape of the guide's live `hint` ([below](#hints-and-notes)),
+rebuilt by the guide from what it kept of that reading, with no new reading.
+It is the hint of the note the game's line kept at that step (matched by its
+`id`), shown only where what the seat could see there
+(`hexset.game.observed_digest`) is what it saw when the hint was given, so a
+hint for a move later taken back never shows on the line that replaced it.
+Its `id` is the note's. `null` for anyone else, at a ranked game, at another
+seat's step, at a forced move, and where the guide kept nothing of it.
+
+`replay.played` lists every move the seat played at that decision, with the
+note its guide gave it, kept or taken back: the notes of the game's line
+there, and those of moves taken back at the same position, where no undo
+after the move went back before that step or the seat saw the same there.
+The newest note of each move, oldest first, each with `taken_back`. Empty
+for anyone else, at a ranked game and where none was played or graded.
+
+A seat's replay view at an unranked game also carries `replay.stats`, its
+guide's dice and robber numbers (`guide.stats`) as they stood after that
+step. The page's review covers the whole game at every position, its
+graph's playhead at the position shown.
+
+`GET /api/table/<code>/timeline` gives `steps`, the steps played,
+`last_round`, and `items`, one a step, `{"round", "actor", "type"}` (`type`
+an action type's name, `TRADE` for a trade). Read with a seat's token at an
+unranked game it also gives `chance`, the seat's guide chance after each step
+from the deal to the newest (`steps` + 1 values, `null` before anything is
+read; from the live guide where the seat's guide is on, else from the graded
+moves in the journal), and `marks`, `{"step", "class"}` for each graded move
+of the seat's; `null` and empty for anyone else. The page's replay bar
+draws it as a strip: the chance as a filled shape, a tick under each
+brilliant move and each error in its grade's colour, and the playhead at the
+position shown. The strip spans about a typical game (250 steps for a
+duel), so a game in play grows from its left, and a longer game fits it. A
+tap or drag on the strip, a swipe across the board (left for the next move,
+right for the one before; from the game, right steps back into it), the
+arrow keys, the mouse wheel over the strip itself (a move a notch, a
+trackpad's small deltas added up to a notch; anywhere else the wheel
+scrolls as ever), a tap or drag on the review's graph, or a row of the
+guide's review (the position just before that move) moves the board. The first time a game is stepped back into, the
+strip says how: "← → TO STEP" on a mouse or trackpad, "SWIPE THE BOARD TO
+STEP" on a touch screen, until the keys, the wheel or a swipe is used. The strip has a pill on each side and no other
+controls: on its right the round ("R12"), which turns red ("R8»") while a
+past position is shown and returns to the game when tapped; on its left the
+guide's win chance (below). Both keep one width and place at every step.
 
 ## Win chance
 
@@ -175,10 +234,155 @@ journal: the position before the step that ended it, or the nearest earlier
 one a replay can stop at. `chance` is `null` where no model rates the table,
 for a seat that has left, and where the model cannot be read. A table is read
 once per `version`: asking again before the table changes returns the same
-answer. Ranked tables refuse the route with a 409. The page shows the answer
-under the seat's cards to a seated player, at a past round (from the replay
-view's `chance`) and at a finished game, and never to a spectator; a toggle in
-the board's corner hides it for that browser.
+answer. Ranked tables refuse the route with a 409. The page does not show it:
+the page's win chance is the guide's ([below](#guide)).
+
+## Guide
+
+A guide is a coach for a person playing on the server's page: it reads each
+of the seat's decisions, offers a hint, and grades each move the seat plays.
+HexSet does not include one. A server offers a guide where a runtime it loads
+(`--runtime`) registers one (`hexset.guides.register_guide`) and
+`--guide-model` ([server.md](server.md)) names the model the guide reads
+with, at every game type that model is offered at. It is offered to a seat
+the server's own page claimed at an unranked duel (a table two seats play,
+the rest locked). The seat's view then carries `guide`: `{"offered": true,
+"takeback": false, "on": false}` until the seat turns it on with `POST
+/api/guide`, and `{"offered": false, "takeback": false, "on": false}` where
+there is none to turn on. `takeback` says whether the seat has a move to take
+back. An API or MCP seat gets no `guide` and a 403 from every guide route.
+
+Once it is on, the view's `guide` is:
+
+| field | meaning |
+|---|---|
+| `on` | `true` |
+| `step` | The step the view is at, which `reading` and `hint` are of |
+| `reading` | The current decision: `none` (no decision with a choice), `pending` while the guide reads it, or `ready` once a hint shows at once when asked for |
+| `hint` | `null` until `POST /api/hint` asks for it, then `{"id", "move", "options", "why", "objective", "groups"}` ([below](#hints-and-notes)) |
+| `notes` | Every graded move of the seat's and every forced one, oldest first |
+| `taken_back` | The seat's graded moves since taken back, each a note with its class |
+| `grading` | How many of the seat's moves are still being graded |
+| `pending` | The newest of those, `{"step", "played"}`, while its note has not landed, else `null` |
+| `flags` | The guide's cards the seat has flagged for review now, by the page's key for each card (`POST /api/flag`) |
+| `stats` | The game's dice and robber numbers so far in cards, read from its journal (takebacks included), `{"you", "them", "rounds"}`: `you` the seat's and `them` its opponent's (the opponents' mean at more seats), each `{"dice", "robber", "net", "on", "moves", "discarded"}`: `dice` the cards the rolls other than 7 paid, the robber's blocks put back, less what they pay on average with no robber on the board, `robber` cards taken by the seat's steals less cards the robber blocked and stole from it, `net` the two together, `on` robber moves by another seat onto the seat's buildings of `moves`, every robber move by another seat, `discarded` cards given up to sevens; `null` without a journal |
+| `chance` | The seat's win chance as the guide last read it, `{"value", "step", "after"}`: `after` true where it is the score of a move the seat played, false where it is the position's; `null` before anything is read |
+
+### Hints and notes
+
+A hint is `{"id", "move", "options", "why", "objective", "groups"}`: `id` a
+number no other note or hint of the table's guide shares, `move` the first
+option's move, and `options`, the moves to play, three at most, best first,
+each `{"action", "score", "loss", "lead", "bound", "class", "why"}`: `score`
+the seat's win chance after that move as the guide reads it, `loss` the
+guide's own move's score less it and `lead` the reverse, `bound` the
+smallest difference the guide tells apart (`null` for the guide's own move),
+`class` the grade the move would get if played, and `why` its reasons. The
+hint's `why` says why the moves shown beat the rest; `groups` lists, for two
+or more options the page may show on one card, `{"of", "why"}`: `of` their
+places in `options` and `why` the reasons they share. During a discard read
+whole, a hint also carries `given`, the count of each resource given so far.
+
+A note is `{"id", "seat", "step", "round", "played", "best", "loss", "score",
+"class", "objective", "bound", "better", "better_classes", "why",
+"better_whys", "better_groups"}`: the move played and the guide's own (wire
+actions), `loss` and `score` as a hint option's, and for a flagged move
+`better`, the moves that were better, with their classes, reasons and the
+reasons they share; a brilliant move also carries `lead`, its gain over the
+guide's own move. A `why` is `{"text", "subject", "predicate"}`: the
+sentence the page shows, and the subject and predicate it is written from.
+
+`objective` is what a grade is on: `"win"` (win chance) or `"mix"` (win
+chance with the points gap), where an option or note on `"mix"` also carries
+`unit`, `"win"` or `"vp"`, the part that decided it, and `weight`, the win
+chance a point is worth there.
+
+`class` is one of `forced` (the only legal move), `best` (the guide's own
+move, with nothing as good), `good` (as good as the guide's own move, as far
+as the guide can tell), `brilliant` (clearly better than it), `mistake`
+(clearly worse) and `blunder` (much worse).
+
+### Who may use the guide
+
+The registered guide decides who may use it (`hexset.guides`): it may refuse
+`POST /api/guide`, `POST /api/hint`, `POST /api/takeback` and `POST
+/api/playfrom` with an error of its own, a 428 where the page must reload or
+pass a check (with `"check": "turnstile"` for the latter) and a 429 with
+`Retry-After` for a limit. It may stamp the page as it is served: a page
+token in the `hexset-page` meta tag, which the page then sends on every API
+request in `X-HexSet-Page`, and a Cloudflare Turnstile site key in the
+`hexset-turnstile` meta tag, which the page runs, sending the answer to
+`POST /api/page`. Where it requires a page token, a request counts as the
+page's (a `web` seat) only with one. With no guide registered, the page
+carries neither and the server asks for nothing.
+
+### Take back, play from here and flags
+
+`POST /api/takeback` takes the game back to just before the seat's most recent
+move, however many moves ago and whoever has moved since; asked again, it goes
+back one move of the seat's further each time. A Knight is taken back with the
+robber move it opened, and a discard to a seven as a whole: all the seat's
+cards of it, and any other seat's cards given between them. It needs no guide
+turned on, only a table that offers one. The journal records an undo back to
+that step. Where the moves taken back include a roll, a development card drawn
+or a steal, the game's chance is drawn afresh from there, written to the
+journal as a `reseed` line: new dice and steal streams and the deck's remaining
+cards reshuffled, so nothing seen in the moves taken back comes round again.
+The table plays on from the position the journal replays to, and a trade round
+open at the time goes with the moves.
+
+`POST /api/playfrom` with `{"step": N}` opens a new table under a code of its
+own that plays the game on from the position after `N` steps: the same
+board, the same seats, each bot the same entry and spec, the seat asking
+holding its seat there with the guide on. It works on a finished game too,
+and leaves the game asked from as it is. The new game's journal is a copy of
+the game's up to that step (`hexset.server._journal.branched`): every line
+written before the line's step `N`, moves taken back and their undo lines
+included, without the closing line or the trade-round notes of step `N` on,
+then the `guide` lines of the steps before `N`, a `branch` line naming the
+game (`from`, its id, and `code`), the step and its round (`round`, the
+last step's before it), and a `reseed` line at `N`: new dice and steal
+streams, and the development cards still in the deck reshuffled. The answer
+is `POST /api/games`'s: the new seat's `token` with its view. Every view of
+the new table, a reopened one's included, carries `branch`, `{"code",
+"step", "round"}`: the game it came from and the position. Like `POST
+/api/takeback` it is the web page's, at an unranked table that offers a guide
+(403 or 409 otherwise); a step outside `0` to the steps played, or not a
+whole number, is a 400; a position the game does not replay to or one the
+game is over at is a 409. A step between a Knight and its robber move is a
+position like any other: the Knight played, its robber move owed.
+
+`POST /api/flag` with `{"card", "of", "id", "step", "round", "text",
+"grade", "played", "best", "flagged"}` flags one of the guide's cards for
+review, or takes the flag off: `card` the page's key for the card, `of`
+`"note"` or `"hint"` and `id` that note's or hint's, `text` the card as
+shown, `played` and `best` wire moves or `null`, and `flagged` true to flag
+and false to take the flag off. The guide keeps each flag beside the game's
+journal; the view's `guide.flags` lists the cards flagged now.
+
+The game's journal records each use, as a `trainer` line naming the seat and
+`guide`, `hint` or `takeback`, and each note, as a `guide` line. A table
+reopened from its journal, after a restart, keeps those notes: the guide,
+turned on again, starts from every `guide` line not taken back. A finished
+game's table with no guide of the seat's on (one reopened from its journal)
+shows the guide the journal saved, read-only: `guide` is `on` with `saved`
+true, `reading` `"none"`, no `hint`, `takeback` false, every note not taken
+back, the `chance` the last graded move left and `stats`, where the seat
+turned its guide on during the game.
+
+### On the page
+
+The page shows the guide to a seat its table offers one to as round buttons
+in the board's top-left corner: a compass that turns the guide on and off
+(remembered by the browser) and Hint. Off, nothing of the guide shows: no
+bubbles, no Hint and no win chance. While it is on, the board's undo button
+is its take back, the replay bar's strip shows the seat's win chance over the
+game, and the pill on its left the percent at the playhead. A hint rings the
+moves it shows on the board, and after each move a bubble at the move gives
+its grade; a bubble's card says why. Once a move is graded, the pill opens
+the review: a graph of the win chance over the game and its key moments,
+each a step of the replay. Every hint and note card has a review flag in its
+corner (`POST /api/flag`).
 
 ## Trade routes
 
@@ -474,18 +678,18 @@ each `*.onnx` in the models directory by the `name` its metadata declares
 ([onnx.md](onnx.md#serving-a-model)), one file per name at each game type; the
 filename plays no part. `models` is every entry once; `game_types` maps each
 `hexset.rules.GAME_TYPES` name to the entries a table of that type seats, each
-with the `name`, `version` and `commit` a model file declares, and the
-`owner`, `url` and `description` it declares too, or the profile a preset was
-registered with ([guide.md](guide.md)):
+with the `name`, `version` and `label` a model file declares (nothing else it
+declares is served), or the profile a preset was registered with
+([guide.md](guide.md)):
 
 ```json
 {"models": ["mybot", "mynet"],
  "game_types": {"standard": {"mybot": {"version": "1.0", "owner": "octocat",
                                        "description": "A rules bot for every game type."},
-                             "mynet": {"name": "mynet", "version": "1.0", "commit": "0123abcd"}},
+                             "mynet": {"name": "mynet", "version": "1.0", "label": "My Net"}},
                 "duel-variant": {"mybot": {"version": "1.0", "owner": "octocat",
                                            "description": "A rules bot for every game type."},
-                                 "mynet": {"name": "mynet", "version": "1.0d", "commit": "4567cdef"}}}}
+                                 "mynet": {"name": "mynet", "version": "1.0d", "label": "My Net"}}}}
 ```
 
 A preset is offered at every game type, or at those the server's

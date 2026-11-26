@@ -36,6 +36,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--ranked-bot` | none | The opponent the [ranked queue](api.md#ranked-play) seats in a table's one seat no player fills, as the opponent picker names it; it never takes two seats at a table. Without one, a ranked table waits for players to fill it |
 | `--ranked-entrant` | none | A server bot, as the opponent picker names it, that plays [ranked games](api.md#ranked-play) itself: one at a time at each game type it is offered at, ranked as `bot:<name>`. Repeat for more; a name the server does not offer, or the `--ranked-bot`, stops it at start |
 | `--chance-model` | none | The model, as the opponent picker names it, that rates a seated player's [win chance](api.md#win-chance) at every unranked table of a game type it is offered at, whether or not it sits there. A name not offered as a model file stops the server at start. Without one, a table's own model seat rates it |
+| `--guide-model` | none | The model, as the opponent picker names it, that a [guide](api.md#guide) a runtime registers reads with, for a page seat that asks for it at an unranked duel of a game type the model is offered at. A name not offered as a model file stops the server at start. Without one, or without a runtime that registers a guide, no table offers a guide |
 | `--preset-modes` | none | `NAME=TYPE[,TYPE...]`: offer the preset `NAME` at these game types only, as a model file's `modes` declare its own; at other game types the picker leaves it out and seating it is a 400. Repeat for more presets; a name that is not a listed preset, or a game type the server does not deal, stops it at start. A preset not named is offered at every game type |
 | `--menu-tab` | none | `LABEL=URL`: a tab the game page's menu shows after its own, opening `URL` in a frame of the menu ([below](#menu-tabs)). Repeatable |
 | `--menu-tab-for` | none | A client network (CIDR) shown the `--menu-tab` tabs; repeatable. Naming none shows them to every client |
@@ -114,6 +115,10 @@ decision as `Decision.to_json` writes it, `seat` included, once the move is
 decided. A rebuilt game appends to the same file. The journal directory's
 `*.jsonl` readers do not look in `search/`. A file that cannot be written
 is reported once and play goes on.
+
+A [guide](api.md#guide) may keep its readings and review flags in
+`guide/` under the journal directory. The journal readers do not look in
+`guide/` either.
 
 Rebuilt games keep their seats, names and client identities. Bot seats get
 fresh tokens and resume. A person's seat comes back claimed and without a

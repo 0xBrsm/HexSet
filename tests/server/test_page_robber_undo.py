@@ -167,7 +167,8 @@ def test_playing_then_undoing_a_knight_offers_and_uses_the_board_cancel(running_
             )
             assert _shown(page, "undo-build"), "a self-played knight has to stay cancellable"
             assert not _shown(page, "roll-dice")
-            assert not _shown(page, "end-turn")
+            # End turn keeps its corner, greyed out, while it is not on offer.
+            assert page.is_disabled("#end-turn")
             assert not _shown(page, "buy-dev-card")
 
             page.click("#undo-build")

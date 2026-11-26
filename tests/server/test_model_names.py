@@ -61,7 +61,7 @@ def test_a_file_is_offered_by_the_name_it_declares_not_its_filename(models):
     assert "whatever-file" not in listed_models() and "mynet-1.0" not in listed_models()
     view = new_tables().handle("GET", "/api/models", {}, None)
     assert "mynet" in view["models"]
-    assert view["game_types"]["standard"]["mynet"] == {"name": "mynet", "version": "1.0", "commit": "abc"}
+    assert view["game_types"]["standard"]["mynet"] == {"name": "mynet", "version": "1.0"}
     assert "mynet" not in view["game_types"]["duel-variant"], "no modes is standard only"
 
 
@@ -131,19 +131,17 @@ def test_a_replaced_file_is_read_again(models):
     assert "newer" in model_options() and "old" not in model_options()
 
 
-def test_a_file_may_declare_a_profile_held_to_a_clients_rules(models, capsys):
-    (models / "a.onnx").write_bytes(named(name="mynet", version="1.0", commit="abc", owner="octocat",
+def test_a_file_shows_only_its_name_label_and_version(models):
+    """A model file's commit, owner, url and description stay on the server:
+    `/api/models` and its bot profile give its name, version and `label`, the
+    label held to a client's rules."""
+    (models / "a.onnx").write_bytes(named(name="mynet", version="1.0", commit="abc", owner="octocat", label="My Net",
                                           url="https://example.org/mynet", description="A small net."))
-    (models / "b.onnx").write_bytes(named(name="other", version="1", owner="octocat", url="ftp://x",
-                                          description="x" * 101))
+    (models / "b.onnx").write_bytes(named(name="other", version="1", owner="octocat", label="x" * 101))
     listed = new_tables().handle("GET", "/api/models", {}, None)["game_types"]["standard"]
-    assert listed["mynet"] == {"name": "mynet", "version": "1.0", "commit": "abc", "owner": "octocat",
-                                   "url": "https://example.org/mynet", "description": "A small net."}
-    assert listed["other"] == {"name": "other", "version": "1", "owner": "octocat"}
-    logged = capsys.readouterr().err
-    assert "declares a url it may not" in logged and "declares a description it may not" in logged
-    assert api.bot_profile("mynet") == {"version": "1.0", "owner": "octocat",
-                                            "url": "https://example.org/mynet", "description": "A small net."}
+    assert listed["mynet"] == {"name": "mynet", "version": "1.0", "label": "My Net"}
+    assert listed["other"] == {"name": "other", "version": "1", "label": "x" * 40}
+    assert api.bot_profile("mynet") == {"version": "1.0", "label": "My Net"}
     assert api.bot_profile("test-trader") == {} and api.bot_profile("nothing") == {}
 
 
